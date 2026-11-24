@@ -880,7 +880,7 @@ final class Library: ObservableObject {
         menu = SalonMenu(title: "Mises à jour", subtitle: nil, items: [
             SalonMenuItem(label: "Mettre à jour Home", detail: date.map { "Version du \($0.formatted(date: .abbreviated, time: .shortened))" }, icon: "house.fill", section: "Home", tint: .blue, action: {
                 self.menu = nil; self.lancer("home-mettre-a-jour.command", titre: "Mise à jour de Home") }),
-            SalonMenuItem(label: "Moteurs", detail: "nxnative, MacNativeGames, Obelisk", icon: "cpu", section: "Moteurs", tint: .purple, action: { self.openMoteurs() }),
+            SalonMenuItem(label: "Moteurs", detail: "nxnative, MacNativeGames", icon: "cpu", section: "Moteurs", tint: .purple, action: { self.openMoteurs() }),
         ], hero: "arrow.down.circle.fill", back: { self.menu = self.plusMenu() })
     }
     func openMoteurs() {
@@ -890,14 +890,11 @@ final class Library: ObservableObject {
         var items: [SalonMenuItem] = [
             SalonMenuItem(label: "Mettre à jour nxnative", detail: nx.isEmpty ? nil : "Version \(nx)", icon: "cpu", section: "nxnative", tint: .purple, action: { self.menu = nil; self.majMoteur() }),
         ]
-        items.insert(SalonMenuItem(label: "Préparer ce Mac", detail: "Pour les jeux Switch", icon: "wrench.and.screwdriver.fill", section: "Outils", tint: .teal, action: { self.openPreparation(back: { self.openMoteurs() }) }), at: 0)
+        items.insert(SalonMenuItem(label: "Composants Mac", detail: "Les outils pour les jeux Switch", icon: "wrench.and.screwdriver.fill", section: "Outils", tint: .teal, action: { self.openPreparation(back: { self.openMoteurs() }) }), at: 0)
         if FileManager.default.fileExists(atPath: Atelier.home.appendingPathComponent("MacNativeGames/build_app.py").path) {
             let v = lire(["/usr/bin/git", "-C", Atelier.home.appendingPathComponent("MacNativeGames").path, "log", "-1", "--format=%h · %cd", "--date=format:%d/%m/%Y"])
             items.append(SalonMenuItem(label: "Mettre à jour MacNativeGames", detail: v.isEmpty ? nil : "Version \(v)", icon: "leaf.fill", section: "MacNativeGames", tint: .green, action: {
                 self.menu = nil; self.lancer("mng-mettre-a-jour.command", titre: "Mise à jour de MacNativeGames", jeux: Set(self.games.filter { Atelier.moteurDe($0) == .mng }.map { $0.id })) }))
-        }
-        if let o = ["/Applications/Obelisk.app", "/Applications/Jeux/Obelisk.app"].first(where: { FileManager.default.fileExists(atPath: $0) }) {
-            items.append(SalonMenuItem(label: "Ouvrir Obelisk", detail: version(o), icon: "desktopcomputer", section: "Obelisk", tint: .indigo, action: { self.menu = nil; self.ouvrirObelisk() }))
         }
         if let n = ["/Applications/NX Library.app", "/Applications/NXLibrary.app"].first(where: { FileManager.default.fileExists(atPath: $0) }) {
             items.append(SalonMenuItem(label: "Ouvrir NX Library", detail: version(n), icon: "books.vertical.fill", section: "NX Library", tint: .orange, action: {
@@ -2718,61 +2715,52 @@ struct TacheView: View {
         }
         return duree(passe * (1 - f) / f)
     }
+    // Une pastille posée dans l'interface, en bas à droite, sur la ligne des aides et dans leur style : un anneau qui se remplit,
+    // le nom de la tâche en capitales, et dessous où elle en est. Finie ou en échec, elle porte ses boutons.
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in contenu(TacheView.fraction(t, tl.date), tl.date) }
-        .padding(20).frame(width: 460)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.35)))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(couleur.opacity(0.22), lineWidth: 1))
-        .shadow(color: .black.opacity(0.45), radius: 30, y: 12).foregroundStyle(.white)
-        .contentShape(Rectangle()).onTapGesture { if !t.fini { lib.openTacheMenu() } }
+        .padding(.leading, 10).padding(.trailing, 22).frame(height: 68)
+        .background(.ultraThinMaterial, in: Capsule())
+        .background(Capsule().fill(Color.black.opacity(0.45)))
+        .overlay(Capsule().strokeBorder(couleur.opacity(t.fini || t.erreur != nil ? 0.55 : 0.16), lineWidth: 1))
+        .shadow(color: .black.opacity(0.4), radius: 22, y: 10).foregroundStyle(.white)
+        .contentShape(Capsule()).onTapGesture { if !t.fini { lib.openTacheMenu() } }
         .animation(.easeInOut(duration: 0.35), value: t.fini)
     }
     @ViewBuilder private func contenu(_ fr: Double?, _ now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Image(systemName: t.erreur != nil ? "exclamationmark.triangle.fill" : t.fini ? "checkmark.circle.fill" : "hammer.fill")
-                    .font(.system(size: 20, weight: .semibold)).foregroundStyle(couleur)
-                Text(t.titre).font(.system(size: 18, weight: .bold, design: .rounded)).lineLimit(1)
-                Spacer(minLength: 8)
-                if t.erreur == nil, let f = fr {
-                    Text("\(Int((min(max(f, 0), 1) * 100).rounded())) %").font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
-                        .contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(f * 100))
-                }
-            }
-            if t.erreur == nil {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(.white.opacity(0.14))
-                        if let f = fr {
-                            Capsule().fill(LinearGradient(colors: [couleur.opacity(0.75), couleur], startPoint: .leading, endPoint: .trailing))
-                                .frame(width: max(8, geo.size.width * CGFloat(min(max(f, 0), 1))))
-                                .animation(.easeInOut(duration: 0.9), value: f)
-                        } else {   // pas de mesure : un reflet qui passe
-                            Capsule().fill(.white.opacity(0.75)).frame(width: geo.size.width * 0.28)
-                                .offset(x: vague ? geo.size.width * 0.72 : 0)
-                                .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: true), value: vague)
-                                .onAppear { vague = true }
-                        }
+        let f = fr.map { min(max($0, 0), 1) }
+        HStack(spacing: 14) {
+            ZStack {
+                Circle().stroke(.white.opacity(0.16), lineWidth: 4)
+                if t.erreur == nil, !t.fini {
+                    if let f { Circle().trim(from: 0, to: max(0.02, f)).stroke(.white, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.9), value: f) }
+                    else {   // pas de mesure : un arc qui tourne
+                        Circle().trim(from: 0, to: 0.28).stroke(.white, style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(vague ? 360 : 0))
+                            .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: vague).onAppear { vague = true }
                     }
-                }.frame(height: 8)
-            }
-            Group {
-                if let e = t.erreur { Text(e) }
-                else if t.fini { Text(t.etape.contains("déjà à jour") ? t.etape : "Terminé") }
-                else { Text(TacheView.restant(t, now)) }
-            }.font(.system(size: 14, weight: .medium, design: .rounded).monospacedDigit()).opacity(0.72).lineLimit(1)
+                } else { Circle().stroke(couleur, lineWidth: 4) }
+                Image(systemName: t.erreur != nil ? "exclamationmark" : t.fini ? "checkmark" : "arrow.down").font(.system(size: 17, weight: .black)).foregroundStyle(couleur)
+            }.frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(t.titre.uppercased()).font(.system(size: 13, weight: .black).width(.expanded)).tracking(1).lineLimit(1)
+                Group {
+                    if let e = t.erreur { Text(e) }
+                    else if t.fini { Text(t.etape.contains("déjà à jour") ? t.etape : "Terminé") }
+                    else { Text(TacheView.restant(t, now)) }
+                }.font(.system(size: 14, weight: .medium).monospacedDigit()).opacity(0.7).lineLimit(1)
+            }.frame(maxWidth: 380, alignment: .leading).fixedSize(horizontal: true, vertical: false)
             if t.erreur != nil || t.fini {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     if t.erreur != nil {
-                        Text("Ouvrir dans le dossier").font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(.black)
-                            .padding(.horizontal, 16).padding(.vertical, 8).background(Capsule().fill(.white))
+                        Text("Journal").font(.system(size: 14, weight: .bold)).foregroundStyle(.black).padding(.horizontal, 16).frame(height: 38).background(Capsule().fill(.white))
                             .onTapGesture { NSWorkspace.shared.activateFileViewerSelecting([t.log]) }
                     }
-                    Text("Fermer").font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .padding(.horizontal, 16).padding(.vertical, 8).background(Capsule().fill(.white.opacity(0.18)))
+                    Image(systemName: "xmark").font(.system(size: 14, weight: .black)).frame(width: 38, height: 38).background(Circle().fill(.white.opacity(0.16)))
                         .onTapGesture { lib.fermerTache() }
-                }.transition(.opacity)
+                }.padding(.leading, 6).transition(.opacity)
+            } else if let f {
+                Text("\(Int((f * 100).rounded())) %").font(.system(size: 20, weight: .black).width(.expanded).monospacedDigit()).padding(.leading, 10)
+                    .contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(f * 100))
             }
         }
     }
@@ -3023,8 +3011,8 @@ struct Screen: View {
             if lib.picker != nil { PickerView(lib: lib) }
             if lib.ouverture { OuvertureView(lib: lib).zIndex(20) }
             if let t = lib.tache {
-                TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 64).padding(.bottom, 92)
-                    .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .flou))
+                TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, 30)   // sur la ligne des aides, à la marge de l'écran
+                    .transition(.asymmetric(insertion: .offset(y: 16).combined(with: .opacity), removal: .flou))
             }
             if let r = lib.running {
                 // Écran « en cours de jeu » : derrière le jeu (bureau), ou visible quand le jeu est sur l'autre écran / en fenêtre
@@ -3365,6 +3353,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: {}), SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: {})])
             lib.openAdvancedSettings(); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 4), "avance.png") }; lib.menu = nil
             rendre(MenuView(lib: lib, menu: ajout, apercu: 2), "ajouter.png")
+            var t1 = Tache(titre: "Mise à jour du moteur nxnative", log: URL(fileURLWithPath: "/tmp/x.log")); t1.fraction = 0.42; t1.etape = "Compilation"
+            var t2 = Tache(titre: "Construction du jeu", log: URL(fileURLWithPath: "/tmp/x.log")); t2.fini = true; t2.erreur = "Le jeu de base est introuvable"
+            var t3 = Tache(titre: "Mise à jour de Home", log: URL(fileURLWithPath: "/tmp/x.log")); t3.fini = true; t3.etape = "Terminé"
+            rendre(ZStack { Color(white: 0.08); VStack(alignment: .trailing, spacing: 40) { TacheView(lib: lib, t: t1); TacheView(lib: lib, t: t2); TacheView(lib: lib, t: t3) } }, "tache.png")
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
@@ -4431,7 +4423,7 @@ extension Library {
     /// « Préparer ce Mac » : ce qu'il faut pour construire les jeux Switch (outils d'Apple, Homebrew, les deux moteurs), ce qui est déjà
     /// là, et le script qui installe le reste (preparer-moteurs.command). L'état est lu par le même script (--etat), hors du fil principal.
     func openPreparation(bienvenue: Bool = false, back: (() -> Void)? = nil) {
-        let titre = bienvenue ? "Bienvenue dans Home" : "Préparer ce Mac"
+        let titre = bienvenue ? "Bienvenue dans Home" : "Composants Mac"
         menu = SalonMenu(title: titre, items: [SalonMenuItem(label: "Vérification…", icon: "hourglass", info: true, action: {})], back: back ?? { self.menu = self.plusMenu() }, roue: true)
         DispatchQueue.global().async {
             setenv("HOME_MOTEURS", self.moteursVoulus, 1)   // l'état de ce que le mode d'utilisation demande
