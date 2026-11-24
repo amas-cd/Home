@@ -1579,12 +1579,15 @@ final class Library: ObservableObject {
         guard running == nil, let f = fond else { return }
         fond = nil
         guard f.app?.isTerminated == false || f.direct?.isRunning == true else { return }
-        let g = f.jeu, app = activee ?? f.app
+        // Un jeu PC est lancé par un processus de Home, et sa fenêtre appartient à une app que son moteur crée à part : on la retrouve
+        // ici pour la remettre devant. Sans ça Home se cachait sans rien montrer, et c'est l'app d'en dessous qui apparaissait.
+        let duJeu = f.direct == nil ? nil : NSWorkspace.shared.runningApplications.first { ($0.bundleIdentifier ?? "").hasPrefix("com.zagrios.obelisk.game.") && !$0.isTerminated && $0.activationPolicy == .regular }
+        let g = f.jeu, app = activee ?? f.app ?? duJeu
         running = g; startedAt = Date(); overlay = true; lastInput = Date(); watchedApp = app; direct = f.direct; applySavedVolume(g)
         if config.capture ?? true, CGPreflightScreenCaptureAccess() { Recorder.shared.start() }
         NotificationCenter.default.post(name: .salonHide, object: nil)
         log("\(g.name) : session reprise (le jeu était resté ouvert)")
-        if activee == nil { app?.activate() }
+        if activee == nil { app?.activate(options: [.activateAllWindows]) }
         // la fin du jeu : son app qui se ferme (un jeu lancé par un processus de Home a déjà son propre signal de fin)
         watch?.invalidate()
         if let app, f.direct == nil {
