@@ -1298,9 +1298,10 @@ final class Library: ObservableObject {
     @Published var gameMuted = false
     @Published var flashGeneral = false                            // la barre de volume affichée concerne le général (sinon les jeux)
     private var macPrev: Float = 0.5, gamePrev: Float = 1
-    func macStep(_ d: Float, quiet: Bool = false) {
+    /// barre: false = réglé depuis le curseur du haut de l'écran, qui montre déjà le niveau : la barre de volume ne s'affiche pas en plus
+    func macStep(_ d: Float, quiet: Bool = false, barre: Bool = true) {
         let n = min(1, max(0, quiet ? macVolume + d : ((macVolume + d) * 20).rounded() / 20))
-        SystemVolume.set(n); macVolume = n; macMuted = false; flashGeneral = true; lastInput = Date(); volumeFlash = Date()
+        SystemVolume.set(n); macVolume = n; macMuted = false; lastInput = Date(); if barre { flashGeneral = true; volumeFlash = Date() }
     }
     func toggleMacMute() {
         if macMuted { macMuted = false; SystemVolume.set(macPrev); macVolume = macPrev } else { macPrev = macVolume > 0 ? macVolume : 0.5; macMuted = true; SystemVolume.set(0); macVolume = 0 }
@@ -2009,8 +2010,8 @@ struct Tile: View {
         .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: r, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
         .shadow(color: .black.opacity(selected ? 0.6 : 0.35), radius: selected ? 24 : 10, y: selected ? 14 : 6)
-        .brightness(selected ? 0 : -0.12)
-        .animation(.easeOut(duration: 0.16), value: selected)
+        .brightness(selected ? 0 : -0.12).offset(y: selected ? -10 : 0)
+        .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.3), value: selected)
     }
 }
 struct Hint: View {
@@ -2732,6 +2733,7 @@ struct Screen: View {
     @ObservedObject var lib: Library
     @State private var now = Date()
     @State private var appeared = false
+    @State private var barreVolume = false   // la barre de volume en haut de l'écran, visible 2 s après chaque réglage
     @State private var pulse = false
     let clock = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
     var body: some View {
@@ -2764,18 +2766,19 @@ struct Screen: View {
                                 Circle().fill(.white).frame(width: 14, height: 14).offset(x: max(0, 120 * CGFloat(lib.macVolume) - 7)).shadow(color: .black.opacity(0.4), radius: 3)
                             }
                             .frame(width: 120, height: 26).contentShape(Rectangle())
-                            .gesture(DragGesture(minimumDistance: 0).onChanged { g in lib.macStep(Float(min(1, max(0, g.location.x / 120))) - lib.macVolume, quiet: true) })
+                            .gesture(DragGesture(minimumDistance: 0).onChanged { g in lib.macStep(Float(min(1, max(0, g.location.x / 120))) - lib.macVolume, quiet: true, barre: false) })
                             .animation(.linear(duration: 0.06), value: lib.macVolume)
                             Text(lib.macMuted ? "muet" : "\(Int((lib.macVolume * 100).rounded()))").font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit()).frame(width: 34, alignment: .trailing)
                         }.padding(.horizontal, 16).frame(height: 44).background(.black.opacity(0.42), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
-                        Text(now, format: .dateTime.hour().minute()).font(.system(size: 21, weight: .semibold, design: .rounded).monospacedDigit())
-                            .padding(.horizontal, 18).frame(height: 44).background(.black.opacity(0.42), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
                         if let pct = PadBattery.percent() {
-                            HStack(spacing: 6) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "gamecontroller.fill").font(.system(size: 16))
                                 Image(systemName: GCController.controllers().first?.battery?.batteryState == .charging ? "battery.100percent.bolt" : pct < 20 ? "battery.25percent" : pct < 55 ? "battery.50percent" : "battery.100percent").font(.system(size: 15))
                                 Text("\(pct) %").font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                             }.padding(.horizontal, 16).frame(height: 44).background(.black.opacity(0.42), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+                             .help("Batterie de la manette")
                         }
+                        Text(now, format: .dateTime.hour().minute()).font(.system(size: 26, weight: .semibold, design: .rounded).monospacedDigit()).shadow(color: .black.opacity(0.5), radius: 6).padding(.leading, 10)
                     }
                 }.padding(.horizontal, 84).padding(.top, 44).foregroundStyle(.white)
                 Spacer()
@@ -2806,24 +2809,25 @@ struct Screen: View {
                     }.padding(.horizontal, 84).padding(.bottom, 22).foregroundStyle(.white)
                      .id("info-plus").transition(.opacity)
                 }
-                // le jeu visé reste à la même place, à gauche : c'est la rangée entière qui glisse sous lui, les jeux déjà passés s'effaçant vers la gauche
-                HStack(alignment: .bottom, spacing: 22) {
-                    ForEach(Array(lib.visible.enumerated()), id: \.element.id) { i, game in
-                        Tile(image: lib.cover(game), selected: i == lib.selected, isIcon: lib.art[game.id]?.cover == nil)
-                            .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: i == lib.selected) } }.overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }.id(game.id).onTapGesture { if lib.selected == i { lib.launch() } else { lib.selected = i } }
-                            .opacity(i < lib.selected ? 0.0 : 1).animation(.easeOut(duration: 0.2), value: lib.selected)
-                    }
-                    AddTile(selected: lib.selected >= lib.visible.count).id("salon-plus")
-                        .onTapGesture { if lib.selected >= lib.visible.count { lib.openAddMenu() } else { lib.selected = lib.visible.count; Sounds.shared.play("deplacer") } }
+                // tous les jeux restent visibles ; la rangée défile en douceur pour suivre le jeu visé, qui grandit et se soulève
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .bottom, spacing: 22) {
+                            ForEach(Array(lib.visible.enumerated()), id: \.element.id) { i, game in
+                                Tile(image: lib.cover(game), selected: i == lib.selected, isIcon: lib.art[game.id]?.cover == nil)
+                                    .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: i == lib.selected) } }.overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }.id(game.id).onTapGesture { if lib.selected == i { lib.launch() } else { lib.selected = i } }
+                            }
+                            AddTile(selected: lib.selected >= lib.visible.count).id("salon-plus")
+                                .onTapGesture { if lib.selected >= lib.visible.count { lib.openAddMenu() } else { lib.selected = lib.visible.count; Sounds.shared.play("deplacer") } }
+                        }
+                        .padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 30)
+                        .id("categorie-\(lib.categoryIndex)")
+                        .transition(.asymmetric(insertion: .offset(y: 70 * CGFloat(lib.sensCategorie)).combined(with: .opacity), removal: .offset(y: -70 * CGFloat(lib.sensCategorie)).combined(with: .opacity)))
+                        .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.32), value: lib.categoryIndex)
+                    }.scrollClipDisabled()
+                     .onChange(of: lib.selected) { _, _ in withAnimation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.34)) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
+                     .onChange(of: lib.categoryIndex) { _, _ in if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } }
                 }
-                .fixedSize(horizontal: true, vertical: false)
-                .offset(x: -CGFloat(min(lib.selected, lib.visible.count)) * (Tile.cote(false) + 22))
-                .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.34), value: lib.selected)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 30)
-                .id("categorie-\(lib.categoryIndex)")
-                .transition(.asymmetric(insertion: .offset(y: 70 * CGFloat(lib.sensCategorie)).combined(with: .opacity), removal: .offset(y: -70 * CGFloat(lib.sensCategorie)).combined(with: .opacity)))
-                .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.32), value: lib.categoryIndex)
                 .offset(y: appeared ? 0 : 36).opacity(appeared ? 1 : 0).animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45), value: appeared)
                 .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { appeared = true } }
                 HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie"); Spacer() }
@@ -2842,7 +2846,7 @@ struct Screen: View {
                 // Écran « en cours de jeu » : derrière le jeu (bureau), ou visible quand le jeu est sur l'autre écran / en fenêtre
                 NowPlayingView(lib: lib, game: r).transition(.opacity)
             }
-            if Date().timeIntervalSince(lib.volumeFlash) < 2 {
+            if barreVolume {
                 VStack { HStack(spacing: 12) {
                         let v = lib.flashGeneral ? lib.macVolume : lib.volume, muted = lib.flashGeneral ? lib.macMuted : lib.gameMuted
                         Image(systemName: v == 0 ? "speaker.slash.fill" : v < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill").font(.system(size: 18, weight: .semibold))
@@ -2857,8 +2861,13 @@ struct Screen: View {
                     .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }
             }
         }
-        .task(id: lib.volumeFlash) { try? await Task.sleep(nanoseconds: 2_050_000_000); withAnimation(.easeIn(duration: 0.3)) { lib.objectWillChange.send() } }   // 2 s après le dernier réglage, la barre repart
-        .animation(.easeOut(duration: 0.3), value: Date().timeIntervalSince(lib.volumeFlash) < 2)
+        // chaque réglage la montre (ou la garde) ; 2 s après le dernier, elle repart vers le haut en fondu, comme elle est venue
+        .task(id: lib.volumeFlash) {
+            guard Date().timeIntervalSince(lib.volumeFlash) < 1 else { return }
+            withAnimation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.32)) { barreVolume = true }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if !Task.isCancelled { withAnimation(.timingCurve(0.5, 0, 0.8, 0.3, duration: 0.38)) { barreVolume = false } }
+        }
         .onReceive(clock) { now = $0 }.animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.3), value: lib.current?.id).animation(.easeInOut(duration: 0.22), value: lib.menu?.title).animation(.easeInOut(duration: 0.22), value: lib.picker?.game.id)
     }
 }
