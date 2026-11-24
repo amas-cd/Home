@@ -1,4 +1,4 @@
-From bbcfbac3bfd4f1767bbe5feee4c2f42a992cab14 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <anas@local>
 Date: Sun, 8 Nov 2026 21:56:48 +0000
 Subject: [PATCH 05/44] loader: a mod module's unresolved game imports stay 0
@@ -9,7 +9,7 @@ Subject: [PATCH 05/44] loader: a mod module's unresolved game imports stay 0
  1 file changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index f744243f..ea6128e8 100644
+index b04cf7cf956e943bcc29d8f5bc7de64eb85eee13..b0a334c4f2045568f8db92db3dc0dd16e81d4030 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -284,7 +284,12 @@ static void relocate(Module *m) {

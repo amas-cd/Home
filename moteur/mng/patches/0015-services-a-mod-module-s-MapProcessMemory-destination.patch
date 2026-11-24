@@ -1,4 +1,4 @@
-From 832d80f32c1b67bc4e103655b0659ed8289215ab Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 09:41:43 +0000
 Subject: [PATCH 15/44] services: a mod module's MapProcessMemory destinations
@@ -15,7 +15,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  2 files changed, 12 insertions(+), 4 deletions(-)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index 19f5efb7..0bae610d 100644
+index b713e20690fbc93f661c18d6396859437c1d1ee3..8d88f23cdab323285348480660e476f080c31216 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -611,6 +611,7 @@ static void probe(void) {
@@ -27,7 +27,7 @@ index 19f5efb7..0bae610d 100644
   for(unsigned i=0;i<NM;i++)if(pc>=(uintptr_t)modules[i].base&&pc<(uintptr_t)modules[i].base+modules[i].size){*name=modules[i].name;*off=pc-(uintptr_t)modules[i].base;return 1;}
   return 0;
 diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
-index 9f656598..24cf1fdd 100644
+index bece142e5b3412f203fe841618652886959888b1..1000f2ca77b7f95ec8c52f868e01f70028098c3e 100644
 --- a/games/totk/runtime/services.c
 +++ b/games/totk/runtime/services.c
 @@ -529,6 +529,12 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset

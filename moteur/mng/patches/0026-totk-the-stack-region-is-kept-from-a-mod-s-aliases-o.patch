@@ -1,4 +1,4 @@
-From b59f8e42521dc7ac85c99f64aa0b03393bf5e92a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 11:32:50 +0000
 Subject: [PATCH 26/44] totk: the stack region is kept from a mod's aliases
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 6 insertions(+), 3 deletions(-)
 
 diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
-index daf79645..3e8daebd 100644
+index df01c70cd03dd94b58d107a9faebc447eacac597..8fd8bb32979d3e7d0428b93852aeb62810e17e76 100644
 --- a/games/totk/runtime/services.c
 +++ b/games/totk/runtime/services.c
 @@ -518,12 +518,15 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset

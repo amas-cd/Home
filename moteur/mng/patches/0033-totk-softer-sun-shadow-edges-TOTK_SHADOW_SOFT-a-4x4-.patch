@@ -1,4 +1,4 @@
-From 042fbcb387469ca55984a3845f8c3ccf38aac474 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 11:40:41 +0000
 Subject: [PATCH 33/44] totk: softer sun-shadow edges (TOTK_SHADOW_SOFT), a 4x4
@@ -15,7 +15,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 35 insertions(+)
 
 diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h b/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
-index d027b196..08f3f1c6 100644
+index d9597f1f933faa6029895cd9c941400510e8e45b..7025e96173b6f31f9539ebaec6d8b427669796df 100644
 --- a/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
 +++ b/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
 @@ -282,6 +282,40 @@ static int ssao_entry(const char *key) {

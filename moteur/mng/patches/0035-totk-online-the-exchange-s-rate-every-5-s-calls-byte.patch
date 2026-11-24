@@ -1,4 +1,4 @@
-From 9268b756f1d33480d088cf313c54aaa546497328 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 22:21:48 +0000
 Subject: [PATCH 35/44] totk online: the exchange's rate every 5 s (calls,
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 34 insertions(+), 2 deletions(-)
 
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index 433d7993..cc779222 100644
+index 433d7993ccc1e7fd8f3a9cfd469d30e329e7a2d9..cc779222bdb50271b51280217dca94142b90c5cc 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -18,6 +18,8 @@

@@ -1,4 +1,4 @@
-From 62c5daeafe2a2058b3dc5301e17c7f2e00173947 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 07:14:03 +0000
 Subject: [PATCH 14/44] services: MapProcessMemory honours a 4 KiB-aligned
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  2 files changed, 14 insertions(+), 8 deletions(-)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index da605b77..19f5efb7 100644
+index 17a8bdd9289808d017658a6c1a55e80f3c784ffe..b713e20690fbc93f661c18d6396859437c1d1ee3 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -238,9 +238,9 @@ static void map_module(Module *m,const char *dir) {
@@ -30,7 +30,7 @@ index da605b77..19f5efb7 100644
    if((modules[i].ctor_flag==0)!=(pass==0))continue;
    module_slots[i]=cursor;cursor+=page_up(modules[i].file_size)+0x8000;}
 diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
-index ce9dc505..9f656598 100644
+index 8f11ac900b81daa3ead9089b90d4137d1ff8d615..bece142e5b3412f203fe841618652886959888b1 100644
 --- a/games/totk/runtime/services.c
 +++ b/games/totk/runtime/services.c
 @@ -570,17 +570,23 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset

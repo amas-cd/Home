@@ -1,4 +1,4 @@
-From 1eb8bedaaee8637f1213cd46a2f22c30d0c0758c Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 23:29:08 +0000
 Subject: [PATCH 12/44] loader: with TOTK_DEBUG_LOG, list the code words a mod
@@ -11,7 +11,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 21 insertions(+)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index 8ff93d79..ad900278 100644
+index a78986b4e0cac67834fa5cdbd0fceccaca0895d9..7dfdb562c353e96b5512d3aaf35a97b227165fea 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -629,10 +629,31 @@ uintptr_t runtime_frame_controller_return_pc(void) {

@@ -47,7 +47,7 @@ Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
 | `app/salon-construire.command` | Compile, signe et installe `/Applications/Home.app`. `HOME_BUILD_ONLY=<dossier>` : compile seulement. `HOME_VERSION=x.y.z` : version de l'app |
 | `moteur/outils/` | Les scripts que Home lance (voir plus bas) |
 | `moteur/patches/` | Les patchs d'Anas pour nxnative (`series` donne l'ordre) |
-| `moteur/tools/` | `engine.py` (version figée de nxnative + patchs), notes de version, tests |
+| `moteur/tools/` | `engine.py` (version figée de nxnative + patchs), `serie.py` (rejoue les patchs d'Anas sur une nouvelle version, avec réparations sûres : voir « Mises à jour des moteurs »), notes de version, tests |
 | `moteur/obelisk/` | Lancement direct Epic (Legendary), `launch.sh` du moteur Voile (repris d'Obelisk, GPL-3.0) |
 | `moteur/pc/pc.py` | Jeux PC sans Obelisk : télécharge Voile, compte Epic (Legendary), bibliothèque, installation, lancement. Lancé par `outils/pc.command` |
 | `moteur/compat/pc.json` | Liste de compatibilité PC, avec sources : `bloque` (jamais lancé), `verifie`, `linux`. Un jeu absent n'est jamais bloqué |
@@ -177,6 +177,20 @@ Home les lance dans le Terminal, sans le PATH du Terminal (ajoute Homebrew au PA
 | `journaux.command` | « Journaux pour Claude » : copie les journaux dans `/Applications/Home/log/diag` |
 | `totk-server.sh`, `smoo-server.sh` | Serveurs en ligne locaux (TOTK Online n'est plus local, voir plus bas) |
 | `totk-moniteur.command`, `rocket-league-direct.command` | Moniteur TOTK Online, préparation du lancement direct Epic |
+
+## Mises à jour des moteurs : garder les changements d'Anas
+
+Les changements d'Anas vivent en séries de patchs dans le dépôt : `moteur/patches` (nxnative) et `moteur/mng/patches`
+(MacNativeGames ; `series` donne l'ordre, `.upstream-ref` la version de l'amont dessous). `moteur/tools/serie.py` les rejoue sur
+une nouvelle version, dans un dossier à part : le clone en service ne bouge que si tout s'est appliqué.
+
+- Un patch que `git am -3` refuse est repris fichier par fichier, avec trois réparations sûres : fichier devenu un lien (appliqué
+  sur la cible), fichier déplacé (renommage vu par git, sinon contexte), ajout simple à côté d'un changement de l'amont.
+- Sinon la mise à jour s'arrête : rien n'est modifié, `<Home>/log/mng-maj.json` (ou `nxnative-maj.json`) passe à « attente » et un
+  rapport dit quel patch, quel fichier et les versions en présence. Home l'affiche en tête de Mises à jour (`majEnAttente`).
+  Dans ce cas : adapter le commit à la main dans le clone, puis relancer la mise à jour.
+- Après une réussite, la série est réécrite dans `<Home>/moteur/mng` et dans `~/Home/moteur/mng` s'il existe : pense à l'enregistrer.
+- Tests : `cd moteur && python3 -m unittest tools.tests.test_serie`.
 
 ## Jeux en ligne
 

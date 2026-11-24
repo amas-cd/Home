@@ -1,4 +1,4 @@
-From 67b1fbb444bdba239f0ed30058d07b761527bef0 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 23:16:41 +0000
 Subject: [PATCH 11/44] loader: a retail module's symbol table seen by a mod
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 12 insertions(+)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index c767764d..8ff93d79 100644
+index f1ced02675b636769528517c05f727d1313808c9..a78986b4e0cac67834fa5cdbd0fceccaca0895d9 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -342,6 +342,18 @@ static void rtld_module_list(void) {

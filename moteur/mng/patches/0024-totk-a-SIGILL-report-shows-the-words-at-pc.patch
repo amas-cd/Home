@@ -1,4 +1,4 @@
-From 4ed1eccf82cf5aed4e0f6150afa3a1342c8211c2 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:43:48 +0000
 Subject: [PATCH 24/44] totk: a SIGILL report shows the words at pc
@@ -10,7 +10,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 5 insertions(+)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index 30d3e3e9..9a2b2896 100644
+index 74ee1eb84fead0e50aa98f40232774f1261e79fc..ea560c999f31542383330782a4b34071fdee7bcf 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -572,6 +572,11 @@ static void crash(int num,siginfo_t *info,void *context) {

@@ -1,4 +1,4 @@
-From 01e157255e959ac83f661ef0761a6cc8d49e907b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 13:04:10 +0000
 Subject: [PATCH 28/44] build_app: --from-work, the TotK Mac app again from the
@@ -11,34 +11,36 @@ needed once.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
 ---
- build_app.py | 64 ++++++++++++++++++++++++++++++++++++++++++++++++++--
- 1 file changed, 62 insertions(+), 2 deletions(-)
+ build_app.py | 66 +++++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 63 insertions(+), 3 deletions(-)
 
 diff --git a/build_app.py b/build_app.py
-index ca8b8acd..8ce5b5d3 100644
+index 42c4c8cf719a9f2968e2aac509ba38535eb5b409..c1b7feb50b96e8881aa6ad5a689b8a80d9e4a07c 100644
 --- a/build_app.py
 +++ b/build_app.py
-@@ -657,7 +657,9 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
+@@ -832,8 +832,10 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
      exefs = tree / f'extracted/{version}/exefs'
      want = expected['exefs_sha256']
      manifest = exefs.parent / 'extraction-manifest.json'
--    if not source_matches(manifest, game) or not exefs_matches(exefs, want, expected['title_id']):
+-    why = source_mismatch(manifest, game) or (None if exefs_matches(exefs, want, expected['title_id']) else
+-                                               'the extracted ExeFS is not the verified one')
 +    if game is None and not exefs_matches(exefs, want, expected['title_id']):
 +        raise BuildError(f'--from-work: the {version} ExeFS in {exefs} is not the verified one; build once from the game file')
-+    if game is not None and (not source_matches(manifest, game) or not exefs_matches(exefs, want, expected['title_id'])):
-         say('1/4 code: extracting the ExeFS from the game file')
++    why = None if game is None else (source_mismatch(manifest, game) or (None if exefs_matches(exefs, want, expected['title_id']) else
++                                                                       'the extracted ExeFS is not the verified one'))
+     if why:
+         say(f'1/4 code: extracting the ExeFS from the game file ({why})')
          if exefs.exists():
-             shutil.rmtree(exefs)
-@@ -1091,6 +1093,8 @@ def step_update_data(tree, game, update, keys, logs, *, version, mod=None, nativ
-                      and (folder/'romfs.bin').stat().st_size == expected['romfs']['size'])
-         except (ValueError, KeyError):
-             pass
-+    if not valid and game is None:
+@@ -1270,6 +1272,8 @@ def step_update_data(tree, game, update, keys, logs, *, version, mod=None, nativ
+     folder = tree/f'extracted/{version}/romfs'
+     index = folder/'index.json'
+     why = romfs_mismatch(folder, expected, need_pass=True)
++    if why and game is None:
 +        raise BuildError(f'--from-work: the {expected["display_version"]} RomFS in {folder} is not the verified one; build once from the game files')
-     if not valid:
+     if why and not adopt_game_data(tree, app, version, folder, logs):
          hactool = build_hactool(tree, logs)
          if folder.exists():
-@@ -2683,8 +2687,11 @@ def mac_game_data(args, device_app):
+@@ -3394,8 +3398,11 @@ def mac_game_data(args, device_app):
  def parse_args(argv):
      ap = argparse.ArgumentParser(description='Build a native Mac app or unsigned iPhone/iPad IPA from TOTK base 1.0.0 (XCI/NSP), optionally with the separate 1.2.1 or 1.4.3 update; or a Mac app from Breath of the Wild: a combined 1.6.0 card image, or a base NSP with its separate 1.6.0 or 1.9.0 update NSP and optional add-on content NSPs (--dlc).',
                                   epilog='example: python3 build_app.py ~/Games/totk.xci -k ~/keys/prod.keys')
@@ -51,8 +53,8 @@ index ca8b8acd..8ce5b5d3 100644
      ap.add_argument('--update', type=Path, help='separate supported cumulative update NSP/NSZ; outputs the same single app (Breath of the Wild: the 1.9.0 update NSP, not for a card image)')
      ap.add_argument('--dlc', type=Path, action='append', metavar='DLC.nsp', help='Breath of the Wild with a separate 1.6.0 or 1.9.0 --update: an add-on content (DLC) NSP; repeat for the second pack (01007EF00011F001, 01007EF00011F002); each is optional, and a pack left out is not in the app; such a build takes its packs from --dlc only, also when the game file is a card image')
      ap.add_argument('--platform', choices=('macos','ios','visionos'), default='macos', help='build a macOS app (default), unsigned iPhone/iPad IPA, or native Vision Pro IPA')
-@@ -2751,8 +2758,61 @@ def build_oot(args, source):
-                            shader_chain=shader_chain), args)
+@@ -3479,8 +3486,61 @@ def check_nup(source):
+     return title
  
  
 +def main_from_work(args):
@@ -111,5 +113,5 @@ index ca8b8acd..8ce5b5d3 100644
 +    if args.game is None:
 +        raise BuildError('the game file is needed (or --from-work <version> with --work, to build again from a work folder)')
      if args.game.suffix.lower() == '.nup':
-         return build_oot(args, args.game.expanduser().resolve())
-     if args.game.expanduser().is_dir():   # a Switch 2 dump folder
+         from tools import nup_title
+         source = args.game.expanduser().resolve()

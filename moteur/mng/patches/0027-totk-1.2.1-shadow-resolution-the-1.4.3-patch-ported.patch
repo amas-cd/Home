@@ -1,4 +1,4 @@
-From ce2fd460fa230b487d2032214fbd31777048223e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 11:38:49 +0000
 Subject: [PATCH 27/44] totk 1.2.1: shadow resolution (the 1.4.3 patch ported)
@@ -12,12 +12,12 @@ graphics-shadow.txt) and TOTK_SHADOW_SCALE drive it, at once.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
 ---
- games/totk/runtime/game_patches.c   | 56 +++++++++++++++++++++++++++++
- games/totk/runtime/settings_panel.h | 24 ++++++++++++-
+ games/totk/runtime/game_patches.c  | 56 ++++++++++++++++++++++++++++++
+ games/totk/runtime/settings_game.h | 24 ++++++++++++-
  2 files changed, 79 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/runtime/game_patches.c b/games/totk/runtime/game_patches.c
-index 64cccad1..d9ce74bb 100644
+index 64cccad184a08770db31660f31aa25ad884d6e1f..d9ce74bbc5b5a2a984b1226c362db29f3dd5ba55 100644
 --- a/games/totk/runtime/game_patches.c
 +++ b/games/totk/runtime/game_patches.c
 @@ -645,6 +645,61 @@ static void patch_cursor_speed(Module *m) {
@@ -90,11 +90,11 @@ index 64cccad1..d9ce74bb 100644
  #else
      if (aspect_requested()) runtime_fail("TOTK_ASPECT: only 1.2.1 and 1.4.3 so far");
  #endif
-diff --git a/games/totk/runtime/settings_panel.h b/games/totk/runtime/settings_panel.h
-index 984ec6ba..4b1a2bfe 100644
---- a/games/totk/runtime/settings_panel.h
-+++ b/games/totk/runtime/settings_panel.h
-@@ -153,6 +153,9 @@ int dm_gfx_smaa_quality(void); void dm_gfx_smaa_quality_set(int q);
+diff --git a/games/totk/runtime/settings_game.h b/games/totk/runtime/settings_game.h
+index 8e4bd4dd3cbd34b05b34d8abe54e77e7f54502e9..40e86b47a7dacafe2f006edd4dca7b213f6a5661 100644
+--- a/games/totk/runtime/settings_game.h
++++ b/games/totk/runtime/settings_game.h
+@@ -143,6 +143,9 @@ int dm_gfx_smaa_quality(void); void dm_gfx_smaa_quality_set(int q);
  int dm_gfx_aa_method(void); void dm_gfx_aa_method_set(int method);
  int dm_gfx_fxaa_quality(void); void dm_gfx_fxaa_quality_set(int q);
  #endif
@@ -104,7 +104,7 @@ index 984ec6ba..4b1a2bfe 100644
  int nvn_fps_lock(void);
  
  /* Picking a resolution sizes the window to it at once (user 2026-10-25): 720p 1280x720, 1080p and 720p + MetalFX 1920x1080, MetalFX 2560x1440, native its own size (2K), 2K + MetalFX and native 4K 3840x2160, in the window's points as the first window (frontend.m runtime_front_run), the picture's shape kept
-@@ -259,6 +262,10 @@ static void settings_effects_restore(void) {
+@@ -235,6 +238,10 @@ static void settings_effects_restore(void) {
  }
  #elif defined(GAME_BOTW190)
  static void settings_effects_restore(void);   /* botw_effects.h */
@@ -115,7 +115,7 @@ index 984ec6ba..4b1a2bfe 100644
  #else
  static void settings_effects_restore(void) {}
  #endif
-@@ -745,6 +752,9 @@ static void settings_effects_reset(void) {
+@@ -629,6 +636,9 @@ static void settings_effects_reset(void) {
   for(const char *const *f=(const char *const[]){"graphics-fov.txt","graphics-lod.txt","graphics-far.txt","graphics-fxaa.txt","graphics-smaa-quality.txt","graphics-aa-method.txt","graphics-fxaa-quality.txt","graphics-sharpen.txt","graphics-effects.txt","graphics-shadow.txt","graphics-dof.txt",NULL};*f;f++)
    runtime_setting_remove(*f);
  #endif
@@ -125,7 +125,7 @@ index 984ec6ba..4b1a2bfe 100644
  #ifdef GAME_BOTW190
   if(runtime_shadow_res_available()&&!runtime_shadow_res_locked()){runtime_shadow_res_save(0);runtime_setting_remove("shadows.txt");}
   if(runtime_fov_available()&&!runtime_fov_scale_locked()){runtime_fov_scale_set(1);runtime_setting_remove("graphics-fov.txt");}
-@@ -759,7 +769,19 @@ static void settings_effects_reset(void) {
+@@ -643,7 +653,19 @@ static void settings_effects_reset(void) {
  #ifndef TOTK_GAME_V143
  static TOTKSettingRow *settings_botw_shadow_row(void) {
   NSString *t=settings_text("阴影分辨率","Shadow resolution");

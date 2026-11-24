@@ -1,4 +1,4 @@
-From 9433d34e3865d6e9d7a70c4a9761595ba839c118 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 22:40:04 +0000
 Subject: [PATCH 07/44] runtime: rtld's module list for a mod module
@@ -17,7 +17,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  2 files changed, 77 insertions(+), 2 deletions(-)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index ea6128e8..92730cab 100644
+index b0a334c4f2045568f8db92db3dc0dd16e81d4030..eac2338fdada69e57b9ca6cf1bf89472843e5c52 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -232,6 +232,19 @@ static void map_module(Module *m,const char *dir) {
@@ -98,7 +98,7 @@ index ea6128e8..92730cab 100644
  static void verify_identity(int negative) {
   unsigned checked=0;void *original=required("nnMain");
   for(unsigned i=0;i<NM;i++)for(unsigned j=0;j<modules[i].nreloc;j++) {
-@@ -641,8 +694,12 @@ int main(int argc,char **argv) {
+@@ -642,8 +695,12 @@ int main(int argc,char **argv) {
   runtime_hle_stack_init((uint64_t)runtime_keys[4]*8);
   need(pthread_key_create(&environment_key,environment_destroy)==0,"thread environment key");
   load_tables();
@@ -112,7 +112,7 @@ index ea6128e8..92730cab 100644
  #if !TARGET_OS_IPHONE
   if(!strcmp(argv[2],"export-ios")){const char *out=getenv("TOTK_EXPORT_IOS");need(out!=NULL,"export-ios needs TOTK_EXPORT_IOS=<dir>");export_ios_text(argv[1],out);return 0;}
 diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
-index 5b6def32..ce9dc505 100644
+index 5849f24fc7083c747bca04e9221459ef740a8cc5..8f11ac900b81daa3ead9089b90d4137d1ff8d615 100644
 --- a/games/totk/runtime/services.c
 +++ b/games/totk/runtime/services.c
 @@ -229,6 +229,7 @@ static void memory_init(void) {

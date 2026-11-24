@@ -1,4 +1,4 @@
-From 663526cc27f8bc4a28f435f3b76f9b8bec307882 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 23:41:55 +0000
 Subject: [PATCH 13/44] loader: invalidate the instruction cache at the
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 15 insertions(+), 13 deletions(-)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index ad900278..da605b77 100644
+index 7dfdb562c353e96b5512d3aaf35a97b227165fea..17a8bdd9289808d017658a6c1a55e80f3c784ffe 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -629,24 +629,26 @@ uintptr_t runtime_frame_controller_return_pc(void) {

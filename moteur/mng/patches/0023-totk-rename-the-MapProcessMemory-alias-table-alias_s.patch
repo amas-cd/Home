@@ -1,4 +1,4 @@
-From cdc951a6316aebb0f29ef70f49ddefe3c5c888b8 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:40:01 +0000
 Subject: [PATCH 23/44] totk: rename the MapProcessMemory alias table
@@ -11,7 +11,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
-index 4fba084f..61fd8a6a 100644
+index 82d0f2f9b9b8c618aa65bec313d829ec8f957f51..3c5f7fb1e838f64a1426796522902252d6ebd3ce 100644
 --- a/games/totk/runtime/services.c
 +++ b/games/totk/runtime/services.c
 @@ -456,7 +456,7 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset

@@ -1,4 +1,4 @@
-From b9c261da441064ad6209fe5a6cf4405a6033dc8d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 21:03:39 +0000
 Subject: [PATCH 34/44] oot: TOTK_FULLSCREEN=1 starts in macOS full screen on
@@ -10,15 +10,15 @@ uses; the restored resolution no longer resizes the window out of it.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
 ---
- games/oot/runtime/frontend.m       | 9 +++++++++
- games/oot/runtime/settings_panel.h | 1 +
+ games/oot/runtime/frontend.m      | 9 +++++++++
+ games/oot/runtime/settings_game.h | 1 +
  2 files changed, 10 insertions(+)
 
 diff --git a/games/oot/runtime/frontend.m b/games/oot/runtime/frontend.m
-index fc9e3916..5cde3c04 100644
+index dbf063e3f0f944bce97b8e2c957058b7e97d7e01..43a301a2a340e19d5645089df5da8df6cd41a4fd 100644
 --- a/games/oot/runtime/frontend.m
 +++ b/games/oot/runtime/frontend.m
-@@ -956,6 +956,15 @@ corners by the present encoder (gfx/nvn/fps_overlay.c). The box sits under the o
+@@ -798,6 +798,15 @@ corners by the present encoder (gfx/nvn/fps_overlay.c). The box sits under the o
    if(window.level==NSFloatingWindowLevel){NSRect f=window.frame;[window setFrameOrigin:NSMakePoint(NSMaxX(vis)-f.size.width,NSMaxY(vis)-f.size.height)];}   /* TOTK_WINDOW_FLOAT: top-right corner */
    front_sync_drawable();
    if(assume_focus()){[window orderFrontRegardless];}else{[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];}   /* in front of other apps' windows, keyboard left alone */
@@ -31,14 +31,14 @@ index fc9e3916..5cde3c04 100644
 +    NSRect v=sc.visibleFrame,f=window.frame;[window setFrameOrigin:NSMakePoint(NSMidX(v)-f.size.width/2,NSMidY(v)-f.size.height/2)];
 +    fprintf(stderr,"[oot] fullscreen at start on '%s' (TOTK_FULLSCREEN)\n",sc.localizedName.UTF8String);
 +    dispatch_async(dispatch_get_main_queue(),^{if(!(window.styleMask&NSWindowStyleMaskFullScreen))[window toggleFullScreen:nil];});}}
-   front_sr_view();
-   [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){(void)n;note_window_screen();front_sr_view();}];   /* a refresh rate changed on the same screen */
-   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{note_occlusion(" 3 s after opening");});
-diff --git a/games/oot/runtime/settings_panel.h b/games/oot/runtime/settings_panel.h
-index 75ad4c6d..d7ba37d7 100644
---- a/games/oot/runtime/settings_panel.h
-+++ b/games/oot/runtime/settings_panel.h
-@@ -153,6 +153,7 @@ int nvn_fps_lock(void);
+   totk_board_start();   /* the leaderboard's rounds (board_upload.h): nothing is sent unless the player turned 我要上榜 on */
+   mng_active_start(@"oot", mng_active_version());
+ #if defined(TOTK_SCREENSHOT_WINDOW)
+diff --git a/games/oot/runtime/settings_game.h b/games/oot/runtime/settings_game.h
+index 43da43393cbb673a5f17ad19d926b764ca359103..99bb42dd24b39fd6183a6f6c5fafe4694bf10bc9 100644
+--- a/games/oot/runtime/settings_game.h
++++ b/games/oot/runtime/settings_game.h
+@@ -32,6 +32,7 @@ int nvn_fps_lock(void);
     (the aspect ratio picked) and shrunk to fit the screen's visible area. Full screen stays as it is. */
  static void settings_window_size(unsigned w,unsigned h,double ratio) {
   if(!window||(window.styleMask&NSWindowStyleMaskFullScreen))return;

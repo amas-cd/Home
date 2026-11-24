@@ -1,4 +1,4 @@
-From 3a31494b06b0d4a1bd28d3eed5eb444aae08f99a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 13:17:29 +0000
 Subject: [PATCH 29/44] build_app: --mod-module more than once, each mod module
@@ -15,10 +15,10 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  2 files changed, 26 insertions(+), 14 deletions(-)
 
 diff --git a/build_app.py b/build_app.py
-index 8ce5b5d3..300bd44e 100644
+index c1b7feb50b96e8881aa6ad5a689b8a80d9e4a07c..71ea244e46ad3c99259f0e339a782b17e873f147 100644
 --- a/build_app.py
 +++ b/build_app.py
-@@ -707,16 +707,26 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
+@@ -884,16 +884,26 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
      # --mod merged a patch into main, which the report records.
      digests = {f'{name}.patched.bin': sha256(out / f'{name}.patched.bin') for name in ('main', 'sdk', 'subsdk0')}
      extra = {}
@@ -53,7 +53,7 @@ index 8ce5b5d3..300bd44e 100644
      scope = f'hash match with verified {expected["display_version"]} rewrite'
      if merged:
          scope = (f'verified {expected["display_version"]} rewrite, with the main-module patches of {merged["folder"]} '
-@@ -724,7 +734,7 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
+@@ -901,7 +911,7 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
      report = dict(format=1, status='pass', rom_version=version, scope=scope,
                    module_file_sha256={**{f'extracted/{version}/exefs/{n}': want[n] for n in ('main', 'sdk', 'subsdk0')},
                                        **{f'rewritten/{version}/{n}': digests[n] for n in digests}, **extra},
@@ -62,7 +62,7 @@ index 8ce5b5d3..300bd44e 100644
                    **({'mod_exefs': {key: merged[key] for key in
                                      ('folder', 'folder_sha256', 'build_id', 'patches', 'edit_bytes', 'reserved_sites',
                                       'retail_main_sha256', 'patched_main_sha256', 'rewritten_main_sha256',
-@@ -2717,7 +2727,7 @@ def parse_args(argv):
+@@ -3429,7 +3439,7 @@ def parse_args(argv):
                      help='a mod folder prepared before the build: its exefs/ IPS / IPS32 / pchtxt patches for the main '
                           'module are merged into the code before it is rewritten (its romfs/ goes in with '
                           '--install-mod-romfs; docs/mods.md)')
@@ -71,7 +71,7 @@ index 8ce5b5d3..300bd44e 100644
                      help="a mod's own code module (TOTK Online's subsdk4, say): rewritten for Apple silicon and loaded "
                           'beside the game\'s modules, so its run-time hooks and its code run (scripts/mod_module.py)')
      ap.add_argument('--install-mod-romfs', action='store_true',
-@@ -2775,7 +2785,7 @@ def main_from_work(args):
+@@ -3503,7 +3513,7 @@ def main_from_work(args):
          raise BuildError(f'--mod expects a mod folder prepared before the build (its files under exefs/ and/or romfs/): {mod} has neither. See docs/mods.md.')
      if args.install_mod_romfs and not (mod and (mod / 'romfs').is_dir()): raise BuildError('--install-mod-romfs needs --mod with a romfs/ folder')
      code_mod = mod if mod and (mod / 'exefs').is_dir() else None
@@ -80,7 +80,7 @@ index 8ce5b5d3..300bd44e 100644
      args.mac_game_data, game_data_folder = mac_game_data(args, False)
      py = prerequisites(args)
      logs = work / 'logs'
-@@ -2786,7 +2796,7 @@ def main_from_work(args):
+@@ -3514,7 +3524,7 @@ def main_from_work(args):
      native_4k = True if native_5k else args.native_4k
      if native_4k is None: native_4k = version in ('v143', 'v121') and native_4k_default()
      say(f'Tears of the Kingdom {VERSIONS[version]["display_version"]} from the work folder {work}, without the game file'
@@ -89,7 +89,7 @@ index 8ce5b5d3..300bd44e 100644
      step_code(tree, None, None, env, logs, version=version, mod=code_mod, mod_module=mod_module)
      if version == 'v0': step_data(tree, None, None, logs, mod=mod)
      else: step_update_data(tree, None, None, None, logs, version=version, mod=mod, native_4k=native_4k, native_5k=native_5k, vr=False)
-@@ -3021,7 +3031,7 @@ def main(argv):
+@@ -3753,7 +3763,7 @@ def main(argv):
              ('' if not native_5k or native_5k_roomy() else
              '. Note: this Mac has less than 32 GB of memory; a native 5K app reserves about 2.7 GiB more than a 4K one at'
              ' every start, whatever is shown'))
@@ -99,7 +99,7 @@ index 8ce5b5d3..300bd44e 100644
      if update:
          step_code(tree, update, keys, env, logs, version=version,
 diff --git a/games/totk/scripts/mod_module.py b/games/totk/scripts/mod_module.py
-index 974bd21f..633f3a52 100644
+index 974bd21fcbd4f4bd10315104308697d3f6cfa3dc..633f3a525d6a9ecbd3d791302067f77077bc60df 100644
 --- a/games/totk/scripts/mod_module.py
 +++ b/games/totk/scripts/mod_module.py
 @@ -43,6 +43,8 @@ def main():

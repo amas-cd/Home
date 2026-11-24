@@ -1,4 +1,4 @@
-From 44130090eb392dfd73527e8a8da1d1649c261389 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 23:08:59 +0000
 Subject: [PATCH 10/44] frontend: the borderless window stays on the launcher's
@@ -11,10 +11,10 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 4 insertions(+), 2 deletions(-)
 
 diff --git a/games/totk/runtime/frontend.m b/games/totk/runtime/frontend.m
-index 94d8e774..f5b503e5 100644
+index 8636b0d76ee536643bf8f293fa9ae81e3bd36b2a..6191560d76d62f6f3266cbeeede342616d1f1ef3 100644
 --- a/games/totk/runtime/frontend.m
 +++ b/games/totk/runtime/frontend.m
-@@ -18,6 +18,7 @@
+@@ -20,6 +20,7 @@
  #include "../third_party/d2r_gfx/gfx/nvn/totk_mfx_mode.h"
  #include "../third_party/d2r_gfx/gfx/nvn/fps_overlay.h"
  static NSWindow *window;
@@ -22,7 +22,7 @@ index 94d8e774..f5b503e5 100644
  uint64_t dm_nvn_frame_count(void);   /* gfx/nvn/hle_nvn.c: game frames presented so far */
  static CAMetalLayer *metalLayer;
  static _Atomic float hdrHeadroom=1;
-@@ -917,10 +918,10 @@ with it (a test's frames and pictures then say nothing). */
+@@ -773,10 +774,10 @@ with it (a test's frames and pictures then say nothing). */
      NSScreen *sc=window.screen?:NSScreen.mainScreen;
      {const char *id=getenv("TOTK_SCREEN_ID");if(id&&*id){unsigned long want=strtoul(id,NULL,10);   /* the launcher's display (NSScreenNumber), else the window's */
        for(NSScreen *s in NSScreen.screens)if([s.deviceDescription[@"NSScreenNumber"] unsignedLongValue]==want){sc=s;break;}}}
@@ -35,11 +35,11 @@ index 94d8e774..f5b503e5 100644
    }}
    if(window.level!=NSFloatingWindowLevel)window.collectionBehavior|=NSWindowCollectionBehaviorFullScreenPrimary;   /* a floating test window is an auxiliary one */
    window.tabbingMode=NSWindowTabbingModeDisallowed;
-@@ -964,6 +965,7 @@ corners by the present encoder (gfx/nvn/fps_overlay.c). The box sits under the o
+@@ -820,6 +821,7 @@ corners by the present encoder (gfx/nvn/fps_overlay.c). The box sits under the o
    if(window.level==NSFloatingWindowLevel){NSRect f=window.frame;[window setFrameOrigin:NSMakePoint(NSMaxX(vis)-f.size.width,NSMaxY(vis)-f.size.height)];}   /* TOTK_WINDOW_FLOAT: top-right corner */
    front_sync_drawable();
    if(assume_focus()){[window orderFrontRegardless];}else{[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];}   /* in front of other apps' windows, keyboard left alone */
 +  if(borderlessScreen){[window setFrame:borderlessScreen.frame display:YES];dispatch_async(dispatch_get_main_queue(),^{[window setFrame:borderlessScreen.frame display:YES];});}   /* TOTK_BORDERLESS: [window center] above and the first ordering go to the key window's screen; the chosen screen wins */
-   front_sr_view();
-   [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){(void)n;note_window_screen();front_sr_view();}];   /* a refresh rate changed on the same screen */
-   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{note_occlusion(" 3 s after opening");});
+   totk_board_start();   /* the leaderboard's rounds (board_upload.h): nothing is sent unless the player turned 我要上榜 on */
+ #ifdef GAME_INBOX_ID   /* game_version.h names Breath of the Wild, Bananza and Pokopia; Tears of the Kingdom otherwise */
+   mng_active_start(@GAME_INBOX_ID, mng_active_version());

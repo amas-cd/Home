@@ -1,4 +1,4 @@
-From b270fb836e78b72c3073d23ea9fee9becc089a23 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 12:24:32 +0100
 Subject: [PATCH 31/44] totk 1.2.1: fixed resolution (the 1.4.3 patch ported),
@@ -18,7 +18,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 25 insertions(+)
 
 diff --git a/games/totk/runtime/game_patches.c b/games/totk/runtime/game_patches.c
-index d9ce74bb..cd17deb7 100644
+index d9ce74bbc5b5a2a984b1226c362db29f3dd5ba55..cd17deb758422dd9bfaa812072af010080c21765 100644
 --- a/games/totk/runtime/game_patches.c
 +++ b/games/totk/runtime/game_patches.c
 @@ -700,6 +700,30 @@ static void patch_shadow_res_121(Module *m) {

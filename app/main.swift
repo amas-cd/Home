@@ -874,10 +874,25 @@ final class Library: ObservableObject {
     }
     /// Les logiciels qui font tourner les jeux : chacun mis à jour, puis ses jeux reconstruits
     /// Mises à jour : Home, puis les moteurs (chacun sa section)
+    /// Une mise à jour d'un moteur arrêtée parce qu'un changement d'Anas ne s'applique plus sur la nouvelle version (tools/serie.py) :
+    /// rien n'a été modifié, un rapport dit quel changement et pourquoi. [(nom du moteur, rapport)]
+    func majEnAttente() -> [(String, URL)] {
+        [("MacNativeGames", "mng-maj.json"), ("nxnative", "nxnative-maj.json")].compactMap { nom, f in
+            guard let d = try? Data(contentsOf: Atelier.home.appendingPathComponent("log/" + f)), let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+                  j["etat"] as? String == "attente", let r = j["rapport"] as? String, FileManager.default.fileExists(atPath: r) else { return nil }
+            return (nom, URL(fileURLWithPath: r))
+        }
+    }
+    /// Les choix « en attente » à mettre en tête d'un menu de mises à jour : chacun ouvre son rapport
+    func choixEnAttente() -> [SalonMenuItem] {
+        majEnAttente().map { nom, rapport in
+            SalonMenuItem(label: "\(nom) en attente", detail: "Un de tes changements ne s'applique plus. Ouvrir le rapport", icon: "exclamationmark.triangle.fill", section: "En attente", tint: .orange, action: { NSWorkspace.shared.open(rapport) })
+        }
+    }
     func openMisesAJour() {
         let app = Bundle.main.bundleURL
         let date = (try? app.appendingPathComponent("Contents/MacOS/Salon").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-        menu = SalonMenu(title: "Mises à jour", subtitle: nil, items: [
+        menu = SalonMenu(title: "Mises à jour", subtitle: nil, items: choixEnAttente() + [
             SalonMenuItem(label: "Mettre à jour Home", detail: date.map { "Version du \($0.formatted(date: .abbreviated, time: .shortened))" }, icon: "house.fill", section: "Home", tint: .blue, action: {
                 self.menu = nil; self.lancer("home-mettre-a-jour.command", titre: "Mise à jour de Home") }),
             SalonMenuItem(label: "Moteurs", detail: "nxnative, MacNativeGames", icon: "cpu", section: "Moteurs", tint: .purple, action: { self.openMoteurs() }),
@@ -900,7 +915,7 @@ final class Library: ObservableObject {
             items.append(SalonMenuItem(label: "Ouvrir NX Library", detail: version(n), icon: "books.vertical.fill", section: "NX Library", tint: .orange, action: {
                 self.menu = nil; NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: n), configuration: NSWorkspace.OpenConfiguration()) { _, _ in } }))
         }
-        menu = SalonMenu(title: "Moteurs", subtitle: nil, items: items, hero: "cpu", back: { self.openMisesAJour() })
+        menu = SalonMenu(title: "Moteurs", subtitle: nil, items: choixEnAttente() + items, hero: "cpu", back: { self.openMisesAJour() })
     }
     func openCategoriesSettings() {
         let custom = (config.categories ?? []).filter { !Library.base.contains($0) }
@@ -2752,8 +2767,9 @@ struct TacheView: View {
             if t.erreur != nil || t.fini {
                 HStack(spacing: 8) {
                     if t.erreur != nil {
-                        Text("Journal").font(.system(size: 14, weight: .bold)).foregroundStyle(.black).padding(.horizontal, 16).frame(height: 38).background(Capsule().fill(.white))
-                            .onTapGesture { NSWorkspace.shared.activateFileViewerSelecting([t.log]) }
+                        let rapport = (t.erreur ?? "").contains("en attente") ? lib.majEnAttente().first(where: { t.titre.contains($0.0) || (t.erreur ?? "").contains($0.0) })?.1 : nil
+                        Text(rapport == nil ? "Journal" : "Rapport").font(.system(size: 14, weight: .bold)).foregroundStyle(.black).padding(.horizontal, 16).frame(height: 38).background(Capsule().fill(.white))
+                            .onTapGesture { if let rapport { NSWorkspace.shared.open(rapport) } else { NSWorkspace.shared.activateFileViewerSelecting([t.log]) } }
                     }
                     Image(systemName: "xmark").font(.system(size: 14, weight: .black)).frame(width: 38, height: 38).background(Circle().fill(.white.opacity(0.16)))
                         .onTapGesture { lib.fermerTache() }

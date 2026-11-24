@@ -18,7 +18,21 @@ avant="$(cut -c1-12 .upstream-ref)"
 if "$PY" tools/engine.py --tmp "$MOT/.bump-tmp" bump --to main --dry >/dev/null 2>&1; then
   "$PY" tools/engine.py --tmp "$MOT/.bump-tmp" bump --to main >/dev/null 2>&1 && STATUS+=("moteur : $avant → $(cut -c1-12 .upstream-ref)") || STATUS+=("moteur : mise à jour ÉCHOUÉE, version $avant gardée")
 else
-  STATUS+=("moteur : tes patchs entrent en conflit avec le nouveau nxnative → version $avant gardée (dis-le à Claude)")
+  # un patch ne s'applique plus tel quel : les réparations sûres de tools/serie.py (fichier déplacé ou devenu un lien, ajout simple à
+  # côté d'un changement de l'amont). Si elles ne suffisent pas, rien n'est écrit : la version et les patchs restent, Home l'affiche.
+  "$PY" tools/engine.py --tmp "$MOT/.bump-tmp" bump --to main --repair --report "$LOGD/nxnative-maj-rapport.txt" > "$LOGD/nxnative-maj.log" 2>&1; code=$?
+  if [ $code -eq 0 ]; then
+    STATUS+=("moteur : $avant → $(cut -c1-12 .upstream-ref) ($(grep -c '^repaired: ' "$LOGD/nxnative-maj.log") patch(s) réparé(s) seul(s))")
+  else
+    STATUS+=("moteur : mise à jour nxnative en attente, un de tes changements ne s'applique plus → version $avant gardée (rapport : $LOGD/nxnative-maj-rapport.txt)")
+    [ -f "$LOGD/nxnative-maj-rapport.txt" ] || tail -20 "$LOGD/nxnative-maj.log" > "$LOGD/nxnative-maj-rapport.txt"
+    printf '{"etat": "attente", "rapport": "%s", "version_gardee": "%s"}\n' "$LOGD/nxnative-maj-rapport.txt" "$avant" > "$LOGD/nxnative-maj.json"
+  fi
+fi
+# la mise à jour est passée (ou il n'y avait rien de neuf) : plus rien en attente ; et la série part aussi dans le dépôt Home s'il est là
+if [ "$(cat "$LOGD/nxnative-maj.json" 2>/dev/null | grep -c attente)" = 1 ] && "$PY" tools/engine.py --tmp "$MOT/.bump-tmp" bump --to main --dry >/dev/null 2>&1; then rm -f "$LOGD/nxnative-maj.json" "$LOGD/nxnative-maj-rapport.txt"; fi
+if [ "$avant" != "$(cut -c1-12 .upstream-ref)" ] && [ -d "$HOME/Home/moteur/patches" ] && [ "$HOME/Home/moteur" != "$MOT" ]; then
+  rsync -a --delete --exclude README.md "$MOT/patches/" "$HOME/Home/moteur/patches/" && cp "$MOT/.upstream-ref" "$HOME/Home/moteur/.upstream-ref" && echo "série nxnative recopiée dans $HOME/Home/moteur (à enregistrer dans le dépôt)"
 fi
 "$PY" tools/engine.py --tmp "$MOT/.bump-tmp" sync >/dev/null 2>&1 || STATUS+=("moteur : sync ÉCHOUÉ")
 rm -rf "$MOT"/.bump-tmp

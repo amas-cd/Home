@@ -1,4 +1,4 @@
-From 893647db739545741c94c30b2bc9dd918a9ac073 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 11:30:27 +0000
 Subject: [PATCH 32/44] totk: with TOTK_FULLSCREEN=1 the resolution setting
@@ -10,14 +10,14 @@ animation was still running, which took the window out of full screen.
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
 ---
- games/totk/runtime/settings_panel.h | 3 +++
+ games/totk/runtime/settings_game.h | 3 +++
  1 file changed, 3 insertions(+)
 
-diff --git a/games/totk/runtime/settings_panel.h b/games/totk/runtime/settings_panel.h
-index 4b1a2bfe..01496950 100644
---- a/games/totk/runtime/settings_panel.h
-+++ b/games/totk/runtime/settings_panel.h
-@@ -162,6 +162,9 @@ int nvn_fps_lock(void);
+diff --git a/games/totk/runtime/settings_game.h b/games/totk/runtime/settings_game.h
+index 40e86b47a7dacafe2f006edd4dca7b213f6a5661..2a7c20a0f0db84a9128ac2fb557669fdee2a3ca9 100644
+--- a/games/totk/runtime/settings_game.h
++++ b/games/totk/runtime/settings_game.h
+@@ -152,6 +152,9 @@ int nvn_fps_lock(void);
     (the aspect ratio picked) and shrunk to fit the screen's visible area. Full screen stays as it is. */
  static void settings_window_size(unsigned w,unsigned h,double ratio) {
   if(!window||(window.styleMask&NSWindowStyleMaskFullScreen))return;

@@ -1,4 +1,4 @@
-From 11d5efe7abd6cda39e70fa62e5c673332de7cbf1 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 22:23:39 +0000
 Subject: [PATCH 36/44] totk: the game's main thread asks for user-interactive
@@ -14,14 +14,14 @@ outdoors at 40-50 fps with the GPU at 13 ms. The threads CreateThread makes were
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
 ---
- games/totk/runtime/threads.c | 5 +++++
+ shared/runtime/threads.c | 5 +++++
  1 file changed, 5 insertions(+)
 
-diff --git a/games/totk/runtime/threads.c b/games/totk/runtime/threads.c
-index 1e814be8..806fe1a9 100644
---- a/games/totk/runtime/threads.c
-+++ b/games/totk/runtime/threads.c
-@@ -775,6 +775,11 @@ uint32_t svc_thread_main_init(void) {
+diff --git a/shared/runtime/threads.c b/shared/runtime/threads.c
+index 42cbfb9dd1119040613f0c12b8b4af7f66c1a11b..be1fa505e752ee992af50d6c35bc67348712a40b 100644
+--- a/shared/runtime/threads.c
++++ b/shared/runtime/threads.c
+@@ -834,6 +834,11 @@ uint32_t svc_thread_main_init(void) {
      g_main_handle = t->handle;
  #endif
      pthread_setspecific(g_keythr, t);

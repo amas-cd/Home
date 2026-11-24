@@ -1,4 +1,4 @@
-From 1e3eed07025dc5caee6c883df5967fae033cab1f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:27:29 +0000
 Subject: [PATCH 20/44] totk online: a real profile picture for the server's
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 60 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index 23c47ac6..433d7993 100644
+index 23c47ac623450d9783a643ae688b6487c929e918..433d7993ccc1e7fd8f3a9cfd469d30e329e7a2d9 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -111,7 +111,66 @@ static const char *online_ntop(int af, const void *src, char *dst, uint32_t size

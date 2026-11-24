@@ -1,4 +1,4 @@
-From 82225354089d5a1598855d0d1ca0b74063f7af4f Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <anas@local>
 Date: Sun, 8 Nov 2026 21:53:58 +0000
 Subject: [PATCH 04/44] step_app: copy a mod module's rewritten image into the
@@ -9,13 +9,13 @@ Subject: [PATCH 04/44] step_app: copy a mod module's rewritten image into the
  1 file changed, 5 insertions(+)
 
 diff --git a/build_app.py b/build_app.py
-index ccddc641..ca8b8acd 100644
+index 0ec6aeb9cea77829b727b032b15c9bd6e68dcbff..42c4c8cf719a9f2968e2aac509ba38535eb5b409 100644
 --- a/build_app.py
 +++ b/build_app.py
-@@ -1934,6 +1934,11 @@ def step_app(tree, out, logs, *, version="v0", game='totk', game_data='app', gam
+@@ -2515,6 +2515,11 @@ def step_app(tree, out, logs, *, version="v0", game='totk', game_data='app', gam
+         remove_tree(tmp)
      res = tmp / 'Contents/Resources/totk'   # the launcher's game folder, for both games (app/launcher.m)
-     files = [f'rewritten/{version}/main.patched.bin', f'rewritten/{version}/sdk.patched.bin',
-              f'rewritten/{version}/subsdk0.patched.bin', f'extracted/{version}/romfs/runtime-index.bin']   # romfs.bin: data_bundle
+     files = app_modules(version) + [f'extracted/{version}/romfs/runtime-index.bin']   # romfs.bin: data_bundle
 +    # a mod's own module (scripts/mod_module.py): every extra subsdkN the tables of this build bind goes in beside them
 +    tables_report = tree / ('analysis/phase12-validation.json' if version == 'v0' else f'analysis/{version}-port/phase12-validation.json')
 +    if tables_report.is_file():

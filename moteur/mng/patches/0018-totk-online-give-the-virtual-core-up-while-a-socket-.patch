@@ -1,4 +1,4 @@
-From 738f3000217325e82cc306951627d170b2a30dac Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:15:47 +0000
 Subject: [PATCH 18/44] totk online: give the virtual core up while a socket
@@ -15,7 +15,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 14 insertions(+), 4 deletions(-)
 
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index c7acd7fc..fb7574ff 100644
+index c7acd7fc99090920cdc9854f3f395a1d5ac4ded0..fb7574ff64a6e14643163b8a1bf31b20b5c94a12 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -34,6 +34,15 @@ static int fail(const char *what) {

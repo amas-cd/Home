@@ -1,4 +1,4 @@
-From 406a90a2e6b7a57e447eb986e68361b743ff79ba Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:21:48 +0000
 Subject: [PATCH 19/44] totk online: Horizon's O_NONBLOCK (0x800) and Linux
@@ -17,7 +17,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 28 insertions(+), 8 deletions(-)
 
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index fb7574ff..23c47ac6 100644
+index fb7574ff64a6e14643163b8a1bf31b20b5c94a12..23c47ac623450d9783a643ae688b6487c929e918 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -3,7 +3,7 @@

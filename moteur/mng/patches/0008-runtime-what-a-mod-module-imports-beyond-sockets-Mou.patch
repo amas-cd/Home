@@ -1,4 +1,4 @@
-From 7789213d9655c4bd3a5a558de09fe0778eccc889 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 22:59:09 +0000
 Subject: [PATCH 08/44] =?UTF-8?q?runtime:=20what=20a=20mod=20module=20impo?=
@@ -18,7 +18,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  2 files changed, 13 insertions(+), 2 deletions(-)
 
 diff --git a/games/totk/runtime/fs_host.c b/games/totk/runtime/fs_host.c
-index 4a5f966f..235a6677 100644
+index 88f9e7ebf6582d7ae3d08cdb0bede3a85b300490..8d6c5a991e97c3521ec4d90ac2b0cfe220ea2bea 100644
 --- a/games/totk/runtime/fs_host.c
 +++ b/games/totk/runtime/fs_host.c
 @@ -34,7 +34,7 @@
@@ -39,7 +39,7 @@ index 4a5f966f..235a6677 100644
  static void cache_dir(int index, char *out, size_t cap) { snprintf(out, cap, "%s/cache/%d", profile, index); }
  static unsigned create_cache(int index, int64_t size, int64_t journal) {
      ready(); if (index < 0 || size < 0 || journal < 0) return R_INVALID_ARGUMENT;
-@@ -414,7 +416,7 @@ void *runtime_fs_host_override(const char *name) {
+@@ -415,7 +417,7 @@ void *runtime_fs_host_override(const char *name) {
          {"_ZN2nn2fs12SetAllocatorEPFPvmEPFvS1_mE", fs_allocator},
          {"_ZN2nn2fs25GetCurrentThreadFsContextEv", get_fs_context}, {"_ZN2nn2fs25SetCurrentThreadFsContextEPKNS0_9FsContextE", set_fs_context},
          {"_ZN2nn2fs18IsSaveDataExistingERKNS_7account3UidE", own_save_exists}, {"_ZN2nn2fs14EnsureSaveDataERKNS_7account3UidE", ensure_save},
@@ -49,7 +49,7 @@ index 4a5f966f..235a6677 100644
          {"_ZN2nn2fs14CommitSaveDataEPKc", commit},   /* SDK 7 (Breath of the Wild 1.6.0) */
  #endif
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index ef81134f..277e4621 100644
+index ef81134f3edf366c985de9e185eaf9fc86c425b8..277e4621c0de55afe4e27ab8437136128162848d 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -7,6 +7,7 @@

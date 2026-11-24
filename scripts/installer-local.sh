@@ -13,10 +13,14 @@ mkdir -p "$M/salon" "$M/outils" "$M/tools" "$M/patches" "$M/obelisk"
 rsync -a "${EX[@]}" "$R/app/" "$M/salon/"
 rsync -a "${EX[@]}" "$R/moteur/outils/" "$M/outils/"
 rsync -a "${EX[@]}" "$R/moteur/tools/" "$M/tools/"
-rsync -a "${EX[@]}" "$R/moteur/patches/" "$M/patches/"
+# les patchs nxnative vont avec leur version figée : si ce Mac a avancé (« Mettre à jour nxnative »), ses patchs ont été refaits pour
+# sa version et ceux du dépôt ne s'y appliquent plus forcément — on garde les siens et on le dit
+if [ ! -f "$M/.upstream-ref" ] || [ "$(cat "$M/.upstream-ref")" = "$(cat "$R/moteur/.upstream-ref")" ]; then rsync -a "${EX[@]}" "$R/moteur/patches/" "$M/patches/"
+else echo "nxnative : ce Mac est sur $(cut -c1-12 "$M/.upstream-ref"), le dépôt sur $(cut -c1-12 "$R/moteur/.upstream-ref") : patchs de ce Mac gardés (montre la différence à Claude)"; fi
 rsync -a "${EX[@]}" "$R/moteur/obelisk/" "$M/obelisk/"
 EX+=(--exclude target)
-for d in pc compat mng steam; do [ -d "$R/moteur/$d" ] && { mkdir -p "$M/$d"; rsync -a "${EX[@]}" "$R/moteur/$d/" "$M/$d/"; }; done
+for d in pc compat mng steam; do SUP=(); [ "$d" = mng ] && SUP=(--delete)   # la série MacNativeGames change de noms de fichiers : les anciens partent
+  [ -d "$R/moteur/$d" ] && { mkdir -p "$M/$d"; rsync -a "${SUP[@]}" "${EX[@]}" "$R/moteur/$d/" "$M/$d/"; }; done
 [ -f "$M/.upstream-ref" ] || cp "$R/moteur/.upstream-ref" "$M/.upstream-ref"   # la version figée de nxnative : celle de ce Mac est gardée (elle avance avec « Mettre à jour nxnative »)
 cp "$R/moteur/README.md" "$M/README.md"
 chmod +x "$M"/outils/*.command "$M"/outils/*.sh "$M"/salon/*.command 2>/dev/null || true

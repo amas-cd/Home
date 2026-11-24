@@ -1,4 +1,4 @@
-From 41bd6c96537c345dd25e59b6238f736b5c92cec6 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Tue, 10 Nov 2026 22:39:04 +0000
 Subject: [PATCH 37/44] totk: a mod's hooks written after the constructors are
@@ -18,7 +18,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 40 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index 9a2b2896..b0ddfbdb 100644
+index ea560c999f31542383330782a4b34071fdee7bcf..6497e803d83a5c73880d8c32dccaaa84be575cf1 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -22,6 +22,8 @@

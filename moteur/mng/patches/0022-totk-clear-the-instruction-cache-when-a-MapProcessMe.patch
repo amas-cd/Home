@@ -1,4 +1,4 @@
-From a6c6b1b706ad1b303ab76c62f06df1aee55a2e19 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:38:23 +0000
 Subject: [PATCH 22/44] totk: clear the instruction cache when a
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 5 insertions(+)
 
 diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
-index 24cf1fdd..4fba084f 100644
+index 1000f2ca77b7f95ec8c52f868e01f70028098c3e..82d0f2f9b9b8c618aa65bec313d829ec8f957f51 100644
 --- a/games/totk/runtime/services.c
 +++ b/games/totk/runtime/services.c
 @@ -455,6 +455,8 @@ uint64_t runtime_svc_inner(unsigned num,uint64_t *r,const char *module,uint64_t

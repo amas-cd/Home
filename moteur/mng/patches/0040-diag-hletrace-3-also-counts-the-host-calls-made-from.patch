@@ -1,4 +1,4 @@
-From 2d3421d097bab81df44d27e605f207d929c4da6d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Wed, 11 Nov 2026 12:27:07 +0000
 Subject: [PATCH 40/44] diag: "hletrace 3" also counts the host calls made from
@@ -9,14 +9,14 @@ Says whether the game's NVN calls pass through TOTK Online's hooks (its overlay)
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
 ---
- games/totk/runtime/hle_stack.c | 23 +++++++++++++++++++++--
- games/totk/runtime/input.c     |  2 +-
+ shared/runtime/hle_stack.c  | 23 +++++++++++++++++++++--
+ shared/runtime/input_file.h |  2 +-
  2 files changed, 22 insertions(+), 3 deletions(-)
 
-diff --git a/games/totk/runtime/hle_stack.c b/games/totk/runtime/hle_stack.c
-index e986ad4e..6846a512 100644
---- a/games/totk/runtime/hle_stack.c
-+++ b/games/totk/runtime/hle_stack.c
+diff --git a/shared/runtime/hle_stack.c b/shared/runtime/hle_stack.c
+index e986ad4e453e2a5731fed02a0b01c5b9f278bb19..6846a51218f0213f33f5186336f7d5b7f9284387 100644
+--- a/shared/runtime/hle_stack.c
++++ b/shared/runtime/hle_stack.c
 @@ -64,9 +64,25 @@ const char *runtime_hle_raw_name(unsigned i) { return i < HLE_THUNKS ? names[i]
  void runtime_hle_describe(unsigned i, char *out, size_t cap) { name_of(i, out, cap); }
  
@@ -66,11 +66,11 @@ index e986ad4e..6846a512 100644
      }
  }
  
-diff --git a/games/totk/runtime/input.c b/games/totk/runtime/input.c
-index 74977d51..cceb7250 100644
---- a/games/totk/runtime/input.c
-+++ b/games/totk/runtime/input.c
-@@ -339,7 +339,7 @@ static void *input_file(void *arg) {
+diff --git a/shared/runtime/input_file.h b/shared/runtime/input_file.h
+index ed47f45b6883b3f1611840a4629cea7ff6224d81..ad994dc029eb169743871fbd22cf66071f60ba05 100644
+--- a/shared/runtime/input_file.h
++++ b/shared/runtime/input_file.h
+@@ -121,7 +121,7 @@ static void *input_file(void *arg) {
              line[strcspn(line, "\r\n")] = 0; runtime_front_text_test("shot", line + 7);
          } else if (!strcmp(line, "kbenter\n") || !strcmp(line, "kbesc\n")) {
              runtime_front_text_test(line[2] == 'e' && line[3] == 'n' ? "enter" : "esc", NULL);
@@ -78,4 +78,4 @@ index 74977d51..cceb7250 100644
 +        } else if (sscanf(line, "hletrace %u %n", &code, &used) == 1 && used && !line[used] && code <= 3) {
              runtime_hle_trace_set((int)code);   /* 1 count host calls, 2 also log the first call of each, 0 stop and print the counts */
          } else if (!strncmp(line, "framestep ", 10)) {   /* "framestep <ms>": pin the real-time frame step, 0 = back to real time */
-             char *end; double ms = strtod(line + 10, &end); if (end == line + 10 || ms < 0 || ms > 100) runtime_fail("framestep takes milliseconds (0 = real time)");
+             char *end; double step = strtod(line + 10, &end); if (end == line + 10 || step < 0 || step > 100) runtime_fail("framestep takes milliseconds (0 = real time)");

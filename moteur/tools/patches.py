@@ -176,9 +176,11 @@ def am(wt, patch):
                'am', '-3', '--quiet', str(patch.path), cwd=wt, check=False)
 
 
-def apply_series(wt, patches, stop=True):
+def apply_series(wt, patches, stop=True, repair=None):
     """Apply each patch in turn. Returns (applied, landed, conflicts): applied = [(patch, commit)], landed = patches that came
-    out empty (upstream has them), conflicts = [(patch, message)]. With stop, the first conflict stays in the worktree."""
+    out empty (upstream has them), conflicts = [(patch, message)]. With stop, the first conflict stays in the worktree.
+    repair(wt, patch) is asked about a patch `git am -3` could not apply: it returns 'applied' (it committed the patch),
+    'landed', or None (the conflict stands; the worktree is clean again)."""
     applied, landed, conflicts = [], [], []
     for p in patches:
         before = git('rev-parse', 'HEAD', cwd=wt).stdout.strip()
@@ -196,6 +198,14 @@ def apply_series(wt, patches, stop=True):
             landed.append(p); continue
         files = git('diff', '--name-only', '--diff-filter=U', cwd=wt, check=False).stdout.split()
         errs = [l for l in (r.stderr + r.stdout).splitlines() if re.match(r'(error|CONFLICT|Patch failed|Applying)', l)]
+        if repair:
+            git('-c', 'user.name=patches.py', '-c', 'user.email=patches@localhost', 'am', '--abort', cwd=wt, check=False)
+            git('reset', '--hard', '-q', before, cwd=wt)
+            done = repair(wt, p)
+            if done == 'applied': applied.append((p, git('rev-parse', 'HEAD', cwd=wt).stdout.strip())); continue
+            if done == 'landed': landed.append(p); continue
+            conflicts.append((p, ('conflicting files: ' + ', '.join(files) + '\n' if files else '') + '\n'.join(errs[-6:])))
+            break                      # the safe repairs did not do: the series stops here, the worktree is clean
         conflicts.append((p, ('conflicting files: ' + ', '.join(files) + '\n' if files else '') + '\n'.join(errs[-6:])))
         if stop: break
         git('am', '--abort', cwd=wt, check=False)

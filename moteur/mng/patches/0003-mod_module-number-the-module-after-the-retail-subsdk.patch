@@ -1,4 +1,4 @@
-From f23dd9e9a6437b2534b9eef9270ad019c8a5314b Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <anas@local>
 Date: Sun, 8 Nov 2026 21:50:43 +0000
 Subject: [PATCH 03/44] mod_module: number the module after the retail subsdks
@@ -9,7 +9,7 @@ Subject: [PATCH 03/44] mod_module: number the module after the retail subsdks
  1 file changed, 10 insertions(+), 4 deletions(-)
 
 diff --git a/games/totk/scripts/mod_module.py b/games/totk/scripts/mod_module.py
-index de5d0cdc..974bd21f 100644
+index de5d0cdc2dd5358af8e6a6c4efcdaf38aa7608f7..974bd21fcbd4f4bd10315104308697d3f6cfa3dc 100644
 --- a/games/totk/scripts/mod_module.py
 +++ b/games/totk/scripts/mod_module.py
 @@ -54,10 +54,16 @@ def main():

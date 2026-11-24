@@ -1,4 +1,4 @@
-From 5c35f02cc640ffb6b96b8a8cf6db313b565f3313 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Wed, 11 Nov 2026 11:47:10 +0000
 Subject: [PATCH 39/44] totk: the soft sun-shadow kernel is off by default
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h b/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
-index 08f3f1c6..232710a7 100644
+index 7025e96173b6f31f9539ebaec6d8b427669796df..0a25660af6ade9cc59d2073251f2a2013a29bacd 100644
 --- a/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
 +++ b/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
 @@ -287,11 +287,12 @@ static int ssao_entry(const char *key) {

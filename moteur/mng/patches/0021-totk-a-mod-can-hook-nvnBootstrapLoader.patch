@@ -1,4 +1,4 @@
-From ed2e5b5931f67592d539730f6a293826f7413c4d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 10:37:46 +0000
 Subject: [PATCH 21/44] totk: a mod can hook nvnBootstrapLoader
@@ -17,7 +17,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
  1 file changed, 29 insertions(+)
 
 diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
-index 0bae610d..30d3e3e9 100644
+index 8d88f23cdab323285348480660e476f080c31216..74ee1eb84fead0e50aa98f40232774f1261e79fc 100644
 --- a/games/totk/runtime/loader.c
 +++ b/games/totk/runtime/loader.c
 @@ -286,6 +286,33 @@ static void export_ios_text(const char *rewritten,const char *out) {

@@ -1,4 +1,4 @@
-From 0306bdb9431be7d7b2f937f9d8d1e2b6983e41c4 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Mon, 9 Nov 2026 09:59:38 +0000
 Subject: [PATCH 17/44] online_host: a failed socket call is logged 8 times,
@@ -11,7 +11,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index c777b0e9..c7acd7fc 100644
+index c777b0e9e2f820165c28d6cbd5da3af33e3bf2d8..c7acd7fc99090920cdc9854f3f395a1d5ac4ded0 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -21,7 +21,18 @@

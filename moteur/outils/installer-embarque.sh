@@ -13,7 +13,8 @@ SRC="${1%/}"; M="$HR/moteur"
 mkdir -p "$M" "$HR/log" "$HR/constructions" "$JX" 2>/dev/null || { echo "ÉCHEC : impossible de créer $M (dossier protégé ? Choisis-en un autre dans Application Support/Salon/dossiers.json)"; exit 1; }
 EX=(--exclude .DS_Store --exclude __pycache__)
 for d in outils tools obelisk pc compat mng steam salon; do
-  [ -d "$SRC/$d" ] && { mkdir -p "$M/$d" && rsync -a "${EX[@]}" "$SRC/$d/" "$M/$d/" || { echo "ÉCHEC : copie de $d"; exit 1; }; }
+  SUP=(); [ "$d" = mng ] && SUP=(--delete)   # la série MacNativeGames change de noms de fichiers d'une version à l'autre : les anciens partent
+  [ -d "$SRC/$d" ] && { mkdir -p "$M/$d" && rsync -a "${SUP[@]}" "${EX[@]}" "$SRC/$d/" "$M/$d/" || { echo "ÉCHEC : copie de $d"; exit 1; }; }
 done
 [ -f "$SRC/README.md" ] && cp "$SRC/README.md" "$M/README.md"
 chmod +x "$M"/outils/*.command "$M"/outils/*.sh "$M"/salon/*.command 2>/dev/null

@@ -19,8 +19,11 @@ Subcommands (Python 3.9+, stdlib and git):
   tree --out DIR [--zip FILE]  the engine tree for players, the release's engine (see below)
   check                        headers valid, no patch touches the shader chain or the generated files, the series applies
                                cleanly to the pin with no empty patch
-  bump --to SHA|main [--dry]   move the pin: re-apply the series on the new commit, drop the patches upstream has, write
-                               patches/ and .upstream-ref
+  bump --to SHA|main [--dry] [--repair [--report FILE]]
+                               move the pin: re-apply the series on the new commit, drop the patches upstream has, write
+                               patches/ and .upstream-ref. With --repair, a patch `git am -3` cannot apply gets the safe
+                               repairs of tools/serie.py (file moved or turned into a link, plain additions next to an
+                               upstream change); when they do not do, nothing is written and FILE says which patch and why
   refresh WORKTREE --to SHA    after a conflicting bump was resolved by hand in WORKTREE: its commits become the series
   relink                       make the links to seedds/nxnative in the README and the other pages point at the pinned commit (bump and
                                refresh do it, check fails while a page names another commit)
@@ -541,12 +544,20 @@ def cmd_bump(a):
     fetch(eng, old)                      # the old pin's blobs let `git am -3` merge three ways
     sha = resolve_target(eng, a.to)
     fetch(eng, sha)
-    s = P.Scratch(eng, sha, a.tmp, keep=not a.dry)
+    s = P.Scratch(eng, sha, a.tmp, keep=not a.dry and not a.repair)
+    repaired = []
+    def repair(wt, p):
+        serie = importlib.import_module('serie')      # tools/serie.py: the same repairs as for MacNativeGames
+        b = serie.rejouer(wt, old, [p.path], a.report)
+        if not b['ok']: return None
+        if b['repares']: repaired.append(f"{p.file}: " + '; '.join(b['repares'][0]['notes']))
+        return 'landed' if b['deja'] else 'applied'
     try:
-        applied, landed, conflicts = P.apply_series(s.dir, patches, stop=not a.dry)
+        applied, landed, conflicts = P.apply_series(s.dir, patches, stop=not a.dry, repair=repair if a.repair else None)
         P.report(old, sha, applied, landed, conflicts)
+        for r in repaired: say(f'repaired: {r}')
         if conflicts:
-            if a.dry: s.close(); return 1
+            if a.dry or a.repair: s.close(); return 3 if a.repair else 1
             p = conflicts[0][0]
             say(f'\nStopped at {p.file}. The conflict is left in {s.dir}:\n'
                 f'  resolve it there, `git am --continue`, apply the rest with `git am -3 <patches>`, then run\n'
@@ -600,7 +611,9 @@ def main(argv=None):
     s = sub.add_parser('tree'); s.add_argument('--out', required=True, help='the folder for the tree (emptied when it is an earlier tree)'); s.add_argument('--zip', help='also write the deterministic zip of the tree'); s.set_defaults(f=cmd_tree)
     sub.add_parser('status').set_defaults(f=cmd_status)
     sub.add_parser('check').set_defaults(f=cmd_check)
-    s = sub.add_parser('bump'); s.add_argument('--to', required=True, help='the new upstream commit, or a branch such as main'); s.add_argument('--dry', action='store_true'); s.set_defaults(f=cmd_bump)
+    s = sub.add_parser('bump'); s.add_argument('--to', required=True, help='the new upstream commit, or a branch such as main'); s.add_argument('--dry', action='store_true')
+    s.add_argument('--repair', action='store_true', help='try the safe repairs of tools/serie.py on a patch that does not apply'); s.add_argument('--report', help='with --repair: where to write what stopped the bump')
+    s.set_defaults(f=cmd_bump)
     sub.add_parser('relink').set_defaults(f=cmd_relink)
     s = sub.add_parser('refresh'); s.add_argument('worktree'); s.add_argument('--to', required=True); s.set_defaults(f=cmd_refresh)
     a = ap.parse_args(argv)

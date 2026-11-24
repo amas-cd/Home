@@ -1,4 +1,4 @@
-From cbb90d529675d3b9a334c37e16cc236d4f3ed811 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Sun, 8 Nov 2026 22:16:06 +0000
 Subject: [PATCH 06/44] frontend: TOTK_SCREEN_ID picks the borderless window's
@@ -11,10 +11,10 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 5 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/runtime/frontend.m b/games/totk/runtime/frontend.m
-index 66684088..94d8e774 100644
+index a795568362adb05fe4d5e7209d01f14771d4414e..8636b0d76ee536643bf8f293fa9ae81e3bd36b2a 100644
 --- a/games/totk/runtime/frontend.m
 +++ b/games/totk/runtime/frontend.m
-@@ -914,7 +914,11 @@ with it (a test's frames and pictures then say nothing). */
+@@ -770,7 +770,11 @@ with it (a test's frames and pictures then say nothing). */
      window.styleMask=NSWindowStyleMaskTitled|NSWindowStyleMaskFullSizeContentView;window.titlebarAppearsTransparent=YES;window.titleVisibility=NSWindowTitleHidden;window.movable=NO;
      for(NSUInteger b=NSWindowCloseButton;b<=NSWindowZoomButton;b++)[window standardWindowButton:(NSWindowButton)b].hidden=YES;
      NSApp.presentationOptions=NSApplicationPresentationHideMenuBar|NSApplicationPresentationHideDock;

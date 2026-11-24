@@ -1,4 +1,4 @@
-From b24c9b74490f2a0c0f05b1d6eedee6c93639659d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Wed, 11 Nov 2026 12:40:04 +0000
 Subject: [PATCH 42/44] totk online: with TOTK_ONLINE_LOG, log the first
@@ -14,7 +14,7 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 16 insertions(+)
 
 diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
-index cc779222..5aadd0cb 100644
+index cc779222bdb50271b51280217dca94142b90c5cc..5aadd0cbb06cf586ffac9b89f70c877f7ffa86ca 100644
 --- a/games/totk/runtime/online_host.c
 +++ b/games/totk/runtime/online_host.c
 @@ -97,6 +97,21 @@ static void online_stats(int fd) {

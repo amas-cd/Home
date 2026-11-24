@@ -1,4 +1,4 @@
-From 80da4212114befd91d3cc5fcc43fa9badb089a23 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Wed, 11 Nov 2026 13:10:18 +0000
 Subject: [PATCH 44/44] totk: with TOTK_RT=0 the present thread asks for
@@ -14,10 +14,10 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 9 insertions(+), 1 deletion(-)
 
 diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
-index dd5ab51b..c13af9ac 100644
+index 3f572a3a7f17b205d7b7eea5c7d21d4fbad0678b..ebbe6580523cea1aeb57f9612fd89236cc7ef126 100644
 --- a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
 +++ b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
-@@ -3135,7 +3135,15 @@ static void slow_emit(uint64_t f) {
+@@ -3457,7 +3457,15 @@ static void slow_emit(uint64_t f) {
     MacBook Air M5: 1.4-2 GHz, 40-50 fps; Ocarina of Time's market on nxnative went from 10-16 to 60 fps with DM_RT=0). */
  static int rt_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("TOTK_RT"); if (!e || !*e) e = getenv("DM_RT"); v = !(e && !strcmp(e, "0")); if (!v) LOG("[nvn] TOTK_RT=0: the present thread gets no time-constraint policy (QoS only)"); } return v; }
  static void set_time_constraint_comp(uint64_t period_ns, uint64_t comp_ns) {

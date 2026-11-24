@@ -1,4 +1,4 @@
-From a90089cd6f2a51d57815ed1a973b495d1430a489 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Anas <assosbs9@gmail.com>
 Date: Wed, 11 Nov 2026 13:02:23 +0000
 Subject: [PATCH 43/44] nvn: a command buffer that bound a pool other than the
@@ -16,10 +16,10 @@ Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
  1 file changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
-index 85399783..dd5ab51b 100644
+index 9694527a62beacf61b2fc495b840f5bef3ba9328..3f572a3a7f17b205d7b7eea5c7d21d4fbad0678b 100644
 --- a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
 +++ b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
-@@ -2138,8 +2138,11 @@ static void bind_handles_rec(NVNcommandBuffer *c, int op, int st, int first, int
+@@ -2348,8 +2348,11 @@ static void bind_handles_rec(NVNcommandBuffer *c, int op, int st, int first, int
          if ((tb || sb) && deferred) { static _Atomic int said; if (!atomic_exchange(&said, 1)) LOG("【红】延迟绑定的句柄在提交时才读：非首个描述符池的编号偏移还没加到它们上"); }
          for (int i = 0; i < n && (tb || sb) && !deferred; i++) {
              uint64_t v = r->h[i], tid = v & 0xfffff, sid = v >> 20;
