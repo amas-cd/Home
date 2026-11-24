@@ -1920,10 +1920,12 @@ struct Background: View {
         .clipped().ignoresSafeArea()
     }
 }
+/// Le mouvement de Home quand on se déplace (tuiles, pastilles, tuiles de l'accueil) : court, net, sans rebond
+let glisse = Animation.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.24)
 struct Tile: View {
     let image: NSImage; let selected: Bool; var isIcon = false
     var body: some View {
-        let cote: CGFloat = selected ? 250 : 176, rayon: CGFloat = selected ? 34 : 25
+        let cote: CGFloat = selected ? 226 : 176, rayon: CGFloat = selected ? 31 : 25
         ZStack {
             // la signature de Home : deux cartes, orange et bleue, qui dépassent en éventail derrière le jeu visé
             RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(LinearGradient(colors: Library.orange, startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -1939,9 +1941,9 @@ struct Tile: View {
             .overlay(RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
             .shadow(color: .black.opacity(0.55), radius: selected ? 26 : 12, y: selected ? 16 : 8)
         }
-        .padding(.horizontal, selected ? 46 : 0)   // la place des deux cartes qui dépassent
+        .padding(.horizontal, selected ? 40 : 0)   // la place des deux cartes qui dépassent
         .opacity(selected ? 1 : 0.8)
-        .animation(.spring(response: 0.42, dampingFraction: 0.7), value: selected)
+        .animation(glisse, value: selected)
     }
 }
 struct Hint: View {
@@ -2030,7 +2032,7 @@ struct AccueilView: View {
                     ForEach(Array(choix.enumerated()), id: \.element.cle) { i, c in
                         tuile(c, vise: i == etat.index)
                             .onTapGesture { if var e = lib.accueil { e.index = i; lib.accueil = e; lib.accueilValider() } }
-                            .onHover { dedans in if dedans, var e = lib.accueil, e.index != i { e.index = i; withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { lib.accueil = e } } }
+                            .onHover { dedans in if dedans, var e = lib.accueil, e.index != i { e.index = i; withAnimation(glisse) { lib.accueil = e } } }
                     }
                 }.padding(.top, 54).id("tuiles-\(etat.etape)").transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
                 Spacer(minLength: 20)
@@ -2071,8 +2073,8 @@ struct AccueilView: View {
         .overlay(RoundedRectangle(cornerRadius: 36, style: .continuous).strokeBorder(.white.opacity(vise ? 0.95 : 0), lineWidth: 4))
         .shadow(color: c.teinte[0].opacity(vise ? 0.65 : 0), radius: 44, y: 14)
         .shadow(color: .black.opacity(0.45), radius: 18, y: 12)
-        .scaleEffect(vise ? 1.06 : 0.96).saturation(vise ? 1 : 0.75).opacity(vise ? 1 : 0.62)
-        .animation(.spring(response: 0.35, dampingFraction: 0.72), value: vise)
+        .scaleEffect(vise ? 1.03 : 0.97).saturation(vise ? 1 : 0.75).opacity(vise ? 1 : 0.62)
+        .animation(glisse, value: vise)
     }
     /// L'aide d'un bouton, en pastille
     func aide(_ k: Key, _ texte: String) -> some View {
@@ -2194,7 +2196,7 @@ struct MenuView: View {
                                 .overlay(Circle().stroke(it.destructive && !sel ? MenuView.rouge.opacity(0.8) : .white.opacity(sel ? 0 : 0.24), lineWidth: 1.5))
                                 .foregroundStyle(sel ? (it.destructive ? Color(red: 0.8, green: 0.15, blue: 0.15) : .black) : (it.destructive ? MenuView.rouge : .white))
                                 .shadow(color: .black.opacity(sel ? 0.45 : 0), radius: 18, y: 8)
-                                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: index)
+                                .animation(glisse, value: index)
                                 .contentShape(Circle()).onTapGesture { choisir(i) }
                                 .onHover { dedans in if dedans, index != i { index = i } }
                         }
@@ -2508,14 +2510,14 @@ struct DockProgression: View {
 struct AddTile: View {
     let selected: Bool
     var body: some View {
-        let cote: CGFloat = selected ? 250 : 176, rayon: CGFloat = selected ? 34 : 25
+        let cote: CGFloat = selected ? 226 : 176, rayon: CGFloat = selected ? 31 : 25
         ZStack {
             RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(.white.opacity(selected ? 0.14 : 0.04))
             RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0.3), style: StrokeStyle(lineWidth: selected ? 4 : 2, dash: selected ? [] : [7, 7]))
             Image(systemName: "plus").font(.system(size: selected ? 60 : 44, weight: .light)).foregroundStyle(.white.opacity(selected ? 1 : 0.7))
         }
         .frame(width: cote, height: cote)
-        .animation(.spring(response: 0.42, dampingFraction: 0.7), value: selected)
+        .animation(glisse, value: selected)
     }
 }
 struct PickerView: View {
@@ -2573,7 +2575,7 @@ struct Screen: View {
         let g = lib.current; let a = g.flatMap { lib.art[$0.id] }
         ZStack {
             Group { if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(g?.id ?? "salon-plus")
-                .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 1.04)), removal: .opacity)).animation(.easeInOut(duration: 0.7), value: g?.id)
+                .transition(.opacity).animation(.easeInOut(duration: 0.5), value: g?.id)
             let veiled = lib.menu != nil || lib.picker != nil || lib.accueil != nil
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 10) {
@@ -2582,7 +2584,7 @@ struct Screen: View {
                             .padding(.horizontal, 22).padding(.vertical, 10)
                             .background(Capsule().fill(.white.opacity(i == lib.categoryIndex ? 1 : 0.10)))
                             .foregroundStyle(i == lib.categoryIndex ? .black : .white)
-                            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: lib.categoryIndex)
+                            .animation(glisse, value: lib.categoryIndex)
                             .onTapGesture { lib.categoryIndex = i; lib.selected = 0; Sounds.shared.play("onglet") }
                     }
                     Image(systemName: "ellipsis").font(.system(size: 17, weight: .bold)).frame(width: 44, height: 44).background(Circle().fill(.white.opacity(0.10))).onTapGesture { lib.openPlusMenu() }.help("Menu")
@@ -2619,7 +2621,7 @@ struct Screen: View {
                                 .onTapGesture { lib.openOptions() }
                         }.padding(.top, 14)
                     }.padding(.horizontal, 84).padding(.bottom, 22).foregroundStyle(.white)
-                     .id("info-\(g.id)").transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                     .id("info-\(g.id)").transition(.opacity)
                 } else {
                     // la case + : ajouter un jeu
                     VStack(alignment: .leading, spacing: 10) {
@@ -2628,7 +2630,7 @@ struct Screen: View {
                             .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white)).padding(.top, 14)
                             .onTapGesture { lib.openAddMenu() }
                     }.padding(.horizontal, 84).padding(.bottom, 22).foregroundStyle(.white)
-                     .id("info-plus").transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+                     .id("info-plus").transition(.opacity)
                 }
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -2636,13 +2638,13 @@ struct Screen: View {
                             ForEach(Array(lib.visible.enumerated()), id: \.element.id) { i, game in
                                 Tile(image: lib.cover(game), selected: i == lib.selected, isIcon: lib.art[game.id]?.cover == nil)
                                     .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: i == lib.selected) } }.overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }.id(game.id).onTapGesture { if lib.selected == i { lib.launch() } else { lib.selected = i } }
-                                    .offset(y: appeared ? 0 : 80).opacity(appeared ? 1 : 0)
-                                    .animation(.spring(response: 0.55, dampingFraction: 0.75).delay(Double(min(i, 8)) * 0.05), value: appeared)
+                                    .offset(y: appeared ? 0 : 36).opacity(appeared ? 1 : 0)
+                                    .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45).delay(Double(min(i, 8)) * 0.05), value: appeared)
                             }
                             AddTile(selected: lib.selected >= lib.visible.count).id("salon-plus")
                                 .onTapGesture { if lib.selected >= lib.visible.count { lib.openAddMenu() } else { lib.selected = lib.visible.count; Sounds.shared.play("deplacer") } }
-                                .offset(y: appeared ? 0 : 80).opacity(appeared ? 1 : 0)
-                                .animation(.spring(response: 0.55, dampingFraction: 0.75).delay(Double(min(lib.visible.count, 8)) * 0.05), value: appeared)
+                                .offset(y: appeared ? 0 : 36).opacity(appeared ? 1 : 0)
+                                .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45).delay(Double(min(lib.visible.count, 8)) * 0.05), value: appeared)
                         }.padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 30)
                     }.scrollClipDisabled()   // l'ombre des jaquettes (rayon 30) dépassait le haut du défilement et y était coupée net
                      .onChange(of: lib.selected) { _, _ in withAnimation(.easeInOut(duration: 0.3)) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
@@ -2680,7 +2682,7 @@ struct Screen: View {
                 VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.bottom, 130) }
                     .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }
             }
-        }.onReceive(clock) { now = $0 }.animation(.easeInOut(duration: 0.35), value: lib.current?.id).animation(.spring(response: 0.38, dampingFraction: 0.84), value: lib.menu?.title).animation(.spring(response: 0.38, dampingFraction: 0.84), value: lib.picker?.game.id)
+        }.onReceive(clock) { now = $0 }.animation(.easeInOut(duration: 0.25), value: lib.current?.id).animation(.easeInOut(duration: 0.22), value: lib.menu?.title).animation(.easeInOut(duration: 0.22), value: lib.picker?.game.id)
     }
 }
 
@@ -2786,7 +2788,7 @@ struct HUDView: View {
                                     .background(Circle().fill(on ? AnyShapeStyle(.white) : AnyShapeStyle(.white.opacity(0.12))))
                                     .overlay(Circle().stroke(.white.opacity(on ? 0 : 0.16), lineWidth: 1))
                                     .foregroundStyle(on ? .black : .white).opacity(lib.quickSlider && !on ? 0.45 : 1)
-                                    .animation(.spring(response: 0.28, dampingFraction: 0.75), value: lib.quickIndex)
+                                    .animation(glisse, value: lib.quickIndex)
                             }
                         }
                         .padding(.horizontal, 22).padding(.vertical, 14)
@@ -3959,8 +3961,8 @@ extension Library {
         guard var e = accueil else { return }
         let n = accueilChoix(e).count
         switch k {
-        case "left": if e.index > 0 { e.index -= 1; Sounds.shared.play("deplacer"); withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { accueil = e } }
-        case "right": if e.index < n - 1 { e.index += 1; Sounds.shared.play("deplacer"); withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { accueil = e } }
+        case "left": if e.index > 0 { e.index -= 1; Sounds.shared.play("deplacer"); withAnimation(glisse) { accueil = e } }
+        case "right": if e.index < n - 1 { e.index += 1; Sounds.shared.play("deplacer"); withAnimation(glisse) { accueil = e } }
         case "ok": accueilValider()
         case "back":
             Sounds.shared.play("retour")
