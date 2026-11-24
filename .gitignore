@@ -20,3 +20,6 @@ moteur/obelisk/legendary-path.txt
 *.xcz
 prod.keys
 title.keys
+
+# réglages personnels de Claude Code
+.claude/settings.local.json

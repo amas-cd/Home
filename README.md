@@ -28,6 +28,8 @@ Il faut aussi :
 | `moteur/patches/` | Les patchs appliqués à nxnative (online, 60 fps TotK, plein écran, volume…) |
 | `moteur/tools/` | Gestion du moteur nxnative (version figée, patchs, notes de version) |
 | `moteur/obelisk/` | Lancement direct des jeux Epic via Legendary |
+| `scripts/installer-local.sh` | Recopie le dépôt dans `/Applications/Home/moteur`, puis compile et installe Home sur ton Mac |
+| `CLAUDE.md`, `.claude/` | Le contexte pour Claude Code, et le rappel de demander avant d'envoyer une mise à jour |
 
 ## Compiler sur son Mac
 
