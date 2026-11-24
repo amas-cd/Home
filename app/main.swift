@@ -1787,98 +1787,57 @@ enum BGM {
 // Connexion à Epic Games dans une fenêtre de Home : la page de connexion d'Epic (la vraie, chargée depuis son site) s'affiche dans
 // une vue web ; une fois connecté, Epic renvoie une page qui contient le code de connexion, que Home lit tout seul — rien à copier.
 // Home ne lit ni l'identifiant ni le mot de passe : seule cette dernière page est regardée.
-/// Le remplissage automatique de macOS, à la demande : macOS ajoute au menu Édition un sous-menu « Remplissage automatique » avec
-/// « Mots de passe… » (Touch ID, puis choix du compte), qui remplit le champ où se trouve le curseur — y compris dans une page web
-/// affichée par Home. On retrouve cette commande dans le menu et on la déclenche ; si macOS ne l'a pas mise, on le dit.
-/// La fenêtre de connexion à Steam : une petite page web dessinée par Home (pas une invite de macOS), avec le nom du compte et le mot
-/// de passe, ou le code Steam Guard. Ce qui est tapé revient par un message de la page, jamais par une adresse, et n'est écrit nulle part.
-final class FormulaireSteam: NSObject, WKScriptMessageHandler, NSWindowDelegate {
+/// La fenêtre de connexion à Steam : une fenêtre sombre de Home, avec de vrais champs de macOS marqués « nom de compte » et « mot de
+/// passe » — c'est dans ces champs-là que macOS propose lui-même ses mots de passe enregistrés (la clé qui apparaît dans le champ),
+/// comme sur un site. Ce qui est tapé n'est écrit nulle part.
+final class FormulaireSteam: NSObject, NSWindowDelegate {
     static var enCours: FormulaireSteam?
-    private var fenetre: NSWindow?; private var fin: (([String]?) -> Void)?; private weak var web: WKWebView?
+    private var fenetre: NSWindow?; private var fin: (([String]?) -> Void)?; private var champs: [NSTextField] = []
     /// code == nil : nom du compte et mot de passe (fin reçoit [nom, mot de passe]) ; sinon le texte qui demande le code (fin reçoit [code])
     static func ouvrir(code: String? = nil, _ fin: @escaping ([String]?) -> Void) {
         enCours?.terminer(nil)
         let c = FormulaireSteam(); c.fin = fin; enCours = c
-        let conf = WKWebViewConfiguration(); conf.userContentController.add(c, name: "home")
-        let h: CGFloat = code == nil ? 560 : 440
-        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 460, height: h), configuration: conf); c.web = web
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: h), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
-        w.title = "Connexion à Steam"; w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden; w.appearance = NSAppearance(named: .darkAqua); w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.09, alpha: 1)
-        w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating; w.center(); c.fenetre = w
-        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); w.makeFirstResponder(web)
-        let logo = (Bundle.main.resourceURL?.appendingPathComponent("logos/steam.png")).flatMap { try? Data(contentsOf: $0) }.map { "<img src='data:image/png;base64,\($0.base64EncodedString())'>" } ?? ""
-        let texte = (code ?? "").replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
-        let champs = code == nil
-            ? "<input id='a' name='username' autocomplete='username' placeholder='Nom du compte' autofocus><input id='b' name='password' type='password' autocomplete='current-password' placeholder='Mot de passe'><a onmousedown='event.preventDefault()' onclick=\"webkit.messageHandlers.home.postMessage(['cle'])\">Mes mots de passe</a>"
-            : "<p>\(texte)</p><input id='a' name='code' autocomplete='one-time-code' placeholder='Code' autofocus style='text-align:center;letter-spacing:6px;text-transform:uppercase'>"
-        web.loadHTMLString("""
-        <html><head><meta charset='utf-8'><style>
-        *{box-sizing:border-box;font-family:-apple-system,system-ui;-webkit-user-select:none}
-        body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;padding:0 54px;
-          background:radial-gradient(circle at 80% 0%,#1b4f9c 0%,transparent 55%),radial-gradient(circle at 0% 100%,#3a1d6e 0%,transparent 50%),#0a0d17}
-        img{width:84px;height:84px;border-radius:50%;margin-bottom:6px}
-        h1{margin:0 0 12px;font-size:22px;font-weight:900;letter-spacing:2px;font-stretch:expanded;text-transform:uppercase}
-        p{margin:0 0 4px;text-align:center;opacity:.7;font-size:14px;line-height:1.4}
-        input{width:100%;height:50px;border-radius:25px;border:1.5px solid rgba(255,255,255,.18);background:rgba(0,0,0,.45);color:#fff;font-size:16px;padding:0 22px;outline:none;-webkit-user-select:text}
-        input:focus{border-color:#fff}
-        button{width:100%;height:50px;border-radius:25px;border:0;background:#fff;color:#000;font-size:16px;font-weight:700;margin-top:8px}
-        button:active{opacity:.8}
-        a{font-size:13px;opacity:.65;cursor:default;text-decoration:underline}
-        </style></head><body><form onsubmit="event.preventDefault();var v=[document.getElementById('a').value];var b=document.getElementById('b');if(b)v.push(b.value);if(v.every(function(x){return x.length>0}))webkit.messageHandlers.home.postMessage(['ok'].concat(v))" style='display:contents'>
-        \(logo)<h1>Steam</h1>\(champs)<button type='submit'>\(code == nil ? "Se connecter" : "Valider")</button></form></body></html>
-        """, baseURL: nil)
+        let l: CGFloat = 440, h: CGFloat = code == nil ? 470 : 400
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: l, height: h), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        w.title = "Connexion à Steam"; w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden; w.appearance = NSAppearance(named: .darkAqua); w.isMovableByWindowBackground = true
+        w.backgroundColor = NSColor(red: 0.05, green: 0.08, blue: 0.16, alpha: 1)
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: l, height: h)); var y = h - 150
+        if let i = Symbole.logo("steam") { let iv = NSImageView(frame: NSRect(x: (l - 84) / 2, y: h - 130, width: 84, height: 84)); iv.image = i; iv.imageScaling = .scaleProportionallyUpOrDown; iv.wantsLayer = true; iv.layer?.cornerRadius = 42; iv.layer?.masksToBounds = true; v.addSubview(iv) }
+        let titre = NSTextField(labelWithString: "STEAM"); titre.font = NSFont.systemFont(ofSize: 22, weight: .black); titre.alignment = .center; titre.frame = NSRect(x: 0, y: y - 34, width: l, height: 30); v.addSubview(titre); y -= 54
+        if let code { let t = NSTextField(wrappingLabelWithString: code); t.alignment = .center; t.textColor = .secondaryLabelColor; t.font = .systemFont(ofSize: 14); t.frame = NSRect(x: 50, y: y - 44, width: l - 100, height: 44); v.addSubview(t); y -= 56 }
+        func champ(_ f: NSTextField, _ invite: String, _ type: NSTextContentType) { f.placeholderString = invite; f.contentType = type; f.font = .systemFont(ofSize: 16); f.controlSize = .large; f.bezelStyle = .roundedBezel; f.frame = NSRect(x: 50, y: y - 34, width: l - 100, height: 34); v.addSubview(f); c.champs.append(f); y -= 48 }
+        if code == nil { champ(NSTextField(), "Nom du compte", .username); champ(NSSecureTextField(), "Mot de passe", .password) }
+        else { let f = NSTextField(); f.alignment = .center; champ(f, "Code", .oneTimeCode) }
+        if c.champs.count == 2 { c.champs[0].nextKeyView = c.champs[1]; c.champs[1].nextKeyView = c.champs[0] }
+        let b = NSButton(title: code == nil ? "Se connecter" : "Valider", target: c, action: #selector(FormulaireSteam.valider)); b.bezelStyle = .rounded; b.controlSize = .large; b.keyEquivalent = "\r"
+        b.frame = NSRect(x: 50, y: y - 46, width: l - 100, height: 36); v.addSubview(b)
+        w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = v; w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating; w.center(); c.fenetre = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); w.makeFirstResponder(c.champs.first)
     }
-    func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
-        guard let t = m.body as? [String], let quoi = t.first else { return }
-        if quoi == "cle" { fenetre?.makeFirstResponder(web); if !MotsDePasse.remplir() { NSSound.beep() } }
-        else if quoi == "ok" { terminer(Array(t.dropFirst())) }
+    @objc func valider() {
+        let v = champs.map { $0.stringValue }
+        guard v.allSatisfy({ !$0.isEmpty }) else { NSSound.beep(); return }
+        terminer(v.count == 1 ? [v[0].trimmingCharacters(in: .whitespacesAndNewlines)] : v)
     }
     func windowWillClose(_ n: Notification) { terminer(nil) }
     private func terminer(_ v: [String]?) {
         guard let f = fin else { return }; fin = nil
-        web?.configuration.userContentController.removeScriptMessageHandler(forName: "home")
+        champs.forEach { $0.stringValue = "" }; champs = []
         fenetre?.delegate = nil; fenetre?.close(); fenetre = nil; FormulaireSteam.enCours = nil
         f(v)
     }
 }
-enum MotsDePasse {
-    @discardableResult static func remplir() -> Bool {
-        guard let edition = NSApp.mainMenu?.items.compactMap({ $0.submenu }).first(where: { m in m.items.contains { $0.action == #selector(NSText.paste(_:)) } }) else { return false }
-        edition.update()
-        for it in edition.items {
-            guard let sous = it.submenu else { continue }
-            sous.update()
-            for x in sous.items {
-                let t = x.title.lowercased()
-                if let a = x.action, t.contains("passe") || t.contains("password") { log("Remplissage automatique : « \(it.title) → \(x.title) »"); return NSApp.sendAction(a, to: x.target, from: x) }
-            }
-        }
-        log("Remplissage automatique : pas de commande « Mots de passe » dans le menu Édition (\(edition.items.map { $0.title }.filter { !$0.isEmpty }.joined(separator: ", ")))")
-        return false
-    }
-    /// Un bouton « Mes mots de passe » pour une fenêtre de connexion
-    static func bouton(cible: AnyObject, action: Selector) -> NSButton {
-        let b = NSButton(title: "  Mes mots de passe", target: cible, action: action)
-        b.image = NSImage(systemSymbolName: "key.fill", accessibilityDescription: nil); b.imagePosition = .imageLeading; b.bezelStyle = .rounded; b.controlSize = .large
-        return b
-    }
-}
 final class ConnexionEpic: NSObject, WKNavigationDelegate, NSWindowDelegate {
     static var enCours: ConnexionEpic?
-    private var fenetre: NSWindow?; private var fin: ((String?) -> Void)?; private weak var web: WKWebView?
-    @objc func remplir() { fenetre?.makeFirstResponder(web); if !MotsDePasse.remplir() { NSSound.beep() } }
+    private var fenetre: NSWindow?; private var fin: ((String?) -> Void)?
     static func ouvrir(_ fin: @escaping (String?) -> Void) {
         enCours?.terminer(nil)
         let c = ConnexionEpic(); c.fin = fin; enCours = c
-        let vue = NSView(frame: NSRect(x: 0, y: 0, width: 540, height: 820))
-        let web = WKWebView(frame: NSRect(x: 0, y: 60, width: 540, height: 760)); web.navigationDelegate = c; web.autoresizingMask = [.width, .height]; vue.addSubview(web)
+        // la page d'Epic telle quelle : si macOS propose ses mots de passe dans les pages des apps, il le fait ici tout seul
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 540, height: 800)); web.navigationDelegate = c
         web.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
-        // sous la page : le remplissage automatique de macOS, à portée de clic (clique d'abord dans le champ à remplir)
-        let cle = MotsDePasse.bouton(cible: c, action: #selector(ConnexionEpic.remplir)); cle.frame = NSRect(x: 16, y: 14, width: 210, height: 32); vue.addSubview(cle)
-        let aide = NSTextField(labelWithString: "Clique dans un champ, puis ici."); aide.frame = NSRect(x: 236, y: 20, width: 290, height: 18); aide.textColor = .secondaryLabelColor; aide.font = .systemFont(ofSize: 12); vue.addSubview(aide)
-        c.web = web
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 820), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        w.title = "Connexion à Epic Games"; w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = vue; w.isReleasedWhenClosed = false; w.delegate = c
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 800), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.title = "Connexion à Epic Games"; w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c
         w.level = .floating; w.center(); c.fenetre = w
         NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
         web.load(URLRequest(url: URL(string: "https://legendary.gl/epiclogin")!))
@@ -4571,8 +4530,7 @@ extension Library {
             }
         }
     }
-    /// Se connecter à Epic : une fenêtre de Home affiche la page de connexion d'Epic ; le code est lu tout seul à la fin, et le bouton
-    /// « Mes mots de passe » y appelle le remplissage automatique de macOS
+    /// Se connecter à Epic : une fenêtre de Home affiche la page de connexion d'Epic ; le code est lu tout seul à la fin
     func connexionEpic(retour: @escaping () -> Void) { connexionEpicFenetre(retour: retour) }
     private func finirEpic(_ code: String, retour: @escaping () -> Void) {
         toast = "Connexion à Epic…"
