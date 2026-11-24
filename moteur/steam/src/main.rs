@@ -1,13 +1,14 @@
 //! home-steam — Steam dans Home, sans Obelisk : connexion par QR code, bibliothèque, téléchargement d'un jeu Windows et plan de
 //! lancement, avec steam-kit (le code Steam d'Obelisk, GPL-3.0). Chaque commande écrit du JSON, une ligne par événement.
 //!
-//!   home-steam etat                      {"compte": "nom" | null}
+//!   home-steam etat                      {"compte": "nom" | null, "comptes": ["nom", …]}
+//!   home-steam compte-choisir NOM        change de compte actif (plusieurs comptes peuvent être connectés)
 //!   home-steam connexion                 {"ev":"qr","url":…} à montrer en QR code, puis {"ev":"connecte","compte":…}
 //!   home-steam connexion-identifiants    connexion directe : lit sur l'entrée « nom du compte », puis « mot de passe » (une ligne chacun) ;
 //!                                        {"ev":"telephone"} = à valider dans l'app Steam, ou {"ev":"code","par":"email"|"app"} = un code Steam
 //!                                        Guard attendu sur l'entrée ; puis {"ev":"connecte","compte":…}. Le mot de passe part chiffré
 //!                                        vers Steam (clé RSA de Steam) et n'est ni gardé ni écrit nulle part.
-//!   home-steam deconnexion               oublie le compte (trousseau)
+//!   home-steam deconnexion               oublie le compte actif (trousseau) ; un autre compte connecté devient actif
 //!   home-steam bibliotheque              [{"app": 730, "nom": "…", "windows": true}, …]
 //!   home-steam installer APP             télécharge le jeu Windows (et, s'ils manquent, le moteur Voile et les composants de Valve) ;
 //!                                        {"ev":"progress","frac":…} puis {"ev":"installe","app":…,"nom":…,"dossier":…}
@@ -81,6 +82,34 @@ fn dehexa(s: &str) -> Option<Vec<u8>> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
 }
 
+// Plusieurs comptes : chacun a sa session dans le trousseau (sous son nom de compte), et <Home>/pc/steam/comptes.json dit lesquels
+// existent (nom et identifiant Steam) et lequel est actif. Un jeu installé se relance avec le compte qui l'a installé.
+fn fichier_comptes() -> PathBuf {
+    racine().join("pc/steam/comptes.json")
+}
+
+fn lire_comptes() -> (Option<String>, Vec<(String, u64)>) {
+    let v: serde_json::Value = std::fs::read(fichier_comptes()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(serde_json::json!({}));
+    let liste: Vec<(String, u64)> = v["comptes"].as_array().into_iter().flatten().filter_map(|c| Some((c["nom"].as_str()?.to_owned(), c["steam_id"].as_u64()?))).collect();
+    let actif = v["actif"].as_str().map(str::to_owned).filter(|a| liste.iter().any(|c| &c.0 == a)).or_else(|| liste.first().map(|c| c.0.clone()));
+    (actif, liste)
+}
+
+fn ecrire_comptes(actif: Option<&str>, liste: &[(String, u64)]) {
+    let f = fichier_comptes();
+    if let Some(d) = f.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let v = serde_json::json!({"actif": actif, "comptes": liste.iter().map(|c| serde_json::json!({"nom": c.0, "steam_id": c.1})).collect::<Vec<_>>()});
+    let _ = std::fs::write(f, serde_json::to_vec_pretty(&v).unwrap_or_default());
+}
+
+/// Le nom sous lequel une session est rangée dans le trousseau : le nom du compte, réduit aux caractères sûrs
+fn cle(nom: &str) -> String {
+    let c: String = nom.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    if c.is_empty() { COMPTE.into() } else { format!("compte-{c}") }
+}
+
 fn garder(tokens: &AuthTokens) -> bool {
     let valeur = hexa(format!("{}\n{}", tokens.account_name, tokens.refresh_token).as_bytes());
     // security -i lit sa commande sur l'entrée : le jeton n'apparaît pas dans la liste des processus
@@ -88,13 +117,21 @@ fn garder(tokens: &AuthTokens) -> bool {
         return false;
     };
     if let Some(mut entree) = p.stdin.take() {
-        let _ = writeln!(entree, "add-generic-password -U -s {SERVICE} -a {COMPTE} -l \"Home — session Steam\" -w {valeur}");
+        let _ = writeln!(entree, "add-generic-password -U -s {SERVICE} -a {} -l \"Home — session Steam\" -w {valeur}", cle(&tokens.account_name));
     }
-    p.wait().map(|s| s.success()).unwrap_or(false)
+    if !p.wait().map(|s| s.success()).unwrap_or(false) {
+        return false;
+    }
+    // le compte rejoint la liste et devient le compte actif
+    let (_, mut liste) = lire_comptes();
+    liste.retain(|c| c.0 != tokens.account_name);
+    liste.push((tokens.account_name.clone(), tokens.steam_id));
+    ecrire_comptes(Some(&tokens.account_name), &liste);
+    true
 }
 
-fn compte() -> Option<AuthTokens> {
-    let o = Command::new("/usr/bin/security").args(["find-generic-password", "-s", SERVICE, "-a", COMPTE, "-w"]).stderr(Stdio::null()).output().ok()?;
+fn session(nom: &str) -> Option<AuthTokens> {
+    let o = Command::new("/usr/bin/security").args(["find-generic-password", "-s", SERVICE, "-a", &cle(nom), "-w"]).stderr(Stdio::null()).output().ok()?;
     if !o.status.success() {
         return None;
     }
@@ -103,8 +140,33 @@ fn compte() -> Option<AuthTokens> {
     AuthTokens::restore(nom.to_owned(), jeton.to_owned()).ok()
 }
 
+/// Le compte actif
+fn compte() -> Option<AuthTokens> {
+    session(&lire_comptes().0?)
+}
+
+/// Le compte qui a installé ce jeu (son reçu est dans les installations de ce compte), sinon le compte actif
+fn compte_du_jeu(app_id: u32) -> Option<AuthTokens> {
+    let (_, liste) = lire_comptes();
+    for (nom, id) in &liste {
+        let recus = racine().join(format!("pc/steam/steam-installations-{id}.json"));
+        let v: serde_json::Value = std::fs::read(&recus).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(serde_json::json!([]));
+        if v.as_array().into_iter().flatten().any(|j| j["appId"].as_u64() == Some(app_id as u64)) {
+            if let Some(t) = session(nom) {
+                return Some(t);
+            }
+        }
+    }
+    compte()
+}
+
+/// Oublie le compte actif ; un autre compte connecté, s'il y en a un, devient actif
 fn oublier() {
-    let _ = Command::new("/usr/bin/security").args(["delete-generic-password", "-s", SERVICE, "-a", COMPTE]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let (actif, mut liste) = lire_comptes();
+    let Some(a) = actif else { return };
+    let _ = Command::new("/usr/bin/security").args(["delete-generic-password", "-s", SERVICE, "-a", &cle(&a)]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    liste.retain(|c| c.0 != a);
+    ecrire_comptes(liste.first().map(|c| c.0.as_str()), &liste);
 }
 
 fn exiger_compte() -> AuthTokens {
@@ -265,8 +327,7 @@ struct Compte {
 }
 
 /// La session Steam du compte, ses parties (sessions de jeu) et ses installations, comme l'app Obelisk les assemble
-async fn compte_complet(statut: ob::OnlineStatus) -> Compte {
-    let t = exiger_compte();
+async fn compte_complet(statut: ob::OnlineStatus, t: AuthTokens) -> Compte {
     let l = lieux();
     let _ = std::fs::create_dir_all(&l.library);
     let identifiants = ob::SteamCredentials { account_name: t.account_name.clone(), steam_id: t.steam_id, refresh_token: t.refresh_token.clone() };
@@ -297,7 +358,7 @@ fn rapport(r: &ob::InstallationReport) -> String {
 }
 
 async fn installer(app_id: u32) {
-    let c = compte_complet(ob::OnlineStatus::Invisible).await;
+    let c = compte_complet(ob::OnlineStatus::Invisible, exiger_compte()).await;
     let nom = match c.session.games().await {
         Ok(jeux) => jeux.into_iter().find(|j| j.app_id == app_id).map(|j| j.name),
         Err(e) => echec(&clair(&e.to_string())),
@@ -338,26 +399,22 @@ async fn installer(app_id: u32) {
 }
 
 async fn jeux() {
-    let l = lieux();
-    let Some(t) = compte() else {
-        dire(serde_json::json!([]));
-        return;
-    };
-    // les reçus du compte, lus sans se connecter à Steam
-    let recus = Path::new(&l.library).join(format!("steam-installations-{}.json", t.steam_id));
-    let v: serde_json::Value = std::fs::read(&recus).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(serde_json::json!([]));
-    let sortie: Vec<_> = v
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|j| j["platform"].as_str().is_some_and(|p| p.eq_ignore_ascii_case("windows")) && j["directory"].as_str().is_some_and(|d| Path::new(d).is_dir()))
-        .map(|j| serde_json::json!({"app": j["appId"], "nom": j["name"], "dossier": j["directory"]}))
-        .collect();
+    // les reçus de tous les comptes connectés, lus sans se connecter à Steam
+    let mut sortie = Vec::new();
+    for (_, id) in lire_comptes().1 {
+        let recus = racine().join(format!("pc/steam/steam-installations-{id}.json"));
+        let v: serde_json::Value = std::fs::read(&recus).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(serde_json::json!([]));
+        for j in v.as_array().into_iter().flatten() {
+            if j["platform"].as_str().is_some_and(|p| p.eq_ignore_ascii_case("windows")) && j["directory"].as_str().is_some_and(|d| Path::new(d).is_dir()) {
+                sortie.push(serde_json::json!({"app": j["appId"], "nom": j["name"], "dossier": j["directory"]}));
+            }
+        }
+    }
     dire(serde_json::Value::Array(sortie));
 }
 
 async fn lancer(app_id: u32) {
-    let c = compte_complet(ob::OnlineStatus::Online).await;
+    let c = compte_complet(ob::OnlineStatus::Online, compte_du_jeu(app_id).unwrap_or_else(exiger_compte)).await;
     let Some(i) = installe(&c.installations.state(), app_id) else { echec("ce jeu n'est pas installé par Home") };
     c.installations.launch(i.id.clone());
     let mut terme = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap_or_else(|_| echec("signaux indisponibles"));
@@ -437,12 +494,23 @@ fn identifiants() {
 async fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
     match a.first().map(String::as_str) {
-        Some("etat") => dire(serde_json::json!({"compte": compte().map(|t| t.account_name)})),
+        Some("etat") => {
+            let (actif, liste) = lire_comptes();
+            dire(serde_json::json!({"compte": actif.filter(|a| session(a).is_some()), "comptes": liste.iter().map(|c| c.0.clone()).collect::<Vec<_>>()}));
+        }
+        Some("compte-choisir") if a.len() == 2 => {
+            let (_, liste) = lire_comptes();
+            if !liste.iter().any(|c| c.0 == a[1]) {
+                echec("compte Steam inconnu");
+            }
+            ecrire_comptes(Some(&a[1]), &liste);
+            dire(serde_json::json!({"compte": a[1]}));
+        }
         Some("connexion") => connexion().await,
         Some("connexion-identifiants") => connexion_identifiants().await,
         Some("deconnexion") => {
             oublier();
-            dire(serde_json::json!({"compte": null}));
+            dire(serde_json::json!({"compte": lire_comptes().0}));
         }
         Some("bibliotheque") => bibliotheque().await,
         Some("installer") if a.len() == 2 => installer(app(a.get(1))).await,

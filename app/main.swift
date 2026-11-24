@@ -79,7 +79,7 @@ struct PadHints {
 }
 struct SalonMenuItem { let label: String; var detail: String? = nil; let icon: String; var section: String? = nil; var destructive = false; var tint: Color? = nil; var info = false; var image: URL? = nil; let action: () -> Void }
 /// Un menu : titre, illustration (jaquette du jeu ou grand symbole), texte d'explication, étape d'un assistant, et où revenir avec B
-struct SalonMenu { let title: String; var subtitle: String? = nil; let items: [SalonMenuItem]; var hero: String? = nil; var art: NSImage? = nil; var text: String? = nil; var step: Int? = nil; var steps: Int? = nil; var back: (() -> Void)? = nil; var roue = false; var heroURL: URL? = nil; var grid = false }
+struct SalonMenu { let title: String; var subtitle: String? = nil; let items: [SalonMenuItem]; var hero: String? = nil; var art: NSImage? = nil; var text: String? = nil; var step: Int? = nil; var steps: Int? = nil; var back: (() -> Void)? = nil; var roue = false; var rafraichir: (() -> Void)? = nil; var heroURL: URL? = nil; var grid = false }
 /// La couleur de la pastille d'un choix, d'après son symbole
 func menuTint(_ icon: String, tint: Color? = nil, destructive: Bool = false) -> Color {
     if let tint { return tint }
@@ -386,6 +386,7 @@ final class Library: ObservableObject {
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
     @Published var ouverture = false   // l'animation d'ouverture (logo et jingle), au vrai lancement de l'app seulement
+    var epicNouveau = false   // la prochaine connexion Epic ajoute un compte au lieu de remplacer le compte actif
     var apresTache: (() -> Void)? = nil   // ce que l'assistant fait une fois la tâche en cours réussie (se connecter, ajouter un jeu…)
     @Published var tache: Tache? = nil { didSet { majDock() } }   // la construction / mise à jour en cours, avec sa barre de progression
     /// Ferme la notification d'une tâche terminée (bouton Fermer, B / Échap) : fondu flouté ; une tâche en cours reste affichée
@@ -850,8 +851,8 @@ final class Library: ObservableObject {
         return SalonMenu(title: "Home", subtitle: "\(games.count) jeux · \(categories.count - 1) catégories", items: [
             SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", tint: .blue, action: { self.openMisesAJour() }),
             SalonMenuItem(label: "Ajouter un jeu", icon: "plus.app.fill", action: { self.openAddMenu(back: { self.menu = self.plusMenu() }) }),
-            SalonMenuItem(label: "Comptes", detail: "Epic Games et Steam", icon: "person.crop.circle.fill", tint: .purple, action: { self.openPC(back: { self.menu = self.plusMenu() }) }),
-            SalonMenuItem(label: "Mode", detail: modeResume, icon: "square.grid.2x2.fill", tint: .purple, action: { self.openModeUtilisation() }),
+            SalonMenuItem(label: "Comptes", detail: "Epic Games, Steam", icon: "person.crop.circle.fill", tint: .purple, action: { self.openPC(back: { self.menu = self.plusMenu() }) }),
+            SalonMenuItem(label: "Composants", detail: modeResume, icon: "square.grid.2x2.fill", tint: .purple, action: { self.openModeUtilisation() }),
             SalonMenuItem(label: "Catégories", icon: "tag.fill", action: { self.openCategoriesSettings() }),
             SalonMenuItem(label: "Écrans", icon: "display.2", action: { self.openScreensSettings() }),
             SalonMenuItem(label: "Son", detail: "Général \(Int((macVolume * 100).rounded())) %\(macMuted ? " (muet)" : "") · sons de Home \((config.sons ?? true) ? "activés" : "coupés")", icon: "speaker.wave.2.fill", action: { self.openSoundSettings() }),
@@ -2146,6 +2147,8 @@ struct OuvertureView: View {
 struct Symbole: View {
     let nom: String; let taille: CGFloat
     static var logos: [String: NSImage] = [:]
+    /// Le disque derrière un logo : le rouge de la Switch, sombre pour les autres
+    static func fond(_ nom: String) -> Color { nom == "logo:switch" ? Color(red: 0.90, green: 0.0, blue: 0.07) : nom == "logo:steam" ? Color(red: 0.03, green: 0.08, blue: 0.20) : Color(white: 0.12) }
     static func logo(_ n: String) -> NSImage? {
         if let i = logos[n] { return i }
         guard let u = Bundle.main.resourceURL?.appendingPathComponent("logos/\(n).png"), let i = NSImage(contentsOf: u) else { return nil }
@@ -2232,8 +2235,8 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let st = menu.step, let n = menu.steps, n > 0 { HStack(spacing: 8) { ForEach(1...n, id: \.self) { k in Capsule().fill(.white.opacity(k == st ? 0.95 : 0.25)).frame(width: k == st ? 34 : 10, height: 10) } } }
             HStack(spacing: 12) {
-                Text(menu.title.uppercased()).font(.system(size: 21, weight: .black).width(.expanded)).tracking(1.5)
-                if let suite { Text("·").opacity(0.5); Text(suite.uppercased()).font(.system(size: 21, weight: .black).width(.expanded)).tracking(1.5).opacity(0.55).lineLimit(1).id(suite).transition(.opacity) }
+                Text(menu.title.uppercased()).font(.system(size: 38, weight: .black).width(.expanded)).tracking(1)
+                if let suite { Text(suite.uppercased()).font(.system(size: 19, weight: .black).width(.expanded)).tracking(1.5).opacity(0.55).lineLimit(1).padding(.leading, 8).padding(.top, 12).id(suite).transition(.opacity) }
             }
         }
     }
@@ -2274,7 +2277,7 @@ struct MenuView: View {
                 } else {
                     // un logo de service est montré tel quel, sur un disque sombre ; un symbole, en blanc sur la couleur du choix
                     Symbole(nom: it.icon, taille: it.icon.hasPrefix("logo:") ? 130 : 150).foregroundStyle(.white)
-                        .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Color(white: 0.10)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
+                        .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Symbole.fond(it.icon)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
                         .shadow(color: c.opacity(0.6), radius: 60, y: 10)
                 }
                 Text(it.detail ?? menu.text ?? " ").font(.system(size: 23, weight: .medium)).multilineTextAlignment(.center).opacity(0.8).lineLimit(3).frame(width: 600, height: 96, alignment: .top)
@@ -2296,7 +2299,7 @@ struct MenuView: View {
         }
     }
     private var aides: some View {
-        HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Choisir"); Pilule(k: lib.hints.back, t: menu.back == nil ? "Fermer" : "Retour") }
+        HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Choisir"); if menu.rafraichir != nil { Pilule(k: lib.hints.tri, t: "Actualiser") }; Pilule(k: lib.hints.back, t: menu.back == nil ? "Fermer" : "Retour") }
     }
     var body: some View {
         ZStack(alignment: rangee ? .bottomLeading : .topLeading) {
@@ -2311,8 +2314,10 @@ struct MenuView: View {
                         ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in
                             let sel = i == vise
                             let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
-                            Image(systemName: it.icon).font(.system(size: sel ? 32 : 26, weight: .semibold)).frame(width: sel ? 96 : 76, height: sel ? 96 : 76)
-                                .background(Circle().fill(sel ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(0.5))))
+                            let logo = it.icon.hasPrefix("logo:")
+                            Symbole(nom: it.icon, taille: logo ? (sel ? 38 : 30) : (sel ? 32 : 26)).fontWeight(.semibold).frame(width: sel ? 96 : 76, height: sel ? 96 : 76)
+                                .background(Circle().fill(logo ? AnyShapeStyle(Symbole.fond(it.icon)) : sel ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(0.5))))
+                                .saturation(logo && !sel ? 0.7 : 1).brightness(logo && !sel ? -0.12 : 0)
                                 .overlay(Circle().strokeBorder(sel ? .white.opacity(0.9) : c.opacity(0.45), lineWidth: sel ? 3 : 1.5))
                                 .foregroundStyle(sel ? .white : c)
                                 .shadow(color: c.opacity(sel ? 0.75 : 0), radius: 26, y: 6)
@@ -2370,7 +2375,7 @@ struct MenuView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.trailing, 96).padding(.top, 66)
                 // un trait fin sous le haut de l'écran, qui s'efface vers la droite
                 LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.06)], startPoint: .leading, endPoint: .trailing).frame(height: 1.5)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.horizontal, 96).padding(.top, 116)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.horizontal, 96).padding(.top, 148)
                 // deux anneaux autour du symbole, comme une cible
                 ZStack {
                     Circle().stroke(.white.opacity(0.10), lineWidth: 1.5).frame(width: 440, height: 440)
@@ -2398,6 +2403,7 @@ struct MenuView: View {
         .onChange(of: index) { _, n in MenuView.dernier[menu.title] = n }
         .onReceive(NotificationCenter.default.publisher(for: .salonNav)) { n in
             guard let k = n.object as? String else { return }
+            if k == "tri" { if let r = menu.rafraichir { Sounds.shared.play("valider"); r() }; return }   // triangle : relire la liste
             var cible = index
             if rangee { cible = (k == "right" || k == "down") ? next(index, 1) : (k == "left" || k == "up") ? next(index, -1) : index }   // la rangée : de gauche à droite
             else if menu.grid {   // la grille d'affiches : quatre directions
@@ -3218,6 +3224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Epic Games : Amas.16", detail: "Ta bibliothèque", icon: "logo:epic", tint: .purple, action: {}), SalonMenuItem(label: "Steam : non connecté", detail: "Se connecter", icon: "logo:steam", tint: .blue, action: {}),
                 SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: {}), SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {})], roue: true)
             rendre(MenuView(lib: lib, menu: comptes, apercu: 1), "comptes.png")
+            let ajout = SalonMenu(title: "Ajouter un jeu", items: [SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {}), SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: {}),
+                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "Jeu Windows", detail: "Déjà installé : son .exe", icon: "folder.fill", tint: .orange, action: {}),
+                SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {}), SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: {})])
+            rendre(MenuView(lib: lib, menu: ajout, apercu: 2), "ajouter.png")
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
@@ -3321,6 +3331,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case 53: self.nav("back"); return nil
             default:
                 if ch == "o" || ch == "y" { self.nav("options"); return nil }
+                if ch == "t", self.lib.showOptions { self.nav("tri"); return nil }
                 if (ch == "+" || ch == "=" || ch == "n"), !self.lib.showOptions, self.lib.picker == nil { self.nav("plus"); return nil }
                 return e
             }
@@ -3471,7 +3482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let rxs = gp.rightThumbstick.xAxis.value
         if abs(rxs) > 0.5, lib.picker == nil { lib.macStep(rxs * abs(rxs) * 0.006, quiet: true); if Int(Date().timeIntervalSince1970 * 20) % 6 == 0 { Sounds.shared.play("volume") } }   // stick droit : volume général du Mac
-        if gp.buttonY.isPressed, prev["tri"] != true, lib.picker == nil, !lib.showOptions { lib.toggleMacMute() }
+        if gp.buttonY.isPressed, prev["tri"] != true, lib.picker == nil { if lib.showOptions { nav("tri") } else { lib.toggleMacMute() } }   // dans un menu : actualiser
         prev["tri"] = gp.buttonY.isPressed
         let buttons: [(String, Bool, String)] = [("ok", okB.isPressed, "ok"), ("back", backB.isPressed, "back"), ("menu", gp.buttonMenu.isPressed, "options"),
                                                   ("home", salonB?.isPressed == true, "plus"), ("l1", gp.leftShoulder.isPressed, "catL"), ("r1", gp.rightShoulder.isPressed, "catR")]
@@ -4180,19 +4191,19 @@ extension Library {
         let mode = config.mode ?? "tout"
         func choix(_ nom: String, _ precision: String, _ symbole: String, _ teinte: Color, _ cle: String) -> SalonMenuItem {
             SalonMenuItem(label: nom + (!premier && cle == mode ? " : actuel" : ""), detail: precision, icon: symbole, tint: teinte, action: {
-                if cle == "pc" { self.appliquerMode(mode: cle, moteurs: "tout", ensuite: { self.openPC() }) } else { self.etapeMoteurs(mode: cle, premier: premier) } })
+                if cle == "pc" { self.appliquerMode(mode: cle, moteurs: "tout", ensuite: nil) } else { self.etapeMoteurs(mode: cle, premier: premier) } })
         }
         var items = [
             choix("Tout", "Jeux Nintendo et jeux PC", "square.grid.2x2.fill", .purple, "tout"),
             choix("Nintendo", "Switch et Switch 2, à partir de tes dumps", "gamecontroller.fill", .orange, "nintendo"),
-            choix("PC", "Epic Games, Steam, jeux Windows", "desktopcomputer", .blue, "pc"),
+            choix("PC", "Le moteur Windows, pour Epic Games, Steam et tes jeux Windows", "desktopcomputer", .blue, "pc"),
         ]
         if premier { items.append(SalonMenuItem(label: "Plus tard", icon: "moon.zzz.fill", tint: .gray, action: { self.config.mode = "tout"; self.saveConfig(); self.menu = nil })) }
-        menu = SalonMenu(title: premier ? "Bienvenue" : "Mode", items: items, step: 1, steps: 2, back: premier ? { self.config.mode = "tout"; self.saveConfig(); self.menu = nil } : { self.menu = self.plusMenu() }, roue: true)
+        menu = SalonMenu(title: premier ? "Bienvenue" : "Composants", items: items, step: 1, steps: 2, back: premier ? { self.config.mode = "tout"; self.saveConfig(); self.menu = nil } : { self.menu = self.plusMenu() }, roue: true)
     }
     private func etapeMoteurs(mode: String, premier: Bool) {
-        let suite: (String) -> Void = { m in self.appliquerMode(mode: mode, moteurs: m, ensuite: mode == "tout" ? { self.openPC() } : nil) }   // avec les jeux PC : on finit sur Comptes
-        menu = SalonMenu(title: "Nintendo", items: [
+        let suite: (String) -> Void = { m in self.appliquerMode(mode: mode, moteurs: m, ensuite: nil) }
+        menu = SalonMenu(title: "Moteurs Nintendo", items: [
             SalonMenuItem(label: "Tout", detail: "Le bon moteur pour chaque jeu", icon: "sparkles", tint: .purple, action: { suite("tout") }),
             SalonMenuItem(label: "MacNativeGames", detail: "Tears of the Kingdom, Breath of the Wild, Ocarina of Time", icon: "leaf.fill", section: "Avancé", tint: .orange, action: { suite("mng") }),
             SalonMenuItem(label: "nxnative", detail: "Les autres jeux — demande Xcode", icon: "cpu.fill", tint: .blue, action: { suite("nxnative") }),
@@ -4204,7 +4215,7 @@ extension Library {
     /// Enregistre le mode et télécharge ce qui lui manque ; « ensuite » se fait quand tout est installé
     private func appliquerMode(mode: String, moteurs: String, ensuite: (() -> Void)?) {
         config.mode = mode; config.moteurs = moteurs; saveConfig(); menu = nil
-        MenuView.dernier["Bienvenue"] = nil; MenuView.dernier["Mode"] = nil
+        MenuView.dernier["Bienvenue"] = nil; MenuView.dernier["Composants"] = nil
         let nintendoPret = !modeNintendo || ((moteurs == "nxnative" || Atelier.mngPret) && (moteurs == "mng" || Atelier.nxnativePret))
         DispatchQueue.global().async {
             let e = self.modePC ? (PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]) : [:]
@@ -4269,33 +4280,79 @@ extension Library {
         items.append(SalonMenuItem(label: "Fermer", icon: "xmark.circle.fill", tint: .gray, action: { if let back { back() } else { self.menu = nil } }))
         menu = SalonMenu(title: "Incompatible avec le Mac", subtitle: nom, items: items, hero: "xmark.shield.fill", text: "Home ne lance pas ce jeu : il ne démarrerait pas, ou ton compte pourrait être sanctionné. Aucune protection n'est contournée.", back: back)
     }
-    /// Comptes : un seul endroit pour Epic Games et Steam. Chaque service montre son état ; le choisir fait ce qu'il faut, dans l'ordre —
-    /// installer le moteur Windows s'il manque, se connecter si on ne l'est pas, sinon ouvrir la bibliothèque. Les jeux qu'on a déjà
-    /// (un .exe, un installateur) sont au même endroit.
+    /// Comptes (menu de Home) : gérer ses comptes Epic Games et Steam, et rien d'autre — se connecter, en ajouter un, passer de l'un à
+    /// l'autre, se déconnecter. Les bibliothèques, elles, s'ouvrent depuis « Ajouter un jeu ».
     func openPC(back: (() -> Void)? = nil) {
         let ici: () -> Void = { self.openPC(back: back) }
         menu = SalonMenu(title: "Comptes", items: [SalonMenuItem(label: "Un instant", icon: "hourglass", info: true, action: {})], back: back, roue: true)
+        etatComptes { e, steamActif, steamComptes in
+            guard self.menu?.title == "Comptes" else { return }
+            let epic = e["compte"] as? String
+            self.menu = SalonMenu(title: "Comptes", items: [
+                SalonMenuItem(label: "Epic Games : " + (epic ?? "non connecté"), icon: "logo:epic", tint: .purple, action: { self.openCompteEpic(back: ici) }),
+                SalonMenuItem(label: "Steam : " + (steamActif ?? "non connecté"), icon: "logo:steam", tint: .blue, action: { self.openCompteSteam(back: ici) }),
+            ], back: back, roue: true)
+        }
+    }
+    /// L'état des comptes, lu hors du fil principal : celui d'Epic (pc.command etat), le compte Steam actif et tous les comptes Steam
+    private func etatComptes(_ suite: @escaping ([String: Any], String?, [String]) -> Void) {
         DispatchQueue.global().async {
             let e = PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]
-            let steam = PCHome.steamPret ? (PCHome.json(PCHome.steam(["etat"])) as? [String: Any])?["compte"] as? String : nil
-            DispatchQueue.main.async {
-                guard self.menu?.title == "Comptes" else { return }
-                let moteur = e["voile"] as? String != nil && e["legendary"] as? Bool == true, epic = e["compte"] as? String
-                var items: [SalonMenuItem] = [
-                    SalonMenuItem(label: "Epic Games : " + (epic ?? "non connecté"), detail: epic != nil ? "Ta bibliothèque" : moteur ? "Se connecter" : "Installer le moteur Windows, puis se connecter", icon: "logo:epic", tint: .purple, action: {
-                        if !moteur { self.apresTache = ici; if !self.lancer("pc.command", ["preparer"], titre: "Moteur Windows") { self.apresTache = nil } }   // puis retour ici, où il ne reste qu'à se connecter
-                        else if epic == nil { self.connexionEpic(retour: ici) }
-                        else { self.openBibliotheque(back: ici) } }),
-                    SalonMenuItem(label: "Steam : " + (steam ?? "non connecté"), detail: steam != nil ? "Ta bibliothèque" : PCHome.steamPret ? "Se connecter" : "Préparer Steam, puis se connecter", icon: "logo:steam", tint: .blue, action: {
-                        if !PCHome.steamPret { self.apresTache = ici; if !self.lancer("preparer-steam.command", titre: "Préparation de Steam") { self.apresTache = nil } }
-                        else if steam == nil { self.connexionSteam(retour: ici) }
-                        else { self.openBibliothequeSteam(back: ici) } }),
-                    SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: { self.ajouterExe() }),
-                    SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: { self.installerDepuisSetup() }),
-                ]
-                if epic != nil { items.append(SalonMenuItem(label: "Quitter Epic", icon: "rectangle.portrait.and.arrow.right", section: "Déconnexion", tint: .gray, action: { DispatchQueue.global().async { _ = PCHome.run(["deconnexion"]); DispatchQueue.main.async { ici() } } })) }
-                if steam != nil { items.append(SalonMenuItem(label: "Quitter Steam", icon: "rectangle.portrait.and.arrow.right", section: epic == nil ? "Déconnexion" : nil, tint: .gray, action: { _ = PCHome.steam(["deconnexion"]); ici() })) }
-                self.menu = SalonMenu(title: "Comptes", items: items, back: back, roue: true)
+            let st = PCHome.steamPret ? PCHome.json(PCHome.steam(["etat"])) as? [String: Any] : nil
+            DispatchQueue.main.async { suite(e, st?["compte"] as? String, st?["comptes"] as? [String] ?? []) }
+        }
+    }
+    /// Un compte Epic de plus (ou le premier) : le moteur Windows d'abord s'il manque, puis la connexion
+    private func connecterEpic(moteur: Bool, nouveau: Bool, retour: @escaping () -> Void) {
+        if !moteur { apresTache = retour; if !lancer("pc.command", ["preparer"], titre: "Moteur Windows") { apresTache = nil }; return }
+        epicNouveau = nouveau; connexionEpic(retour: retour)
+    }
+    private func connecterSteam(retour: @escaping () -> Void) {
+        if !PCHome.steamPret { apresTache = retour; if !lancer("preparer-steam.command", titre: "Préparation de Steam") { apresTache = nil }; return }
+        connexionSteam(retour: retour)
+    }
+    func openCompteEpic(back: @escaping () -> Void) {
+        let ici: () -> Void = { self.openCompteEpic(back: back) }
+        menu = SalonMenu(title: "Epic Games", items: [SalonMenuItem(label: "Un instant", icon: "hourglass", info: true, action: {})], back: back, roue: true)
+        etatComptes { e, _, _ in
+            guard self.menu?.title == "Epic Games" else { return }
+            let moteur = e["voile"] as? String != nil && e["legendary"] as? Bool == true
+            let comptes = (e["comptes"] as? [[String: Any]] ?? []).compactMap { c -> (String, String, Bool)? in guard let i = c["id"] as? String, let n = c["nom"] as? String else { return nil }; return (i, n, c["actif"] as? Bool ?? false) }
+            var items: [SalonMenuItem] = comptes.map { c in
+                SalonMenuItem(label: c.1 + (c.2 ? " : actif" : ""), detail: c.2 ? nil : "Passer sur ce compte", icon: c.2 ? "checkmark.circle.fill" : "person.crop.circle", tint: c.2 ? .green : .gray, action: {
+                    if c.2 { return }; DispatchQueue.global().async { _ = PCHome.run(["compte-choisir", c.0]); DispatchQueue.main.async { ici() } } })
+            }
+            items.append(SalonMenuItem(label: comptes.isEmpty ? "Se connecter" : "Ajouter un compte", icon: "person.crop.circle.badge.plus", tint: .purple, action: { self.connecterEpic(moteur: moteur, nouveau: !comptes.isEmpty, retour: ici) }))
+            if !comptes.isEmpty { items.append(SalonMenuItem(label: "Se déconnecter", detail: comptes.first { $0.2 }?.1, icon: "rectangle.portrait.and.arrow.right", destructive: true, action: { DispatchQueue.global().async { _ = PCHome.run(["deconnexion"]); DispatchQueue.main.async { ici() } } })) }
+            self.menu = SalonMenu(title: "Epic Games", items: items, back: back, roue: true)
+        }
+    }
+    func openCompteSteam(back: @escaping () -> Void) {
+        let ici: () -> Void = { self.openCompteSteam(back: back) }
+        menu = SalonMenu(title: "Steam", items: [SalonMenuItem(label: "Un instant", icon: "hourglass", info: true, action: {})], back: back, roue: true)
+        etatComptes { _, actif, comptes in
+            guard self.menu?.title == "Steam" else { return }
+            var items: [SalonMenuItem] = comptes.map { n in
+                SalonMenuItem(label: n + (n == actif ? " : actif" : ""), detail: n == actif ? nil : "Passer sur ce compte", icon: n == actif ? "checkmark.circle.fill" : "person.crop.circle", tint: n == actif ? .green : .gray, action: {
+                    if n == actif { return }; _ = PCHome.steam(["compte-choisir", n]); ici() })
+            }
+            items.append(SalonMenuItem(label: comptes.isEmpty ? "Se connecter" : "Ajouter un compte", icon: "person.crop.circle.badge.plus", tint: .blue, action: { self.connecterSteam(retour: ici) }))
+            if actif != nil { items.append(SalonMenuItem(label: "Se déconnecter", detail: actif, icon: "rectangle.portrait.and.arrow.right", destructive: true, action: { _ = PCHome.steam(["deconnexion"]); ici() })) }
+            self.menu = SalonMenu(title: "Steam", items: items, back: back, roue: true)
+        }
+    }
+    /// Depuis « Ajouter un jeu » : la bibliothèque d'un service. S'il manque quelque chose (le moteur, un compte), Home le fait d'abord puis y revient.
+    func ouvrirBibliotheque(_ service: String, back: @escaping () -> Void) {
+        let ici: () -> Void = { self.ouvrirBibliotheque(service, back: back) }
+        toast = nil
+        etatComptes { e, steamActif, _ in
+            if service == "steam" {
+                if steamActif == nil { self.connecterSteam(retour: { PCHome.steamPret && (PCHome.json(PCHome.steam(["etat"])) as? [String: Any])?["compte"] as? String != nil ? ici() : back() }) }
+                else { self.openBibliothequeSteam(back: back) }
+            } else {
+                let moteur = e["voile"] as? String != nil && e["legendary"] as? Bool == true
+                if !moteur || e["compte"] as? String == nil { self.connecterEpic(moteur: moteur, nouveau: false, retour: { (PCHome.json(PCHome.run(["etat"])) as? [String: Any])?["compte"] as? String != nil || !moteur ? ici() : back() }) }
+                else { self.openBibliotheque(back: back) }
             }
         }
     }
@@ -4309,8 +4366,8 @@ extension Library {
     private func finirEpic(_ code: String, retour: @escaping () -> Void) {
         toast = "Connexion à Epic…"
         DispatchQueue.global().async {
-            let s = PCHome.run(["connexion", code], timeout: 60)
-            DispatchQueue.main.async { self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
+            let s = PCHome.run(["connexion", code] + (self.epicNouveau ? ["--nouveau"] : []), timeout: 60)
+            DispatchQueue.main.async { self.epicNouveau = false; self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
         }
     }
     func connexionEpicFenetre(retour: @escaping () -> Void) {
@@ -4482,7 +4539,8 @@ extension Library {
                             SalonMenuItem(label: "Télécharger et installer", detail: detail, icon: "arrow.down.circle.fill", tint: .green, action: { self.menu = nil; self.lancer("steam.command", ["installer", String(app)], titre: "Installation de \(nom)") }),
                         ], hero: "arrow.down.circle.fill", text: "Au premier jeu, Home télécharge aussi le moteur Windows et les composants Steam de Valve.", back: ici) })
                 }
-                self.menu = SalonMenu(title: "Bibliothèque Steam", subtitle: "\(items.count) jeux", items: items.isEmpty ? [SalonMenuItem(label: "Aucun jeu sur ce compte", icon: "tray", info: true, action: {})] : items, hero: "books.vertical.fill", back: back)
+                let boutique = SalonMenuItem(label: "Boutique", detail: "Ajoute un jeu à ton compte, puis actualise", icon: "cart.fill", tint: .blue, action: { NSWorkspace.shared.open(URL(string: "https://store.steampowered.com")!) })
+                self.menu = SalonMenu(title: "Bibliothèque Steam", subtitle: "\(items.count) jeux", items: [boutique] + items, hero: "books.vertical.fill", back: back, rafraichir: ici)
             }
         }
     }
@@ -4509,7 +4567,8 @@ extension Library {
                             SalonMenuItem(label: "Télécharger et installer", detail: detail, icon: "arrow.down.circle.fill", tint: .green, action: { self.menu = nil; self.lancer("pc.command", ["installer", app], titre: "Installation de \(nom)") }),
                         ], hero: "arrow.down.circle.fill", back: ici) })
                 }
-                self.menu = SalonMenu(title: "Bibliothèque Epic Games", subtitle: "\(items.count) jeux", items: items.isEmpty ? [SalonMenuItem(label: "Aucun jeu Windows sur ce compte", icon: "tray", info: true, action: {})] : items, hero: "books.vertical.fill", back: back)
+                let boutique = SalonMenuItem(label: "Boutique", detail: "Ajoute un jeu à ton compte, puis actualise", icon: "cart.fill", tint: .purple, action: { NSWorkspace.shared.open(URL(string: "https://store.epicgames.com")!) })
+                self.menu = SalonMenu(title: "Bibliothèque Epic Games", subtitle: "\(items.count) jeux", items: [boutique] + items, hero: "books.vertical.fill", back: back, rafraichir: ici)
             }
         }
     }
@@ -4517,14 +4576,15 @@ extension Library {
         if menu == nil { Sounds.shared.play("ouvrir") }
         let ici: () -> Void = { self.openAddMenu(back: back) }
         menu = SalonMenu(title: "Ajouter un jeu", subtitle: "Que veux-tu ajouter ?", items: [
-            SalonMenuItem(label: "Switch", icon: "gamecontroller.fill", action: {
+            SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {
                 if !Atelier.nxnativePret && !Atelier.mngPret { self.openPreparation(back: ici); return }   // aucun moteur : d'abord préparer ce Mac
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
-            SalonMenuItem(label: "Epic Games ou Steam", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
-            SalonMenuItem(label: "Jeu Windows installé", detail: "Son .exe", icon: "folder.fill", action: { self.ajouterExe() }),
-            SalonMenuItem(label: "Installateur Windows", detail: "setup.exe ou .msi", icon: "shippingbox.fill", action: { self.installerDepuisSetup() }),
-            SalonMenuItem(label: "App Mac", icon: "macwindow", action: { self.menu = nil; self.addGame() }),
-        ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games ou Steam", "Jeu Windows installé", "Installateur Windows"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
+            SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
+            SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
+            SalonMenuItem(label: "Jeu Windows", detail: "Déjà installé : son .exe", icon: "folder.fill", tint: .orange, action: { self.ajouterExe() }),
+            SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: { self.installerDepuisSetup() }),
+            SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: { self.menu = nil; self.addGame() }),
+        ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games", "Steam", "Jeu Windows", "Installateur"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
         hero: "plus.app.fill", back: back)
     }
     func ouvrirObelisk() {

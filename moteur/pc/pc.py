@@ -23,7 +23,9 @@ compatibilité (moteur/compat/pc.json), avec sa raison et sa source.
   pc.py etat                    ce qui est prêt, en JSON
   pc.py preparer                Legendary (dans moteur/.venv-pc) et Voile, s'ils manquent
   pc.py connexion CODE          le compte Epic, avec le code donné par la page de connexion
-  pc.py deconnexion             oublie le compte Epic
+  pc.py connexion CODE --nouveau   un compte Epic de plus, qui devient le compte actif
+  pc.py compte-choisir ID       change de compte actif (les identifiants sont dans « etat »)
+  pc.py deconnexion             oublie le compte Epic actif
   pc.py bibliotheque            les jeux du compte, en JSON, avec leur compatibilité
   pc.py installer APP           télécharge un jeu dans <Home>/pc/jeux
   pc.py lancer APP [--essai]    lance un jeu (--essai : affiche la commande sans rien lancer, code Epic masqué)
@@ -112,11 +114,26 @@ def installer_voile():
 
 
 # ---------- Legendary (Epic Games) ----------
-def coeur():
+# Plusieurs comptes Epic : Legendary garde un compte par dossier de réglages (LEGENDARY_CONFIG_PATH). Le compte « defaut » est celui
+# de Legendary lui-même (~/.config/legendary) ; les comptes ajoutés ont chacun leur dossier dans <Home>/pc/epic/<id>. Un seul est
+# actif à la fois (bibliothèque, installation) ; un jeu installé retient son compte et se lance avec lui.
+def comptes_epic():
+    d = lire_json(PC / 'epic/comptes.json', {}); l = d.get('comptes') or ['defaut']
+    return {'actif': d.get('actif') if d.get('actif') in l else l[0], 'comptes': l}
+def noter_comptes(actif, liste): ecrire_json(PC / 'epic/comptes.json', {'actif': actif, 'comptes': liste})
+
+def coeur(compte=None):
     import warnings; warnings.filterwarnings('ignore')
     import logging; logging.disable(logging.WARNING)
+    c = compte or comptes_epic()['actif']
+    if c == 'defaut': os.environ.pop('LEGENDARY_CONFIG_PATH', None)
+    else: (PC / 'epic' / c).mkdir(parents=True, exist_ok=True); os.environ['LEGENDARY_CONFIG_PATH'] = str(PC / 'epic' / c)
     from legendary.core import LegendaryCore
     return LegendaryCore()
+
+def nom_compte(i):
+    try: return (coeur(i).lgd.userdata or {}).get('displayName')
+    except Exception: return None
 
 def legendary_present():
     try:
@@ -166,7 +183,7 @@ def compat(app, nom, table=None, namespace=None):
 # ---------- les jeux installés par Home ----------
 def jeux_home(): return lire_json(PC / 'jeux.json', [])
 def noter_jeu(app, nom, dossier, namespace):
-    l = [j for j in jeux_home() if j.get('app') != app]; l.append({'app': app, 'nom': nom, 'dossier': str(dossier), 'namespace': namespace})
+    l = [j for j in jeux_home() if j.get('app') != app]; l.append({'app': app, 'nom': nom, 'dossier': str(dossier), 'namespace': namespace, 'compte': comptes_epic()['actif']})
     ecrire_json(PC / 'jeux.json', sorted(l, key=lambda j: j['nom'].lower()))
 
 
@@ -242,7 +259,8 @@ def cmd_etat():
     if c and connecte(c):
         try: nom = c.lgd.userdata.get('displayName') or '?'
         except Exception: nom = '?'
-    dire(json.dumps({'voile': v[1] if v else None, 'voile_source': v[2] if v else None, 'legendary': leg, 'compte': nom, 'jeux': len(jeux_home())}, ensure_ascii=False))
+    ce = comptes_epic(); liste = [{'id': i, 'nom': nom_compte(i), 'actif': i == ce['actif']} for i in ce['comptes']] if leg else []
+    dire(json.dumps({'voile': v[1] if v else None, 'voile_source': v[2] if v else None, 'legendary': leg, 'compte': nom, 'comptes': [x for x in liste if x['nom']], 'jeux': len(jeux_home())}, ensure_ascii=False))
 
 def cmd_preparer():
     if voile_installe(): dire(f'Voile : déjà là ({voile_installe()[1]})')
@@ -251,17 +269,34 @@ def cmd_preparer():
     else: installer_legendary()
     dire('done in : jeux PC prêts')
 
-def cmd_connexion(code):
+def cmd_connexion(code, nouveau=False):
     code = code.strip().strip('"')
     m = re.search(r'"authorizationCode"\s*:\s*"([0-9a-fA-F]+)"', code)   # toute la réponse de la page collée : le code en est tiré
     if m: code = m.group(1)
     if not re.fullmatch(r'[0-9a-fA-F]{20,64}', code): echec("ce n'est pas un code de connexion Epic (la valeur de « authorizationCode »)")
-    c = coeur()
-    if not c.auth_code(code): echec('Epic a refusé le code (il ne sert qu\'une fois et expire vite) : recommence la connexion')
+    ce = comptes_epic(); cible = ce['actif']
+    if nouveau:   # un compte de plus : son propre dossier, gardé seulement si Epic accepte le code
+        n = 2
+        while f'c{n}' in ce['comptes'] or (PC / 'epic' / f'c{n}').exists(): n += 1
+        cible = f'c{n}'
+    c = coeur(cible)
+    if not c.auth_code(code):
+        if nouveau: subprocess.run(['/bin/rm', '-rf', str(PC / 'epic' / cible)])
+        echec('Epic a refusé le code (il ne sert qu\'une fois et expire vite) : recommence la connexion')
+    if nouveau: noter_comptes(cible, ce['comptes'] + [cible])
     dire('Connecté à Epic : ' + str(c.lgd.userdata.get('displayName', '')))
 
+def cmd_compte_choisir(i):
+    ce = comptes_epic()
+    if i not in ce['comptes']: echec('compte Epic inconnu')
+    noter_comptes(i, ce['comptes']); dire('Compte Epic : ' + str(nom_compte(i)))
+
 def cmd_deconnexion():
-    c = coeur(); c.lgd.invalidate_userdata(); dire('Déconnecté d\'Epic')
+    ce = comptes_epic(); a = ce['actif']
+    coeur(a).lgd.invalidate_userdata()
+    reste = [i for i in ce['comptes'] if i != a or a == 'defaut']   # le compte de base garde sa place (vide), les autres disparaissent
+    suivant = next((i for i in reste if i != a and nom_compte(i)), reste[0] if reste else 'defaut')
+    noter_comptes(suivant, reste or ['defaut']); dire('Déconnecté d\'Epic')
 
 def cmd_bibliotheque():
     c = coeur()
@@ -300,8 +335,8 @@ def cmd_lancer(app, essai=False):
     v = voile_installe()
     if not v: echec('le moteur Windows (Voile) n\'est pas installé : Home → Ajouter un jeu → Jeu PC', 4)
     runtime = v[0]
-    c = coeur()
-    if not c.login(): echec('pas connecté à Epic', 2)
+    c = coeur((jeu_local(app) or {}).get('compte'))   # le compte avec lequel le jeu a été installé
+    if not c.login(): echec('pas connecté à Epic (le compte de ce jeu a été déconnecté)', 2)
     i = c.get_installed_game(app); g = c.get_game(app, platform='Windows')
     if not i or not g: echec(f'{app} n\'est pas installé')
     e = compat(app, g.app_title, None, g.namespace)
@@ -521,7 +556,8 @@ def main():
     c = a[0]
     if c == 'etat': cmd_etat()
     elif c == 'preparer': cmd_preparer()
-    elif c == 'connexion' and len(a) == 2: cmd_connexion(a[1])
+    elif c == 'connexion' and len(a) >= 2: cmd_connexion(a[1], nouveau='--nouveau' in a[2:])
+    elif c == 'compte-choisir' and len(a) == 2: cmd_compte_choisir(a[1])
     elif c == 'deconnexion': cmd_deconnexion()
     elif c == 'bibliotheque': cmd_bibliotheque()
     elif c == 'installer' and len(a) == 2: cmd_installer(a[1])
