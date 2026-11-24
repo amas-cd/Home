@@ -62,7 +62,7 @@ public sealed class Manette
     }
 }
 
-/// Les sons de l'interface : les mêmes fichiers .wav que sur Mac (banque de Kenney, CC0), copiés à côté de l'exécutable
+/// Les sons de l'interface : les mêmes fichiers .wav que sur Mac (les six sons créés pour Home, et son jingle), copiés à côté de l'exécutable
 public static class Sons
 {
     [DllImport("winmm.dll", CharSet = CharSet.Unicode)] static extern bool PlaySound(string? fichier, IntPtr module, uint drapeaux);

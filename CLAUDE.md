@@ -119,7 +119,10 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   RecompLauncher (`https://recomplauncher.com/pc-catalog.json`, relu au plus une fois par jour). Source 2 : une recherche GitHub
   pour ce qui n'y est pas, signalée « hors catalogue ». Home ne télécharge que depuis `github.com/<dépôt>/releases/download/`,
   vérifie le SHA-256 quand il est publié, et refuse un fichier que le catalogue marque `red`. Aucun recomp ne contient de jeu.
-- **Pas sur Windows** : construction des jeux Switch, mods, TOTK / SMO Online, HUD en jeu, capture, volume par jeu.
+- **Pas sur Windows** : construction des jeux Switch, mods, TOTK / SMO Online, HUD en jeu, capture, volume (ni par jeu, ni la barre du
+  haut), choix des images dans Home (un fichier à la place), mode d'utilisation.
+- **Graphisme** : l'app Mac fait foi. `windows/` la recopie vue par vue ; une vue reste en place et on change ses propriétés (c'est ce
+  qui l'anime), et on n'anime jamais une taille (seulement `RenderTransform` et l'opacité). « Animations réduites » : `Mouvement.Reduit`.
 
 | Fichier | Contenu |
 |---|---|
@@ -127,7 +130,9 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `Bibliotheque.cs` | L'équivalent de `Library` : état, navigation, lancement, fin de partie, tous les menus |
 | `Sources.cs` | `Steam`, `Epic`, `SteamGridDB`, `Images` |
 | `Recomps.cs` | `Catalogue`, `GitHub`, `Installation`, `MenusRecomps` |
-| `Vues.cs` | `Ecran`, `Tuile`, `FondVue`, le panneau des menus, « en cours de jeu », tâche, saisie |
+| `Vues.cs` | `Mouvement` (courbes et durées), `Ecran`, `Tuile`, `RangeeJeux`, `FondVue`, `Ouverture` (écran de démarrage), `PastilleTache`, « en cours de jeu », saisie |
+| `VuesMenus.cs` | `VueMenu` : les trois formes de `MenuView` (rangée de pastilles, roue, grille d'affiches). `Menu.Genre` choisit la forme, comme sur Mac |
+| `ANIMATIONS.md` | La fiche des animations de l'app Mac (courbes, durées, distances) : la référence de `Vues.cs` et `VuesMenus.cs` |
 | `Manette.cs` | `Manette` (XInput), `Sons` (les .wav de `app/sons`), `Systeme` (processus d'un dossier, Corbeille) |
 | `MiseAJour.cs` | Mise à jour de Home depuis le dépôt public des setups |
 | `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |
@@ -144,8 +149,9 @@ dotnet build windows/Home.csproj
 HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=recomps HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
 ```
 `HOME_DEMO=1` remplit la bibliothèque avec les recomps en vedette du catalogue. `HOME_SCENARIO` enchaîne des écrans ou des touches
-(`options`, `plus`, `ajout`, `recomps`, `fiche`, `saisie`, `tache`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
-la fenêtre puis quitte : lis le PNG. Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille)
+(`options`, `plus`, `ajout`, `recomps`, `fiche`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
+la fenêtre puis quitte : lis le PNG. Cette image ne montre ni les flous ni un mouvement en cours : pour les voir, lance sans
+`HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille)
 ne se teste pas sur Mac.
 
 Le workflow compile `windows/` sur `windows-latest` (job `windows`), puis fabrique `Home-Setup.exe` avec Inno Setup

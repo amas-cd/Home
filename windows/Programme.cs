@@ -36,15 +36,17 @@ sealed class Fenetre : Window
 {
     readonly Bibliotheque lib = new();
     readonly Canvas racine = new() { ClipToBounds = true, Background = Brushes.Black };
-    readonly Ecran ecran; Manette? manette;
+    Ecran ecran; Manette? manette; double echelle = 1;
 
     public Fenetre()
     {
         Title = "Home"; Background = Brushes.Black; Width = 1600; Height = 900; Content = racine;
-        ecran = new Ecran(lib) { Width = 1920, Height = 1080, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative) };
-        racine.Children.Add(ecran);
+        Mouvement.Reduit = lib.Config.AnimationsReduites;
+        ecran = NouvelEcran();
         // Dessiné pour 1920 de large ; la hauteur suit l'écran (1080 en 16:9, 1200 en 16:10) : aucune bande noire, rien ne dépasse
-        racine.SizeChanged += (_, e) => { var k = Math.Max(0.3, e.NewSize.Width / 1920); ecran.Height = e.NewSize.Height / k; ecran.RenderTransform = new ScaleTransform(k, k); };
+        racine.SizeChanged += (_, e) => { echelle = Math.Max(0.3, e.NewSize.Width / 1920); ecran.Height = e.NewSize.Height / echelle; ecran.RenderTransform = new ScaleTransform(echelle, echelle); };
+        // « Animations réduites » change toutes les durées : l'écran est refait avec les nouvelles
+        lib.Reconstruire = () => { ecran.Detacher(); racine.Children.Remove(ecran); ecran = NouvelEcran(); };
         lib.ChoisirFichier = async (titre, motifs) =>
         {
             var f = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = titre, AllowMultiple = false, FileTypeFilter = [new FilePickerFileType(titre) { Patterns = motifs }] });
@@ -59,12 +61,18 @@ sealed class Fenetre : Window
         {
             Journal.Ecrire($"Home {Bibliotheque.Version} démarre ({Environment.OSVersion})");
             manette = new Manette(lib, () => IsActive);
+            if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
             if (Bibliotheque.Demo) await lib.ChargerDemo(); else _ = Catalogue.Charger();   // le catalogue sert aussi à proposer les mises à jour des recomps
             Scenario();
             // Une fois par démarrage, sans rien installer : le menu propose la mise à jour, c'est le joueur qui la lance
             if (OperatingSystem.IsWindows() && await MiseAJour.Verifier()) lib.Dire($"Home {MiseAJour.Version} est disponible : Menu → Mettre à jour Home");
         };
+    }
+    Ecran NouvelEcran()
+    {
+        var e = new Ecran(lib) { Width = 1920, Height = racine.Bounds.Height > 0 ? racine.Bounds.Height / echelle : 1080, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative), RenderTransform = new ScaleTransform(echelle, echelle) };
+        racine.Children.Add(e); return e;
     }
     void AppliquerFenetre() => WindowState = lib.Config.Fenetre || Environment.GetEnvironmentVariable("HOME_FENETRE") == "1" ? WindowState.Normal : WindowState.FullScreen;
 
@@ -97,6 +105,7 @@ sealed class Fenetre : Window
                 case "options": lib.OuvrirOptions(); break;
                 case "plus": lib.OuvrirPlus(); break;
                 case "ajout": lib.OuvrirAjout(); break;
+                case "ouverture": ecran.Ouvrir(fige: true); break;
                 case "recomps": MenusRecomps.Ouvrir(lib); break;
                 case "fiche": if (Catalogue.Par("totk-pc-recomp") is { } r) MenusRecomps.Fiche(lib, r, lib.FermerMenus); break;
                 case "saisie": lib.Demander("Rechercher un recomp", "Nom du jeu, au clavier", _ => { }); break;

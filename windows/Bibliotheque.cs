@@ -21,7 +21,13 @@ public sealed class Bibliotheque
     public Aides Aides = Aides.Clavier; public int? Batterie;
     // Ce que seule la fenêtre sait faire
     public Func<string, string[], Task<string?>>? ChoisirFichier; public Func<string, Task<string?>>? ChoisirDossier; public Func<Task<string?>>? PressePapiers;
-    public Action? Devant, AppliquerFenetre, Quitter;
+    public Action? Devant, AppliquerFenetre, Quitter, Reconstruire;
+    /// L'écran de démarrage est-il là ? Si oui, l'appui le passe et ne va pas plus loin.
+    public Func<bool>? PasserOuverture;
+    /// 1 = on entre dans un menu (il arrive par la droite), −1 = on revient au précédent (il arrive par la gauche)
+    public double SensMenu = 1;
+    public const int ColonnesGrille = 5;
+    readonly Dictionary<string, int> derniers = new();   // le dernier choix visé de chaque menu : on le retrouve en y revenant
 
     static string FichierConfig => Dossiers.Fichier("jeux.json");
     static string FichierStats => Dossiers.Fichier("statistiques.json");
@@ -34,14 +40,15 @@ public sealed class Bibliotheque
 
     // MARK: Bibliothèque
     /// Les jeux de la catégorie choisie : le dernier joué d'abord, puis par nom
-    public List<Jeu> Visibles => Jeux.Where(j => !Config.Masques.Contains(j.Id) && (IndexCategorie == 0 || j.Categorie == Categories[IndexCategorie]))
+    public List<Jeu> Visibles => JeuxDe(IndexCategorie);
+    public List<Jeu> JeuxDe(int categorie) => Jeux.Where(j => !Config.Masques.Contains(j.Id) && (categorie == 0 || j.Categorie == Categories.ElementAtOrDefault(categorie)))
         .OrderByDescending(j => Stats.TryGetValue(j.Id, out var s) ? s.DernierePartie ?? DateTime.MinValue : DateTime.MinValue).ThenBy(j => j.Nom, StringComparer.CurrentCultureIgnoreCase).ToList();
     public Jeu? Courant { get { var v = Visibles; return Selection < v.Count ? v[Selection] : null; } }
     public RecompInstalle? RecompDe(Jeu j) => j.Origine == Origine.Recomp ? Recomps.FirstOrDefault(r => "recomp:" + r.Id == j.Id) : null;
 
     public void Recharger(string? selectionner = null)
     {
-        Sons.Actifs = Config.Sons;
+        Sons.Actifs = Config.Sons; Mouvement.Reduit = Config.AnimationsReduites;
         Recomps = Json.Lire<List<RecompInstalle>>(Installation.Registre);
         var jeux = new List<Jeu>();
         jeux.AddRange(Steam.Jeux()); jeux.AddRange(Epic.Jeux());
@@ -68,6 +75,7 @@ public sealed class Bibliotheque
     // MARK: Navigation
     public void Nav(string k)
     {
+        if (PasserOuverture?.Invoke() == true) return;
         if (Saisie != null) { if (k == "back") { Saisie = null; Son("retour"); Signaler(); } return; }
         if (EnCours != null) return;
         if (Menu != null) { NavMenu(k); return; }
@@ -85,28 +93,53 @@ public sealed class Bibliotheque
     }
     void NavMenu(string k)
     {
-        var m = Menu!; var e = m.Elements;
-        int Suivant(int de, int pas) { for (var i = de + pas; i >= 0 && i < e.Count; i += pas) if (!e[i].Info) return i; return de; }   // saute les lignes d'information
+        var m = Menu!; var e = m.Elements; var total = e.Count;
+        bool Libre(int n) => n >= 0 && n < total && !e[n].Info;
+        int Suivant(int de, int pas) { for (var i = de + pas; i >= 0 && i < total; i += pas) if (!e[i].Info) return i; return de; }   // saute les lignes d'information
         var cible = IndexMenu;
         switch (k)
         {
-            case "down": cible = m.Grille ? Math.Min(IndexMenu + 3, e.Count - 1) : Suivant(IndexMenu, 1); break;
-            case "up": cible = m.Grille ? Math.Max(IndexMenu - 3, 0) : Suivant(IndexMenu, -1); break;
-            case "right" when m.Grille: cible = Suivant(IndexMenu, 1); break;
-            case "left" when m.Grille: cible = Suivant(IndexMenu, -1); break;
-            case "ok": if (IndexMenu < e.Count && !e[IndexMenu].Info) { Son("valider"); e[IndexMenu].Action(); } return;
-            case "back": Son("retour"); if (m.Retour != null) m.Retour(); else FermerMenus(); return;
+            case "ok": if (Libre(IndexMenu)) { Son("valider"); e[IndexMenu].Action(); } return;
+            case "back": Son("retour"); if (m.Retour != null) { SensMenu = -1; m.Retour(); SensMenu = 1; } else FermerMenus(); return;
             case "plus" or "options": Son("retour"); FermerMenus(); return;
         }
-        if (cible != IndexMenu && cible < e.Count && !e[cible].Info) { IndexMenu = cible; Son("deplacer"); Signaler(); }
+        switch (m.Genre)
+        {
+            case GenreMenu.Rangee:   // la rangée : de gauche à droite
+                cible = k is "right" or "down" ? Suivant(IndexMenu, 1) : k is "left" or "up" ? Suivant(IndexMenu, -1) : IndexMenu; break;
+            case GenreMenu.Grille:   // la grille d'affiches : quatre directions
+                const int c = ColonnesGrille;
+                if (k == "right") cible = Suivant(IndexMenu, 1);
+                else if (k == "left") cible = Suivant(IndexMenu, -1);
+                else if (k == "down")
+                {   // la même colonne, un rang plus bas ; sur le dernier rang incomplet, la dernière affiche
+                    var n = IndexMenu + c;
+                    while (n < total && !Libre(n)) n += c;
+                    if (n >= total && IndexMenu / c < (total - 1) / c) { n = total - 1; while (n > IndexMenu && !Libre(n)) n--; }
+                    if (Libre(n)) cible = n;
+                }
+                else if (k == "up") { var n = IndexMenu - c; while (n >= 0 && !Libre(n)) n -= c; if (Libre(n)) cible = n; }
+                break;
+            default:   // la roue : de haut en bas
+                cible = k == "down" ? Suivant(IndexMenu, 1) : k == "up" ? Suivant(IndexMenu, -1) : IndexMenu; break;
+        }
+        if (cible != IndexMenu && Libre(cible)) ViserMenu(cible, son: true);
     }
     public void Ouvrir(Menu m)
     {
         if (Menu == null) Son("ouvrir");
-        Menu = m; IndexMenu = Math.Max(0, m.Elements.FindIndex(e => !e.Info)); Signaler();
+        Menu = m; IndexMenu = Math.Max(0, m.Elements.FindIndex(e => !e.Info));
+        if (!m.Grille && derniers.TryGetValue(m.Titre, out var d) && d < m.Elements.Count && !m.Elements[d].Info) IndexMenu = d;
+        Signaler();
     }
     public void FermerMenus() { Menu = null; Signaler(); }
-    public void ChoisirMenu(int i) { if (Menu is { } m && i < m.Elements.Count && !m.Elements[i].Info) { IndexMenu = i; Son("valider"); Signaler(); m.Elements[i].Action(); } }
+    /// Vise un choix sans le valider (manette, clic sur un choix de la roue, souris qui passe sur une pastille)
+    public void ViserMenu(int i, bool son = false)
+    {
+        if (Menu is not { } m || i == IndexMenu || i < 0 || i >= m.Elements.Count || m.Elements[i].Info) return;
+        IndexMenu = i; derniers[m.Titre] = i; if (son) Son("deplacer"); Signaler();
+    }
+    public void ChoisirMenu(int i) { if (Menu is { } m && i >= 0 && i < m.Elements.Count && !m.Elements[i].Info) { IndexMenu = i; derniers[m.Titre] = i; Son("valider"); Signaler(); m.Elements[i].Action(); } }
     public void Dire(string texte)
     {
         Toast = texte; Signaler();
@@ -133,7 +166,7 @@ public sealed class Bibliotheque
                 if (await PreparerRecomp(r) is not { } exe) return;
                 cible = exe; if (!exe.StartsWith(r.Dossier, StringComparison.OrdinalIgnoreCase)) dossier = Path.GetDirectoryName(exe)!;
             }
-            Son("lancer"); FermerMenus();
+            Son("valider"); FermerMenus();
             Process? p = null;
             if (OperatingSystem.IsWindows())
                 p = Process.Start(new ProcessStartInfo(cible) { UseShellExecute = true, WorkingDirectory = File.Exists(cible) ? Path.GetDirectoryName(cible)! : "" });
@@ -149,7 +182,7 @@ public sealed class Bibliotheque
         catch (Exception e) { Journal.Ecrire($"lancement de {j.Nom} : {e.Message}"); Dire("Impossible de lancer " + j.Nom); }
         EnCours = null;
         var i = Visibles.FindIndex(x => x.Id == j.Id); if (i >= 0) Selection = i;
-        Devant?.Invoke(); Signaler();
+        Devant?.Invoke(); Son("ouvrir"); Signaler();
     }
     /// Attend la fin de la partie. Une app lancée directement : on attend son processus. Steam, Epic et les recomps : on regarde si un
     /// programme du dossier du jeu tourne (le launcher rend la main tout de suite, et beaucoup de jeux se relancent eux-mêmes).
@@ -224,24 +257,44 @@ public sealed class Bibliotheque
     }
 
     // MARK: Menus
+    /// Les options d'un jeu : un menu court, en rangée de pastilles comme sur Mac. Les images et le nom sont dans « Apparence ».
     public void OuvrirOptions()
     {
         if (Courant is not { } j) return;
         var r = RecompDe(j); var cat = r != null ? Catalogue.Par(r.Id) : null;
-        var m = new Menu { Titre = j.Nom, SousTitre = j.Categorie + (r != null ? $" · {r.Nom} {r.Version}" : ""), Art = Arts.GetValueOrDefault(j.Id)?.Couverture, Symbole = "gamecontroller" };
-        m.Elements.Add(new("Jouer", "play.fill", () => { FermerMenus(); Lancer(); }));
+        var m = new Menu { Titre = j.Nom, SousTitre = j.Categorie + (r != null ? $" · {r.Nom} {r.Version}" : ""), Logo = Arts.GetValueOrDefault(j.Id)?.Logo, Symbole = "gamecontroller" };
+        m.Elements.Add(new("Jouer", "play.fill", () => { FermerMenus(); Lancer(); }, DerniereFois(j)));
         if (r != null && cat != null && cat.Version != r.Version) m.Elements.Add(new("Mettre à jour", "arrow.down.circle", () => MenusRecomps.Fiche(this, cat, OuvrirOptions), $"{r.Version} → {cat.Version}"));
-        m.Elements.Add(new("Changer la jaquette", "photo", () => _ = ChoisirImage(j, "couverture"), "Depuis un fichier image") { Section = "Apparence" });
-        m.Elements.Add(new("Changer le fond", "photo.fill", () => _ = ChoisirImage(j, "fond"), "Depuis un fichier image"));
-        m.Elements.Add(new("Changer le logo", "textformat", () => _ = ChoisirImage(j, "logo"), "Depuis un fichier image (PNG transparent)"));
-        m.Elements.Add(new("Rechercher les images", "magnifyingglass", () => RechercherImages(j), SteamGridDB.Cle != null ? "Steam, catalogue, SteamGridDB" : "Sans clé SteamGridDB : Steam et catalogue seulement"));
-        m.Elements.Add(new("Renommer", "pencil", () => Demander("Nouveau nom", j.Nom, n => { Config.Noms[j.Id] = n; Enregistrer(); FermerMenus(); Recharger(); })));
-        if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier)) { Section = "Jeu" });
+        m.Elements.Add(new("Apparence", "paintbrush", () => OuvrirApparence(j), "Jaquette, fond, logo et nom"));
+        if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier), j.Dossier));
         if (r != null) m.Elements.Add(new("Page GitHub du recomp", "safari", () => Systeme.Ouvrir("https://github.com/" + r.Depot), r.Depot));
         m.Elements.Add(new("Masquer", "eye.slash", () => { Config.Masques.Add(j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le jeu reste installé ; Menu → Jeux masqués pour le remettre"));
-        if (r != null) m.Elements.Add(new("Désinstaller", "trash", () => ConfirmerDesinstallation(j, r)) { Destructif = true });
+        if (r != null) m.Elements.Add(new("Désinstaller", "trash", () => ConfirmerDesinstallation(j, r), "Le dossier du recomp part à la Corbeille") { Destructif = true });
         if (j.Origine == Origine.App) m.Elements.Add(new("Retirer de Home", "trash", () => { Config.Jeux.RemoveAll(e => "app:" + e.Chemin == j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le programme n'est pas supprimé") { Destructif = true });
         Ouvrir(m);
+    }
+    /// « Dernière partie hier · 3 h 20 min de jeu » : ce que l'écran d'accueil ne dit plus, sous le choix « Jouer »
+    string DerniereFois(Jeu j)
+    {
+        if (!Stats.TryGetValue(j.Id, out var s) || s.DernierePartie is not { } d) return "Jamais joué";
+        var jours = (DateTime.Today - d.Date).Days;
+        var quand = jours == 0 ? "aujourd'hui" : jours == 1 ? "hier" : jours < 7 ? $"il y a {jours} jours" : jours < 60 ? $"il y a {jours / 7} semaine{(jours >= 14 ? "s" : "")}" : $"il y a {jours / 30} mois";
+        return "Dernière partie " + quand + (s.Minutes > 0 ? " · " + (s.Minutes >= 60 ? $"{s.Minutes / 60} h {s.Minutes % 60} min de jeu" : $"{s.Minutes} min de jeu") : "");
+    }
+    void OuvrirApparence(Jeu j)
+    {
+        Ouvrir(new Menu
+        {
+            Titre = "Apparence", SousTitre = j.Nom, Symbole = "paintbrush", Retour = OuvrirOptions,
+            Elements =
+            {
+                new("Changer la jaquette", "photo", () => _ = ChoisirImage(j, "couverture"), "Depuis un fichier image"),
+                new("Changer le fond", "photo.fill", () => _ = ChoisirImage(j, "fond"), "Depuis un fichier image"),
+                new("Changer le logo", "textformat", () => _ = ChoisirImage(j, "logo"), "Depuis un fichier image (PNG transparent)"),
+                new("Rechercher les images", "magnifyingglass", () => RechercherImages(j), SteamGridDB.Cle != null ? "Steam, catalogue, SteamGridDB" : "Sans clé SteamGridDB : Steam et catalogue seulement"),
+                new("Renommer", "pencil", () => Demander("Nouveau nom", j.Nom, n => { Config.Noms[j.Id] = n; Enregistrer(); FermerMenus(); Recharger(); }), j.Nom),
+            },
+        });
     }
     void ConfirmerDesinstallation(Jeu j, RecompInstalle r)
     {
@@ -281,8 +334,11 @@ public sealed class Bibliotheque
         m.Elements.Add(new("Ajouter un jeu", "plus", OuvrirAjout, "Recomps, apps et jeux Windows"));
         m.Elements.Add(new("Actualiser la bibliothèque", "arrow.clockwise", () => { FermerMenus(); Recharger(); Dire("Bibliothèque actualisée"); }, "Relit Steam, Epic Games et les recomps"));
         if (Config.Masques.Count > 0) m.Elements.Add(new("Jeux masqués", "eye", OuvrirMasques, $"{Config.Masques.Count} masqué{(Config.Masques.Count > 1 ? "s" : "")}"));
-        m.Elements.Add(new("Sons de l'interface", Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, Config.Sons ? "Activés" : "Coupés") { Section = "Réglages" });
-        m.Elements.Add(new("Affichage", "rectangle", () => { Config.Fenetre = !Config.Fenetre; Enregistrer(); AppliquerFenetre?.Invoke(); OuvrirPlus(); }, Config.Fenetre ? "En fenêtre" : "Plein écran"));
+        // « Nom : état » : la roue montre l'état dans une capsule, à côté du choix visé
+        m.Elements.Add(new("Sons de l'interface : " + (Config.Sons ? "activés" : "coupés"), Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, "Les sons des menus et de la bibliothèque") { Section = "Réglages" });
+        m.Elements.Add(new("Affichage : " + (Config.Fenetre ? "en fenêtre" : "plein écran"), "rectangle", () => { Config.Fenetre = !Config.Fenetre; Enregistrer(); AppliquerFenetre?.Invoke(); OuvrirPlus(); }, "F11 change aussi"));
+        m.Elements.Add(new("Animations : " + (Config.AnimationsReduites ? "réduites" : "complètes"), "sparkles", () => { Config.AnimationsReduites = !Config.AnimationsReduites; Mouvement.Reduit = Config.AnimationsReduites; Enregistrer(); Reconstruire?.Invoke(); OuvrirPlus(); },
+            "Réduites : les mouvements deviennent un fondu très court"));
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
         m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, recomps, journal") { Section = MiseAJour.Version == null ? null : "Home" });

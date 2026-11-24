@@ -31,6 +31,7 @@ public sealed class Config
     public Dictionary<string, string> Noms { get; set; } = new();   // ids renommés
     public bool Sons { get; set; } = true;
     public bool Fenetre { get; set; }                         // en fenêtre plutôt qu'en plein écran
+    public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
 }
 
 /// Un recomp installé par Home : d'où il vient, où il est, comment on le lance
@@ -52,11 +53,15 @@ public sealed class ElementMenu
     public ElementMenu() { }
     public ElementMenu(string libelle, string icone, Action action, string? detail = null) { Libelle = libelle; Icone = icone; Action = action; Detail = detail; }
 }
-/// Un menu : titre, illustration (jaquette du jeu, image distante ou grand symbole), texte d'explication, et où revenir avec B
+/// La forme d'un menu à l'écran (voir VuesMenus.cs) : une rangée de pastilles, une roue, ou une grille d'affiches
+public enum GenreMenu { Rangee, Roue, Grille }
+/// Un menu : titre, logo du jeu, image distante ou grand symbole, texte d'explication, et où revenir avec B
 public sealed class Menu
 {
     public string Titre = ""; public string? SousTitre; public List<ElementMenu> Elements = new();
-    public string? Symbole; public Bitmap? Art; public string? ImageURL; public string? Texte; public Action? Retour; public bool Grille;
+    public string? Symbole; public Bitmap? Logo; public string? ImageURL; public string? Texte; public Action? Retour; public bool Grille;
+    /// Comme sur Mac : un menu court (7 choix au plus, tous actionnables, sans image) est une rangée de pastilles ; les autres, une roue
+    public GenreMenu Genre => Grille ? GenreMenu.Grille : Elements.Count is > 0 and <= 7 && Elements.All(e => !e.Info && e.Image == null) ? GenreMenu.Rangee : GenreMenu.Roue;
 }
 /// Une question posée au clavier (recherche, clé SteamGridDB)
 public sealed class Saisie { public string Titre = ""; public string? Aide; public Action<string> Valider = _ => { }; }
@@ -120,6 +125,7 @@ public static class Icones
         ("record", "Record"), ("rectangle", "Fullscreen"), ("trash", "Delete"), ("eye.slash", "EyeOff"), ("eye", "Eye"), ("xmark", "Close"),
         ("leaf", "Leaf"), ("sparkles", "Creation"), ("clock", "ClockOutline"), ("gear", "Cog"), ("info", "InformationOutline"), ("exclamation", "AlertOutline"),
         ("chevron.right", "ChevronRight"), ("star", "Star"), ("shield", "ShieldCheckOutline"), ("link", "Github"), ("person", "Account"), ("battery", "Battery"),
+        ("wand", "AutoFix"), ("figure", "Run"),
     ];
     static readonly Dictionary<string, Geometry> cache = new();
     public static Geometry De(string sf)
