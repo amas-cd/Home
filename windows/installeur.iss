@@ -1,4 +1,4 @@
-; Le setup de Home pour Windows (Inno Setup 6), fabriqué par le workflow : dist\Home-Setup.exe.
+; Le setup de Home pour Windows (Inno Setup 6), fabriqué par le workflow : dist\Home-Setup.exe, publié sous le nom Home-win64-setup.exe.
 ; Installe pour l'utilisateur seul, sans droits administrateur : Home peut ainsi se mettre à jour tout seul en relançant ce setup
 ; en silencieux (/SILENT). Les données (jeux.json, recomps…) sont ailleurs, dans %LOCALAPPDATA%\Home : une mise à jour ou une
 ; désinstallation n'y touche pas.

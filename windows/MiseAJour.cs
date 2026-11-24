@@ -1,6 +1,5 @@
 // Home pour Windows — les mises à jour de Home lui-même.
-// Le dépôt du code est privé : les setups sont recopiés par le workflow dans un dépôt public qui ne contient qu'eux
-// (amas-cd/Home-releases). Home y lit la dernière version sans jeton : aucun secret dans l'app.
+// Le dépôt est public : Home lit la dernière release de amas-cd/Home sans jeton. Aucun secret dans l'app.
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -8,8 +7,9 @@ namespace Home;
 
 public static class MiseAJour
 {
-    public const string Depot = "amas-cd/Home-releases";
-    const string Fichier = "Home-Setup.exe";
+    public const string Depot = "amas-cd/Home";
+    /// Le setup dans une release : son nom d'aujourd'hui, puis l'ancien (les releases d'avant la 0.3.0)
+    static readonly string[] Fichiers = ["Home-win64-setup.exe", "Home-Setup.exe"];
     public static string? Version { get; private set; }
     static string? adresse, empreinte;
 
@@ -24,9 +24,9 @@ public static class MiseAJour
         if (d == null || d.RootElement.ValueKind != JsonValueKind.Object || !d.RootElement.TryGetProperty("tag_name", out var tag)) return false;
         var version = (tag.GetString() ?? "").TrimStart('v');
         if (!PlusRecente(version, Bibliotheque.Version)) return false;
-        foreach (var a in d.RootElement.GetProperty("assets").EnumerateArray())
+        var assets = d.RootElement.GetProperty("assets").EnumerateArray().ToList();
+        foreach (var a in Fichiers.SelectMany(nom => assets.Where(x => x.GetProperty("name").GetString() == nom)))
         {
-            if (a.GetProperty("name").GetString() != Fichier) continue;
             var url = a.GetProperty("browser_download_url").GetString() ?? "";
             var dg = a.TryGetProperty("digest", out var x) && x.ValueKind == JsonValueKind.String ? x.GetString()! : "";
             if (!url.StartsWith($"https://github.com/{Depot}/releases/download/", StringComparison.OrdinalIgnoreCase) || !dg.StartsWith("sha256:")) continue;
@@ -44,7 +44,7 @@ public static class MiseAJour
         if (lib.Tache is { Fini: false }) { lib.Dire("Une installation est déjà en cours"); return; }
         var t = new Tache { Titre = "Mise à jour de Home " + Version, Etape = "Téléchargement…", Fraction = 0 };
         lib.Tache = t; lib.FermerMenus();
-        var setup = Dossiers.Fichier("telechargements", Fichier);
+        var setup = Dossiers.Fichier("telechargements", Fichiers[0]);
         try
         {
             var recue = await Reseau.Telecharger(adresse, setup, (lu, total) => { t.Fraction = total > 0 ? 0.95 * lu / total : null; t.Etape = $"Téléchargement… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); lib.Signaler(); });
