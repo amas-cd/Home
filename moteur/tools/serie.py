@@ -35,7 +35,7 @@ import tempfile
 import time
 from pathlib import Path
 
-IDENT = ('-c', 'user.name=Anas', '-c', 'user.email=assosbs9@gmail.com', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false')
+IDENT = ('-c', 'user.name=Anas', '-c', 'user.email=273038692+amas-cd@users.noreply.github.com', '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false')
 FUSION = ('-c', 'merge.conflictStyle=diff3', '-c', 'diff.renameLimit=30000', '-c', 'merge.renameLimit=30000')
 
 
@@ -110,7 +110,7 @@ def infos_patch(fichier, tmp):
     champs = dict(l.split(': ', 1) for l in r.stdout.splitlines() if ': ' in l)
     sujet = re.sub(r'^\[PATCH[^\]]*\]\s*', '', champs.get('Subject', Path(fichier).stem))
     corps = msg.read_text('utf-8', 'replace') if msg.exists() else ''
-    return {'auteur': f"{champs.get('Author', 'Anas')} <{champs.get('Email', 'assosbs9@gmail.com')}>", 'date': champs.get('Date', ''),
+    return {'auteur': f"{champs.get('Author', 'Anas')} <{champs.get('Email', '273038692+amas-cd@users.noreply.github.com')}>", 'date': champs.get('Date', ''),
             'sujet': sujet, 'message': sujet + ('\n\n' + corps.strip() + '\n' if corps.strip() else '\n')}
 
 
@@ -361,7 +361,7 @@ def rejouer(arbre_dir, ancienne, patchs, rapport=None):
                 return bilan
             if git('diff', '--cached', '--quiet', cwd=arbre.d).returncode == 0:
                 bilan['deja'].append(p.name); continue          # l'amont a déjà ce changement
-            env = dict(os.environ, GIT_COMMITTER_NAME='Anas', GIT_COMMITTER_EMAIL='assosbs9@gmail.com')
+            env = dict(os.environ, GIT_COMMITTER_NAME='Anas', GIT_COMMITTER_EMAIL='273038692+amas-cd@users.noreply.github.com')
             c = subprocess.run(['git', *IDENT, 'commit', '--quiet', '--author', info['auteur'], *(['--date', info['date']] if info['date'] else []), '-F', '-'],
                                cwd=str(arbre.d), input=info['message'].encode(), capture_output=True, env=env, check=False)
             if c.returncode:

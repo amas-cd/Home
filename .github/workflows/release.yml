@@ -1,6 +1,7 @@
 # Construit Home.app sur un Mac de GitHub, Home pour Windows sur un PC de GitHub, et publie une release avec les deux.
-# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home.dmg (Mac) et Home-Setup.exe (Windows),
-#   que Home télécharge pour se mettre à jour. Un tag v* poussé fait pareil.
+# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home-macSilicon.dmg (Mac, Apple
+#   Silicon) et Home-win64-setup.exe (Windows 64 bits), chacun avec son .sha256. Le dépôt est public : Home lit ses releases sans jeton pour se
+#   mettre à jour. Un tag v* poussé fait pareil.
 # - Un push sur main, ou Run workflow sans version : construction seule, l'app est gardée 7 jours dans les artefacts du run.
 name: Construire Home
 
@@ -58,16 +59,16 @@ jobs:
         run: |
           # Home.app et un raccourci vers Applications : on ouvre le .dmg et on glisse l'app dedans
           mkdir -p dist/dmg && cp -R dist/Home.app dist/dmg/Home.app && ln -s /Applications dist/dmg/Applications
-          hdiutil create -volname "Home" -srcfolder dist/dmg -fs HFS+ -format UDZO -ov dist/Home.dmg
-          cd dist && shasum -a 256 Home.dmg | tee Home.dmg.sha256
+          hdiutil create -volname "Home" -srcfolder dist/dmg -fs HFS+ -format UDZO -ov dist/Home-macSilicon.dmg
+          cd dist && shasum -a 256 Home-macSilicon.dmg | tee Home-macSilicon.dmg.sha256
 
       - name: Garder l'app (artefact)
         uses: actions/upload-artifact@v4
         with:
           name: Home-${{ steps.version.outputs.version }}
           path: |
-            dist/Home.dmg
-            dist/Home.dmg.sha256
+            dist/Home-macSilicon.dmg
+            dist/Home-macSilicon.dmg.sha256
           retention-days: 7
 
   # Home pour Windows (dossier windows/, C# / Avalonia) : même numéro de version que l'app Mac. Autonome : .NET est dans le zip.
@@ -98,15 +99,17 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           & $iscc windows\installeur.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          (Get-FileHash dist/Home-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  Home-Setup.exe" | Out-File -Encoding ascii dist/Home-Setup.exe.sha256
+          # le nom publié : Home-win64-setup.exe (windows/installeur.iss écrit Home-Setup.exe ; on le renomme ici, sans toucher à windows/)
+          Move-Item -Force dist/Home-Setup.exe dist/Home-win64-setup.exe
+          (Get-FileHash dist/Home-win64-setup.exe -Algorithm SHA256).Hash.ToLower() + "  Home-win64-setup.exe" | Out-File -Encoding ascii dist/Home-win64-setup.exe.sha256
 
       - name: Garder l'app (artefact)
         uses: actions/upload-artifact@v4
         with:
           name: Home-Windows-${{ needs.construire.outputs.version }}
           path: |
-            dist/Home-Setup.exe
-            dist/Home-Setup.exe.sha256
+            dist/Home-win64-setup.exe
+            dist/Home-win64-setup.exe.sha256
           retention-days: 7
 
   # La release ne sort que si les deux apps ont compilé : jamais une version Mac sans sa version Windows
@@ -126,16 +129,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.construire.outputs.version }}
         run: |
-          gh release create "v${VERSION}" dist/Home.dmg dist/Home.dmg.sha256 dist/Home-Setup.exe dist/Home-Setup.exe.sha256 \
+          gh release create "v${VERSION}" dist/Home-macSilicon.dmg dist/Home-macSilicon.dmg.sha256 dist/Home-win64-setup.exe dist/Home-win64-setup.exe.sha256 \
             --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "Home ${VERSION}" --generate-notes
-
-      # Ce dépôt est privé : Home pour Windows lit ses mises à jour dans un dépôt public qui ne reçoit que le setup.
-      # Il faut le secret RELEASES_TOKEN (jeton limité à ce dépôt public, « Contents : écriture »). Sans lui, l'étape ne fait rien.
-      - name: Recopier le setup dans le dépôt public
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          VERSION: ${{ needs.construire.outputs.version }}
-        run: |
-          if [ -z "${GH_TOKEN}" ]; then echo "::warning::RELEASES_TOKEN absent : le setup n'est pas recopié dans amas-cd/Home-releases, pas de mise à jour automatique sur Windows"; exit 0; fi
-          gh release create "v${VERSION}" dist/Home-Setup.exe dist/Home-Setup.exe.sha256 \
-            --repo amas-cd/Home-releases --title "Home ${VERSION}" --notes "Home ${VERSION} pour Windows."

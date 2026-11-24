@@ -36,7 +36,8 @@ Identifiants :
 
 ## Le dépôt
 
-Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
+Le dépôt est **amas-cd/Home**, **public** : tout ce qui y entre (code, commentaires, messages de commit, patchs) est lisible par tous.
+Il n'y a qu'un dépôt : le code, et les releases que Home lit sans jeton pour se mettre à jour.
 
 | Chemin | Contenu |
 |---|---|
@@ -53,10 +54,11 @@ Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
 | `moteur/compat/pc.json` | Liste de compatibilité PC, avec sources : `bloque` (jamais lancé), `verifie`, `linux`. Un jeu absent n'est jamais bloqué |
 | `moteur/.upstream-ref`, `moteur/mng/` | Versions figées : commit de nxnative ; commit de MacNativeGames + les commits d'Anas en patchs |
 | `scripts/installer-local.sh` | Recopie le dépôt dans `/Applications/Home/moteur`, puis compile et installe Home sur ce Mac |
-| `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home.dmg` pour un tag `v*` ou pour « Run workflow » avec une version |
+| `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home-macSilicon.dmg` et `Home-win64-setup.exe` (chacun avec son `.sha256`) pour un tag `v*` ou pour « Run workflow » avec une version |
 | `.claude/` | Ce contexte : le hook Stop qui te rappelle de demander l'envoi de la mise à jour |
 
-**Jamais dans le dépôt** : jeux, ROM, NSP/XCI, clés (`prod.keys`, `title.keys`), fichiers système, clé SteamGridDB, clé SSH du
+**Jamais dans le dépôt** (il est public, et l'historique git ne s'efface pas) : adresse IP ou nom d'hôte d'un serveur, pseudo d'un
+compte, chemin personnel, et aussi jeux, ROM, NSP/XCI, clés (`prod.keys`, `title.keys`), fichiers système, clé SteamGridDB, clé SSH du
 serveur (`*.pem`), jetons Epic/Legendary, recettes Obelisk propres à un Mac, journaux, sauvegardes. Le `.gitignore` en couvre
 une partie : vérifie quand même `git status` avant chaque commit.
 
@@ -134,7 +136,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `VuesMenus.cs` | `VueMenu` : les trois formes de `MenuView` (rangée de pastilles, roue, grille d'affiches). `Menu.Genre` choisit la forme, comme sur Mac |
 | `ANIMATIONS.md` | La fiche des animations de l'app Mac (courbes, durées, distances) : la référence de `Vues.cs` et `VuesMenus.cs` |
 | `Manette.cs` | `Manette` (XInput), `Sons` (les .wav de `app/sons`), `Systeme` (processus d'un dossier, Corbeille) |
-| `MiseAJour.cs` | Mise à jour de Home depuis le dépôt public des setups |
+| `MiseAJour.cs` | Mise à jour de Home depuis les releases de amas-cd/Home |
 | `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |
 
 Données sur le PC : `%LOCALAPPDATA%\Home` (`jeux.json`, `statistiques.json`, `recomps.json`, `media/`, `cache/`, `recomps/<id>/`,
@@ -154,15 +156,14 @@ la fenêtre puis quitte : lis le PNG. Cette image ne montre ni les flous ni un m
 `HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille)
 ne se teste pas sur Mac.
 
-Le workflow compile `windows/` sur `windows-latest` (job `windows`), puis fabrique `Home-Setup.exe` avec Inno Setup
-(`windows/installeur.iss` : installation pour l'utilisateur seul dans `%LOCALAPPDATA%\Programs\Home`). La release contient
-`Home.dmg` et `Home-Setup.exe` ; elle ne sort que si les deux compilent.
+Le workflow compile `windows/` sur `windows-latest` (job `windows`), puis fabrique le setup avec Inno Setup
+(`windows/installeur.iss` : installation pour l'utilisateur seul dans `%LOCALAPPDATA%\Programs\Home`) et le publie sous le nom
+`Home-win64-setup.exe`. La release contient `Home-macSilicon.dmg` et `Home-win64-setup.exe`, chacun avec son `.sha256` ; elle ne
+sort que si les deux compilent.
 
-**Mises à jour sur Windows** (`MiseAJour.cs`) : ce dépôt est privé, donc le workflow recopie le setup dans le dépôt public
-**amas-cd/Home-releases** (rien d'autre n'y va : ni code, ni app Mac). Home y lit la dernière version au démarrage, sans jeton,
-et propose « Mettre à jour Home » : il télécharge le setup, vérifie son SHA-256, le lance en silencieux et se rouvre.
-La recopie a besoin du secret GitHub `RELEASES_TOKEN` (jeton d'Anas limité au dépôt public, « Contents : écriture »). Ne le lis
-jamais, ne le mets jamais dans un fichier : c'est Anas qui le crée et le range dans Settings → Secrets → Actions.
+**Mises à jour sur Windows** (`MiseAJour.cs`) : Home lit la dernière release de **amas-cd/Home** au démarrage, sans jeton (le
+dépôt est public), et propose « Mettre à jour Home » : il télécharge `Home-win64-setup.exe`, vérifie son SHA-256, le lance en
+silencieux et se rouvre. Il n'y a plus de dépôt amas-cd/Home-releases ni de secret `RELEASES_TOKEN`.
 
 ## Les scripts (`moteur/outils/`)
 
@@ -235,7 +236,7 @@ Anas t'utilise surtout depuis l'**onglet Code** de l'app Claude. Regarde d'abord
 - **Installer sur le Mac d'Anas** pour qu'il teste (demande-lui avant : Home se ferme et se relance) :
   `bash scripts/installer-local.sh`. Ajoute `--sans-compiler` si seuls des scripts ont changé. Depuis le cloud, donne-lui plutôt
   la commande à coller dans son Terminal : `cd ~/Home && git pull && bash scripts/installer-local.sh`. Ou, s'il ne veut pas de
-  clone, il installe la release : `Home.dmg` de la page Releases.
+  clone, il installe la release : `Home-macSilicon.dmg` de la page Releases.
 - **Compatibilité** : la cible est macOS 14 ; GitHub compile avec Xcode 26 / Swift 6.3. Le Mac d'Anas a un SDK plus récent :
   une API de macOS 27 compile chez lui mais casse la release. Vérifie le résultat du workflow après chaque push.
 - **Signature** : avec le certificat local « Salon Dev », macOS garde les autorisations de Home (Accessibilité, Enregistrement
@@ -250,7 +251,7 @@ modifications pas envoyées.
 1. Sur le Mac, vérifie que ça compile (commande ci-dessus). Partout, relis `git status` / `git diff` (pas de secret, pas de
    fichier de jeu).
 2. Commit en français, sous le nom d'Anas :
-   `git -c user.name=Anas -c user.email=assosbs9@gmail.com commit`
+   `git -c user.name=Anas -c user.email=273038692+amas-cd@users.noreply.github.com commit`
    Le titre dit ce qui change pour lui ; le corps dit pourquoi.
 3. Pose la question avec **AskUserQuestion**, en rappelant en une phrase ce qui a changé. Options :
    - **Publier la release X.Y.Z** (recommandé si l'app ou les scripts changent pour lui ou ses amis) ;
@@ -294,7 +295,7 @@ Numéro de version `X.Y.Z` (dernière release : `gh api repos/amas-cd/home/relea
 
 Décidé avec Anas pour Home autonome (pour lui et ses amis) :
 
-1. **Fait** : dépôt privé, compilation et releases automatiques (0.1.0).
+1. **Fait** : dépôt (privé au départ, public depuis novembre 2026), compilation et releases automatiques (0.1.0).
 2. **Fait en grande partie (à tester sur un Mac neuf) : Home autonome.**
    - Fait : scripts embarqués et installés au démarrage ; « Préparer ce Mac » ; dossiers configurables (`Application Support/Salon/dossiers.json`,
      `HOME_RACINE` / `HOME_JEUX` dans les scripts) ; jeux Epic sans Obelisk (moteur Linux de Voile seulement : programmes 64 bits, pas .NET) ;

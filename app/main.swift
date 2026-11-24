@@ -3361,7 +3361,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rendre(MenuView(lib: lib, menu: sous, apercu: 1), "menu-sous.png")
             lib.openModeUtilisation(premier: true); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 0), "mode.png") }; lib.menu = nil
             let comptes = SalonMenu(title: "Comptes", items: [
-                SalonMenuItem(label: "Epic Games : Amas.16", detail: "Ta bibliothèque", icon: "logo:epic", tint: .purple, action: {}), SalonMenuItem(label: "Steam : non connecté", detail: "Se connecter", icon: "logo:steam", tint: .blue, action: {}),
+                SalonMenuItem(label: "Epic Games : Joueur", detail: "Ta bibliothèque", icon: "logo:epic", tint: .purple, action: {}), SalonMenuItem(label: "Steam : non connecté", detail: "Se connecter", icon: "logo:steam", tint: .blue, action: {}),
                 SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: {}), SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {})], roue: true)
             rendre(MenuView(lib: lib, menu: comptes, apercu: 1), "comptes.png")
             let ajout = SalonMenu(title: "Ajouter un jeu", items: [SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {}), SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: {}),
@@ -3651,7 +3651,7 @@ enum Atelier {
     static let jeux = Dossiers.jeux
     static let home = Dossiers.home   // Home.app à côté ; ici le moteur, MacNativeGames, les constructions, les journaux
     /// TOTK Online : l'adresse du serveur (ip:port) que le Salon donne au jeu à la place du joueur (TOTK_SWKBD_FIRST), lue dans
-    /// serveurs/totk-adresse.txt (une ligne, ex. 74.152.65.85:10014 pour le serveur Azure) ; sans ce fichier, le serveur local, que le Salon démarre lui-même
+    /// serveurs/totk-adresse.txt (une ligne, ex. 203.0.113.10:10014 pour un serveur distant) ; sans ce fichier, le serveur local, que le Salon démarre lui-même
     static func totkAdresse() -> String {
         let s = ((try? String(contentsOf: home.appendingPathComponent("serveurs/totk-adresse.txt"), encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return s.isEmpty ? "127.0.0.1:10014" : s
