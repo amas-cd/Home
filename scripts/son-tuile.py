@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-# Fabrique app/sons/tuile.wav, le son joué en passant d'un jeu à l'autre : le son « scroll_001 » de la banque Kenney (CC0), choisi par
-# Anas, rendu à peine plus grave et « profond » — il résonne dans une salle (réverbération lisse : quatre retards en boucle puis deux
-# diffuseurs, adoucie dans l'aigu). Ni note ajoutée, ni souffle : c'est le son lui-même qui résonne.
-#   python3 scripts/son-tuile.py [SOURCE.wav] [SORTIE.wav] [GRAVE=0.94] [SALLE_S=0.85] [NIVEAU_SALLE=0.46]
+# Fabrique app/sons/tuile.wav, le son joué en passant d'un jeu à l'autre : le tic « tick_001 » de la banque Kenney (CC0), à peine plus
+# grave, avec un soupçon de profondeur — une petite salle, très bas (réverbération lisse : quatre retards en boucle puis deux
+# diffuseurs, adoucie dans l'aigu). Court et discret : c'est un son qu'on entend cent fois de suite.
+#   python3 scripts/son-tuile.py [SOURCE.wav] [SORTIE.wav] [GRAVE=0.94] [SALLE_S=0.20] [NIVEAU_SALLE=0.11]
 import wave, struct, sys
 from pathlib import Path
 ici = Path(__file__).resolve().parent.parent
 a = sys.argv[1:]
-src = a[0] if len(a) > 0 else str(ici / 'app/sons/banque/scroll_001.wav'); dest = a[1] if len(a) > 1 else str(ici / 'app/sons/tuile.wav')
-grave = float(a[2]) if len(a) > 2 else 0.94; salle = float(a[3]) if len(a) > 3 else 0.85; niveau = float(a[4]) if len(a) > 4 else 0.46
+src = a[0] if len(a) > 0 else str(ici / 'app/sons/banque/tick_001.wav'); dest = a[1] if len(a) > 1 else str(ici / 'app/sons/tuile.wav')
+grave = float(a[2]) if len(a) > 2 else 0.94; salle = float(a[3]) if len(a) > 3 else 0.20; niveau = float(a[4]) if len(a) > 4 else 0.11
 w = wave.open(src); n = w.getnframes(); sr = w.getframerate(); ch = w.getnchannels()
 brut = struct.unpack('<%dh' % (n * ch), w.readframes(n)); w.close()
 mono = [sum(brut[i * ch:(i + 1) * ch]) / ch / 32768 for i in range(n)]
+mono = mono[:int(0.06 * sr)]                             # un seul coup, même si la source en enchaîne plusieurs
 # à peine plus grave : le son est relu un peu plus lentement (0,94 = environ un demi-ton plus bas)
 sec = []
 k = 0.0
@@ -41,5 +42,5 @@ fin = int(0.10 * sr)
 for i in range(fin): out[total - fin + i] *= 1 - i / fin
 mx = max(abs(v) for v in out)
 o = wave.open(dest, 'w'); o.setnchannels(2); o.setsampwidth(2); o.setframerate(sr)
-o.writeframes(b''.join(struct.pack('<hh', *[int(v / mx * 0.40 * 32767)] * 2) for v in out)); o.close()
+o.writeframes(b''.join(struct.pack('<hh', *[int(v / mx * 0.34 * 32767)] * 2) for v in out)); o.close()
 print(f'{dest} : {total / sr:.2f} s')
