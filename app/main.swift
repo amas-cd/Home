@@ -753,7 +753,28 @@ final class Library: ObservableObject {
             let fps = e["DM_FPS_TARGET"] == "30" ? "30 fps stables" : e["DM_FPS_HOLD"] == "off" ? "jamais retenu" : "images/s par défaut"
             return fps + (e["DM_PRESENT_UPSCALE"] == "off" ? " · sans MetalFX" : "") + (e["DM_COMPANION"] != nil ? " · serveur en ligne" : "")
         }
+        if Atelier.estOot(g) { let o = reglagesOot(); return Library.ootResolutions[o.res].0 + " · " + (Library.ootImages.first { $0.0 == o.images }?.1 ?? o.images) + (o.images.hasPrefix("lock-") ? " images/s" : "") }
         return config.reglages?[g.id]?["TOTK_RENDER_RES"] == "1600x900" ? "Rendu comme la Switch (1600×900)" : "Rendu 1080p"
+    }
+    /// Ocarina of Time (MacNativeGames) : résolution, images par seconde et qualité. Le jeu les garde dans des fichiers d'un mot, relus à chaque
+    /// lancement ; son panneau (touche 1) écrit les mêmes, mais il demande un clavier. Les valeurs sont celles de games/oot/runtime/settings_game.h.
+    static let ootResolutions: [(String, String)] = [
+        ("720p (depuis 480p)", "Dessiné en 480p puis agrandi : le plus léger, l'image la plus douce"),
+        ("720p", "Dessiné en 720p : léger, le réglage de départ du jeu"),
+        ("1080p (depuis 720p)", "Dessiné en 720p puis agrandi par MetalFX : presque aussi net que le 1080p, et assez léger pour 60 images par seconde"),
+        ("1080p", "Dessiné en 1080p : le plus net sur un écran 1080p, souvent trop lourd pour 60 images par seconde"),
+        ("2K (depuis 1080p)", "Dessiné en 1080p puis agrandi en 2560×1440 : pour un écran 2K"), ("2K", "Dessiné en 2560×1440 : très lourd"),
+        ("4K (depuis 2K)", "Choisi dans le jeu : très lourd"), ("4K", "Choisi dans le jeu : très lourd")]
+    static let ootImages: [(String, String, String)] = [
+        ("lock-30", "30", "Bloqué à 30 : le plus régulier, le réglage de départ du jeu"),
+        ("lock-60", "60", "Bloqué à 60 : le plus fluide ; à tenir avec une résolution légère"),
+        ("interp-1", "30 + 30 calculées", "Le jeu tourne à 30 et MetalFX ajoute une image entre deux : 60 à l'écran, avec un peu plus de retard à la manette"),
+        ("off", "sans limite", "Chaque image dès qu'elle est prête : moins régulier sur un écran 60 Hz")]
+    func reglagesOot() -> (res: Int, images: String, portable: Bool) {
+        let n = Atelier.motMNG(Atelier.ootDonnees, "graphics-canvas.txt").flatMap { Int($0) }.map { $0 == 8 ? 0 : $0 }   // 8 : l'ancien numéro du 720p depuis 480p
+        return (n.flatMap { Library.ootResolutions.indices.contains($0) ? $0 : nil } ?? 1,   // sans fichier : 720p
+                Atelier.motMNG(Atelier.ootDonnees, "graphics-frame.txt") ?? "lock-30",   // sans fichier : le jeu se bloque à 30
+                Atelier.motMNG(Atelier.ootDonnees, "graphics-profile.txt") != "0")   // « 0 » : qualité télé ; tout le reste : portable
     }
     func openReglages(_ g: Game) {
         let retour: () -> Void = { self.menu = self.optionsMenu(g) }
@@ -777,13 +798,22 @@ final class Library: ObservableObject {
             }
             items.append(SalonMenuItem(label: "Fichier des réglages", detail: Atelier.envURL(tid).path, icon: "doc.text", tint: .gray, action: { self.menu = nil; NSWorkspace.shared.open(Atelier.envURL(tid)) }))
         } else if Atelier.moteurDe(g) == .mng {
-            let r = config.reglages?[g.id] ?? [:]; let sw = r["TOTK_RENDER_RES"] == "1600x900"
-            items.append(SalonMenuItem(label: "Rendu : \(sw ? "comme la Switch (1600×900)" : "1080p")", detail: sw ? "Dessiné en 1600×900 puis agrandi : des bords plus doux, comme sur la télé" : "Dessiné directement à la taille de l'écran : le plus net", icon: "photo.tv", action: {
-                var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]; m["TOTK_RENDER_RES"] = sw ? nil : "1600x900"; all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) }))
+            let r = config.reglages?[g.id] ?? [:]; let sw = r["TOTK_RENDER_RES"] == "1600x900"; let oot = Atelier.estOot(g)
+            if oot {   // Ocarina of Time n'a pas TOTK_RENDER_RES : ses propres réglages, écrits là où son panneau les écrit
+                let o = reglagesOot(), res = Library.ootResolutions[o.res], im = Library.ootImages.firstIndex { $0.0 == o.images }
+                items.append(SalonMenuItem(label: "Résolution : \(res.0)", detail: res.1, icon: "photo.tv", action: {
+                    Atelier.ecrireMotMNG(Atelier.ootDonnees, "graphics-canvas.txt", String(o.res >= 5 ? 0 : o.res + 1)); self.openReglages(g) }))   // le 4K ne se choisit que dans le jeu
+                items.append(SalonMenuItem(label: "Images par seconde : \(im.map { Library.ootImages[$0].1 } ?? o.images)", detail: im.map { Library.ootImages[$0].2 } ?? "Choisi dans le jeu", icon: "speedometer", action: {
+                    Atelier.ecrireMotMNG(Atelier.ootDonnees, "graphics-frame.txt", Library.ootImages[((im ?? -1) + 1) % Library.ootImages.count].0); self.openReglages(g) }))
+                items.append(SalonMenuItem(label: "Qualité : \(o.portable ? "portable" : "télé")", detail: o.portable ? "Le profil portable du jeu : moins de végétation, plus léger" : "Le profil télé du jeu : plus de végétation, plus lourd", icon: "leaf.fill", action: {
+                    Atelier.ecrireMotMNG(Atelier.ootDonnees, "graphics-profile.txt", o.portable ? "0" : "1"); self.openReglages(g) }))
+            }
+            if !oot { items.append(SalonMenuItem(label: "Rendu :\(sw ? "comme la Switch (1600×900)" : "1080p")", detail: sw ? "Dessiné en 1600×900 puis agrandi : des bords plus doux, comme sur la télé" : "Dessiné directement à la taille de l'écran : le plus net", icon: "photo.tv", action: {
+                var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]; m["TOTK_RENDER_RES"] = sw ? nil : "1600x900"; all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) })) }
             let rt = r["TOTK_RT"] == "0"
             items.append(SalonMenuItem(label: "Processeur : \(rt ? "géré par macOS" : "temps réel (d'origine)")", detail: rt ? "Le jeu n'annonce plus son temps de travail : macOS ne le garde plus à basse fréquence dans les scènes chargées" : "Le jeu annonce son temps de travail à macOS (peut le coincer à basse fréquence dehors)", icon: "cpu", action: {
                 var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]; m["TOTK_RT"] = rt ? nil : "0"; all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) }))
-            items.append(SalonMenuItem(label: "Réglages dans le jeu", detail: "Touche 1 pendant la partie", icon: "keyboard", tint: .gray, info: true, action: {}))
+            items.append(SalonMenuItem(label: "Réglages dans le jeu", detail: Atelier.estOot(g) ? "Touche 1 pendant la partie ; ceux d'ici comptent au prochain lancement" : "Touche 1 pendant la partie", icon: "keyboard", tint: .gray, info: true, action: {}))
             if Atelier.scriptDedie(g) == "totk-mng-online.command" {
                 items.append(SalonMenuItem(label: "Moniteur du jeu en ligne", icon: "waveform.path.ecg", tint: .teal, action: { self.menu = nil; Atelier.terminal("totk-moniteur.command") }))
             }
@@ -4139,6 +4169,16 @@ enum Atelier {
         if bundle.hasPrefix("org.macnativegames.totk") { return ("TOTK", "totk", "totk") }
         if bundle.hasPrefix("org.macnativegames.botw") { return ("BotW", "botw", "botw") }
         return nil
+    }
+    static let ootDonnees = "OcarinaOfTime"
+    static func estOot(_ g: Game) -> Bool { (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.oot") }
+    /// Un réglage d'un jeu MacNativeGames : un fichier d'un mot dans son dossier de données, que le jeu relit à chaque lancement
+    static func motMNG(_ dossier: String, _ nom: String) -> String? {
+        (try? String(contentsOf: appSupport.appendingPathComponent("MacNativeGames/\(dossier)/\(nom)"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    static func ecrireMotMNG(_ dossier: String, _ nom: String, _ mot: String) {
+        let d = appSupport.appendingPathComponent("MacNativeGames/\(dossier)"); try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        try? (mot + "\n").write(to: d.appendingPathComponent(nom), atomically: true, encoding: .utf8)
     }
     /// Les jeux construits avant le registre ont leur propre script
     static func scriptDedie(_ g: Game) -> String? {
