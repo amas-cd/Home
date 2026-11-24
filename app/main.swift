@@ -922,37 +922,36 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Sons de Home", detail: (config.sons ?? true) ? "Activés" : "Coupés", icon: (config.sons ?? true) ? "speaker.wave.2" : "speaker.slash", tint: .purple, action: { self.toggleSounds(); self.openSoundSettings() }),
         ], hero: "speaker.wave.2.fill", back: { self.menu = self.plusMenu() })
     }
-    /// Avancé : cinq choix seulement, chacun ouvre un petit menu de sa famille (Home, Images, Jeux Switch) ou agit tout de suite
+    /// Avancé : trois choix — Système (Home lui-même, et ses images), Construction (les jeux Switch), Journaux
     func openAdvancedSettings() {
         menu = SalonMenu(title: "Avancé", items: [
-            SalonMenuItem(label: "Home", detail: "Démarrage, animations", icon: "house.fill", tint: .purple, action: { self.openAvanceHome() }),
-            SalonMenuItem(label: "Images", detail: "Jaquettes, fonds et logos", icon: "photo.fill", tint: .blue, action: { self.openAvanceImages() }),
-            SalonMenuItem(label: "Jeux Switch", detail: "Clés, construction, place", icon: "logo:switch", tint: .red, action: { self.openAvanceSwitch() }),
-            SalonMenuItem(label: "Lancement direct Epic", detail: "Un jeu Obelisk sans ouvrir Obelisk", icon: "bolt.fill", tint: .yellow, action: { self.menu = nil; Atelier.terminal("rocket-league-direct.command") }),
+            SalonMenuItem(label: "Système", detail: "Démarrage, animations, images", icon: "gearshape.fill", tint: .purple, action: { self.openAvanceHome() }),
+            SalonMenuItem(label: "Construction", detail: "Jeux Switch : clés, vitesse, place", icon: "hammer.fill", tint: .red, action: { self.openAvanceSwitch() }),
             SalonMenuItem(label: "Journaux", detail: "Les copie pour Claude", icon: "doc.text.magnifyingglass", tint: .gray, action: { self.menu = nil; self.lancer("journaux.command", titre: "Copie des journaux") }),
-        ].filter { i in (self.modeNintendo || i.label != "Jeux Switch") && (self.modePC || i.label != "Lancement direct Epic") }, hero: "gearshape.fill", back: { self.menu = self.plusMenu() })
+        ].filter { i in self.modeNintendo || i.label != "Construction" }, hero: "gearshape.fill", back: { self.menu = self.plusMenu() })
     }
     func openAvanceHome() {
         let veilleOff = salonRoot.appendingPathComponent("veille-off"), reduit = animationsReduites, ici: () -> Void = { self.openAvanceHome() }
-        menu = SalonMenu(title: "Home", items: [
+        menu = SalonMenu(title: "Système", items: [
             SalonMenuItem(label: "Ouverture à la manette : \(FileManager.default.fileExists(atPath: veilleOff.path) ? "non" : "oui")", detail: "Home s'ouvre quand une manette se connecte", icon: "gamecontroller.fill", tint: .green, action: {
                 if FileManager.default.fileExists(atPath: veilleOff.path) { try? FileManager.default.removeItem(at: veilleOff) } else { FileManager.default.createFile(atPath: veilleOff.path, contents: nil) }
                 ici() }),
             SalonMenuItem(label: "Écran de démarrage : \((config.ouverture ?? true) ? "oui" : "non")", detail: "L'intro et son jingle", icon: "play.rectangle.fill", tint: .purple, action: {
                 self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); ici() }),
-            SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", detail: "Des fondus courts à la place des mouvements", icon: reduit ? "tortoise.fill" : "hare.fill", tint: .teal, action: {
+            SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", detail: "Des fondus courts à la place des mouvements", icon: reduit ? "hand.raised.fill" : "hand.wave.fill", tint: .teal, action: {
                 UserDefaults.standard.set(!reduit, forKey: "animationsReduites"); ici() }),
-        ], hero: "house.fill", back: { self.openAdvancedSettings() })
+            SalonMenuItem(label: "Images", detail: "Jaquettes, fonds et logos", icon: "photo.fill", tint: .blue, action: { self.openAvanceImages() }),
+        ], hero: "gearshape.fill", back: { self.openAdvancedSettings() })
     }
     func openAvanceImages() {
         menu = SalonMenu(title: "Images", items: [
             SalonMenuItem(label: "Clé SteamGridDB", detail: SteamGridDB.key() == nil ? "Absente : pas de jaquettes" : "Enregistrée", icon: "key.fill", tint: .blue, action: { self.menu = nil; self.askKey() }),
             SalonMenuItem(label: "Dossier des images", detail: "L'ouvre dans le Finder", icon: "folder.fill", tint: .orange, action: { self.menu = nil; NSWorkspace.shared.open(salonRoot) }),
-        ], hero: "photo.fill", back: { self.openAdvancedSettings() })
+        ], hero: "photo.fill", back: { self.openAvanceHome() })
     }
     func openAvanceSwitch() {
         let ici: () -> Void = { self.openAvanceSwitch() }
-        menu = SalonMenu(title: "Jeux Switch", items: [
+        menu = SalonMenu(title: "Construction", items: [
             SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Ton fichier prod.keys", icon: "key.fill", tint: .yellow, action: {
                 let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
                 p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
