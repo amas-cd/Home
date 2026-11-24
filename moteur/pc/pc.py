@@ -305,7 +305,9 @@ def cmd_bibliotheque():
     for g in c.get_game_list(update_assets=True, platform='Windows'):
         e = compat(g.app_name, g.app_title, table, g.namespace) or {}
         tiers = (g.metadata or {}).get('customAttributes', {}).get('ThirdPartyManagedApp', {}).get('value')
-        sortie.append({'app': g.app_name, 'nom': g.app_title, 'namespace': g.namespace, 'installe': g.app_name in chez_home and Path(chez_home[g.app_name]['dossier']).is_dir(),
+        imgs = {i.get('type'): i.get('url') for i in (g.metadata or {}).get('keyImages', []) if i.get('url')}   # la jaquette : l'affiche en hauteur d'abord
+        image = next((imgs[t] for t in ('DieselGameBoxTall', 'OfferImageTall', 'DieselGameBox', 'OfferImageWide', 'Thumbnail') if t in imgs), None)
+        sortie.append({'app': g.app_name, 'nom': g.app_title, 'namespace': g.namespace, 'image': image, 'installe': g.app_name in chez_home and Path(chez_home[g.app_name]['dossier']).is_dir(),
                        'etat': e.get('etat') or 'inconnu', 'raison': e.get('raison'), 'preuve': e.get('preuve'), 'lanceur': tiers})
     dire(json.dumps(sorted(sortie, key=lambda j: j['nom'].lower()), ensure_ascii=False))
 

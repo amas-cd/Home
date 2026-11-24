@@ -390,7 +390,7 @@ final class Library: ObservableObject {
     func passerOuverture() {
         guard ouverture, !ouverturePart else { return }
         ouverturePart = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.ouverture = false; self.ouverturePart = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self.ouverture = false; self.ouverturePart = false }
     }
     @Published var ouverture = false   // l'animation d'ouverture (logo et jingle), au vrai lancement de l'app seulement
     var epicNouveau = false   // la prochaine connexion Epic ajoute un compte au lieu de remplacer le compte actif
@@ -863,7 +863,7 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Catégories", icon: "tag.fill", action: { self.openCategoriesSettings() }),
             SalonMenuItem(label: "Écrans", icon: "display.2", action: { self.openScreensSettings() }),
             SalonMenuItem(label: "Son", detail: "Général \(Int((macVolume * 100).rounded())) %\(macMuted ? " (muet)" : "") · sons de Home \((config.sons ?? true) ? "activés" : "coupés")", icon: "speaker.wave.2.fill", action: { self.openSoundSettings() }),
-            SalonMenuItem(label: "Capture", detail: capture, icon: "record.circle", action: { self.config.capture = !(self.config.capture ?? true); self.saveConfig(); self.menu = self.plusMenu() }),
+            SalonMenuItem(label: "Capture", detail: capture + " · " + Recorder.duree, icon: "record.circle", action: { self.openCapture() }),
             SalonMenuItem(label: "Avancé", icon: "ellipsis.circle.fill", tint: .gray, action: { self.openAdvancedSettings() }),
             SalonMenuItem(label: "Redémarrer", icon: "arrow.clockwise", tint: .cyan, action: {   // Home se ferme et se rouvre : la liste, les images et les réglages sont relus
                 self.menu = nil; Sounds.shared.play("retour")
@@ -926,6 +926,16 @@ final class Library: ObservableObject {
         ], hero: "speaker.wave.2.fill", back: { self.menu = self.plusMenu() })
     }
     /// Avancé : trois choix — Système (Home lui-même, et ses images), Construction (les jeux Switch), Journaux
+    /// Menu → Capture : l'activer, et choisir combien de temps en arrière le clip remonte
+    func openCapture() {
+        let oui = config.capture ?? true, n = Recorder.secondes
+        menu = SalonMenu(title: "Capture", items: [
+            SalonMenuItem(label: "Capture : \(oui ? "oui" : "non")", detail: oui && !CGPreflightScreenCaptureAccess() ? "Autorisation macOS manquante" : "Garde les derniers instants du jeu", icon: oui ? "record.circle.fill" : "record.circle", tint: .red, action: {
+                self.config.capture = !oui; self.saveConfig(); self.openCapture() }),
+            SalonMenuItem(label: "Durée : \(Recorder.duree)", detail: "Le temps en arrière qui est enregistré", icon: "timer", tint: .orange, action: {
+                let suite = [15, 30, 60, 120]; UserDefaults.standard.set(suite[((suite.firstIndex(of: n) ?? 0) + 1) % suite.count], forKey: "captureSecondes"); self.openCapture() }),
+        ], hero: "record.circle", back: { self.menu = self.plusMenu() })
+    }
     func openAdvancedSettings() {
         menu = SalonMenu(title: "Avancé", items: [
             SalonMenuItem(label: "Système", detail: "Démarrage, animations, images", icon: "gearshape.fill", tint: .purple, action: { self.openAvanceHome() }),
@@ -1139,7 +1149,7 @@ final class Library: ObservableObject {
         running = g; startedAt = Date(); Sounds.shared.play("valider"); overlay = true; lastInput = Date(); applySavedVolume(g)
         if config.capture ?? true {
             if CGPreflightScreenCaptureAccess() { Recorder.shared.start() }
-            else if !captureWarned { captureWarned = true; toast = "Capture des 15 s inactive : macOS ne reconnaît pas l'autorisation Enregistrement d'écran de cette version de Home (voir X → Réglages → Capture en jeu)" }
+            else if !captureWarned { captureWarned = true; toast = "Capture inactive : macOS ne reconnaît pas l'autorisation Enregistrement d'écran de cette version de Home (voir X → Réglages → Capture en jeu)" }
         }
         // Le Salon reste derrière le jeu (bureau noir, façon Big Picture) : sa fenêtre descend sous le niveau normal pour que le jeu soit toujours
         // au-dessus (même en cliquant sur le fond), le HUD par-dessus, et il remonte à la fin du jeu
@@ -1433,7 +1443,7 @@ final class Library: ObservableObject {
         }
         volume = c; Sounds.shared.gain = c; lastInput = Date(); volumeFlash = Date(); flashGeneral = false; if c > 0 { gameMuted = false }
     }
-    var quickItems: [(String, String)] { [("Enregistrer les 15 dernières secondes", Recorder.shared.active ? "record.circle" : "record.circle.fill"), ("Fermer le jeu", "xmark.circle"), ("Retour à Home", "house"),
+    var quickItems: [(String, String)] { [("Enregistrer : \(Recorder.duree)", Recorder.shared.active ? "record.circle" : "record.circle.fill"), ("Fermer le jeu", "xmark.circle"), ("Retour à Home", "house"),
                                           (volumeLabel, volume == 0 ? "speaker.slash" : volume < 0.5 ? "speaker.wave.1" : "speaker.wave.3"),
                                           ("Volume du Mac", macVolume == 0 ? "speaker.slash" : macVolume < 0.5 ? "speaker.wave.1" : "speaker.wave.3")]
                                           + (enLigne() != nil ? [("Joueurs", "person.2.fill")] : []) }
@@ -1524,11 +1534,11 @@ final class Library: ObservableObject {
         case 0:
             guard let g = running else { return }
             guard Recorder.shared.active else {   // la mémoire tampon ne tournait pas : rien de passé à sauver
-                if CGPreflightScreenCaptureAccess() { Recorder.shared.start(); toast = "La capture vient de démarrer : les 15 dernières secondes seront disponibles dans 15 s" }
+                if CGPreflightScreenCaptureAccess() { Recorder.shared.start(); toast = "La capture vient de démarrer : le clip sera disponible dans \(Recorder.duree)" }
                 else { toast = "Pas d'autorisation Enregistrement d'écran pour cette version de Home — signe Home avec le certificat « Salon Dev » puis réactive-le dans Réglages → Confidentialité" }
                 Sounds.shared.play("retour"); return }
             Sounds.shared.play("valider"); toast = "Enregistrement du clip…"
-            Recorder.shared.saveLast(seconds: 15, game: g.name) { [weak self] url in DispatchQueue.main.async { self?.toast = url.map { "Clip enregistré : Vidéos/Salon/\($0.lastPathComponent)" } ?? "Clip impossible (voir salon.log)"; Sounds.shared.play(url == nil ? "retour" : "lancer") } }
+            Recorder.shared.saveLast(seconds: Double(Recorder.secondes), game: g.name) { [weak self] url in DispatchQueue.main.async { self?.toast = url.map { "Clip enregistré : Vidéos/Salon/\($0.lastPathComponent)" } ?? "Clip impossible (voir salon.log)"; Sounds.shared.play(url == nil ? "retour" : "lancer") } }
             closeQuick()
         case 1:   // fermer le jeu : Home repasse devant d'abord, le jeu se ferme derrière lui (sinon macOS montrait le bureau entre les deux)
             Sounds.shared.play("valider"); closeQuick(); toast = "Fermeture du jeu…"
@@ -1607,7 +1617,11 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var writer: AVAssetWriter?; private var vIn: AVAssetWriterInput?; private var aIn: AVAssetWriterInput?
     private var segStart = CMTime.invalid; private var segURL: URL?
     private var segments: [URL] = []
-    private let segLen = 5.0, keep = 4
+    private let segLen = 5.0
+    /// La durée du clip gardé, en secondes (Menu → Capture → Durée) : 15 par défaut
+    static var secondes: Int { let n = UserDefaults.standard.integer(forKey: "captureSecondes"); return [15, 30, 60, 120].contains(n) ? n : 15 }
+    static var duree: String { secondes < 60 ? "\(secondes) s" : secondes == 60 ? "1 min" : "\(secondes / 60) min" }
+    private var keep: Int { Int((Double(Recorder.secondes) / segLen).rounded(.up)) + 1 }   // un segment de plus : celui en cours n'est pas fini
     private var size = CGSize(width: 1920, height: 1080)
     private let tmp = salonRoot.appendingPathComponent("captures/tmp")
     var active: Bool { stream != nil }
@@ -2224,6 +2238,7 @@ struct OuvertureView: View {
     @State private var manette = false   // la manette se pose
     @State private var nom = false       // HOME apparaît
     @State private var onde = false      // les anneaux partent
+    @State private var derive = false    // tout avance très lentement, du début à la fin : rien ne se fige avant le fondu
     private func carteDe(_ c: [Color]) -> some View { RoundedRectangle(cornerRadius: 34, style: .continuous).fill(LinearGradient(colors: c, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 190, height: 262) }
     var body: some View {
         let l = lueurs || fige, ca = carte || fige, ev = eventail || fige, ma = manette || fige, no = nom || fige, part = lib.ouverturePart
@@ -2254,15 +2269,17 @@ struct OuvertureView: View {
                 .scaleEffect(ca ? 1 : 0.72).opacity(ca ? 1 : 0)
                 Text("HOME").font(.system(size: 54, weight: .black).width(.expanded)).tracking(no ? 14 : 44).foregroundStyle(.white).opacity(no ? 1 : 0).padding(.leading, no ? 14 : 44)
             }
-            .scaleEffect(part ? 1.10 : 1).opacity(part ? 0 : 1).animation(.easeInOut(duration: 0.5), value: part)
+            .scaleEffect(derive ? 1.06 : 1)
+            .scaleEffect(part ? 1.12 : 1).opacity(part ? 0 : 1).animation(.easeIn(duration: 0.6), value: part)
         }
-        .opacity(part ? 0 : 1).animation(.easeInOut(duration: 0.7), value: part)   // le fond s'efface pendant que la bibliothèque apparaît
+        .opacity(part ? 0 : 1).animation(.easeInOut(duration: 0.9), value: part)   // le fond s'efface pendant que la bibliothèque apparaît
         .ignoresSafeArea().contentShape(Rectangle())
         .onTapGesture { lib.passerOuverture() }
         .onAppear {
             guard !fige else { return }
             let douce = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7)
             withAnimation(.easeOut(duration: 1.2)) { lueurs = true }
+            withAnimation(.linear(duration: 3.4)) { derive = true }
             withAnimation(douce.delay(0.10)) { carte = true }
             withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.6).delay(0.50)) { eventail = true }
             withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.45).delay(0.80)) { manette = true }
@@ -2384,6 +2401,7 @@ struct MenuView: View {
                     let y: CGFloat = d == 0 ? 0 : CGFloat(d > 0 ? 1 : -1) * (74 + CGFloat(e - 1) * 50)
                     HStack(spacing: 16) {
                         Text(nomEtat(it).0).font(.system(size: 50, weight: .bold).width(.expanded)).tracking(-0.5).lineLimit(1).fixedSize()
+                        if it.icon == "checkmark.seal.fill" { Image(systemName: "checkmark.seal.fill").font(.system(size: 26, weight: .bold)).foregroundStyle(.white).frame(width: 46, height: 46).background(Circle().fill(Color(red: 0.13, green: 0.72, blue: 0.36))) }
                         if sel, let etat = nomEtat(it).1 { Text(etat).font(.system(size: 22, weight: .heavy, design: .rounded)).padding(.horizontal, 14).padding(.vertical, 6).background(Capsule().fill(.white.opacity(0.18))).transition(.opacity) }
                     }
                     .foregroundStyle(it.destructive ? MenuView.rouge : .white)
@@ -2400,21 +2418,28 @@ struct MenuView: View {
         .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.36), value: paru)
     }
     /// À droite : le choix visé en image — son aperçu s'il en a un (mods), sinon son symbole en très grand — et sa précision
+    /// Le disque d'un choix : un logo de service tel quel sur un disque sombre ; un symbole, en blanc sur la couleur du choix
+    private func disque(_ it: SalonMenuItem, _ c: Color) -> some View {
+        Symbole(nom: it.icon, taille: it.icon.hasPrefix("logo:") ? 130 : 150).foregroundStyle(.white)
+            .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Symbole.fond(it.icon)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
+            .shadow(color: c.opacity(0.6), radius: 60, y: 10)
+    }
     @ViewBuilder private var apercuChoix: some View {
         if menu.items.indices.contains(vise) {
             let it = menu.items[vise]; let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
             VStack(spacing: 34) {
                 if let u = it.image {
                     AsyncImage(url: u) { phase in
-                        if let img = phase.image { img.resizable().scaledToFill() } else { ZStack { Color.white.opacity(0.06); ProgressView().tint(.white) } }
-                    }.frame(width: 600, height: 338).clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous)).shadow(color: .black.opacity(0.55), radius: 30, y: 16)
-                } else {
-                    // un logo de service est montré tel quel, sur un disque sombre ; un symbole, en blanc sur la couleur du choix
-                    Symbole(nom: it.icon, taille: it.icon.hasPrefix("logo:") ? 130 : 150).foregroundStyle(.white)
-                        .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Symbole.fond(it.icon)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
-                        .shadow(color: c.opacity(0.6), radius: 60, y: 10)
-                }
+                        if let img = phase.image {
+                            img.resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 30, style: .continuous).strokeBorder(.white.opacity(0.22), lineWidth: 1.5))
+                                .shadow(color: .black.opacity(0.6), radius: 34, y: 18).shadow(color: c.opacity(0.35), radius: 60)
+                        } else if phase.error != nil { disque(it, c) }
+                        else { ProgressView().tint(.white).frame(width: 320, height: 320) }
+                    }.frame(width: 600, height: 500)
+                } else { disque(it, c) }
                 Text(it.detail ?? menu.text ?? " ").font(.system(size: 23, weight: .medium)).multilineTextAlignment(.center).opacity(0.8).lineLimit(3).frame(width: 600, height: 96, alignment: .top)
+                    .offset(y: it.image == nil ? 112 : 0)   // sous les anneaux qui entourent le disque, pas dessus
             }
             .id(vise).transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.94)), removal: .opacity))
             .animation(.easeOut(duration: 0.18), value: index)
@@ -3142,7 +3167,7 @@ struct HUDView: View {
                         if lib.quickItems.indices.contains(lib.quickIndex) {
                             let it = lib.quickItems[lib.quickIndex]; let i = lib.quickIndex
                             let v = i == 4 ? lib.macVolume : lib.volume, muted = i == 4 ? lib.macMuted : lib.gameMuted
-                            Text(it.0.hasPrefix("Volume") ? "\(it.0) · \(muted ? "muet" : "\(Int((v * 100).rounded())) %")" : it.0.replacingOccurrences(of: "les 15 dernières secondes", with: "15 s"))
+                            Text(it.0.hasPrefix("Volume") ? "\(it.0) · \(muted ? "muet" : "\(Int((v * 100).rounded())) %")" : it.0)
                                 .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit()).padding(.horizontal, 18).padding(.vertical, 8)
                                 .background(Capsule().fill(.white)).foregroundStyle(.black).opacity(lib.quickSlider ? 0.5 : 1).id(lib.quickIndex).transition(.opacity)
                         }
@@ -3488,7 +3513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func nav(_ k: String) {
         // pendant la première seconde et demie, rien n'est pris en compte : un bouton tenu ou pressé au moment où Home (re)démarre
         // lançait le premier jeu de la liste sans qu'on le veuille
-        if Date().timeIntervalSince(demarrage) < 1.5 { if lib.ouverture, Date().timeIntervalSince(demarrage) > 0.4 { lib.passerOuverture() }; return }
+        if Date().timeIntervalSince(demarrage) < 1.5 { return }   // les appuis parasites du démarrage ne lancent rien, et ne coupent pas l'écran de démarrage
         if lib.ouverture { lib.passerOuverture(); return }   // n'importe quelle touche ou bouton passe l'ouverture
         if let p = lib.picker {
             _ = p
@@ -4692,7 +4717,7 @@ extension Library {
                     if let c, c.etat == "bloque" { return SalonMenuItem(label: nom, detail: "Incompatible — " + (c.raison ?? ""), icon: "xmark.shield.fill", tint: .red, action: { self.openBloque(nom, c, back: ici) }) }
                     if j["windows"] as? Bool == false { return SalonMenuItem(label: nom, detail: "Pas de version Windows", icon: "minus.circle", tint: .gray, info: true, action: {}) }
                     let detail = c?.etat == "verifie" ? "Vérifié sur Mac" : c?.etat == "linux" ? "Fonctionne sous Linux — pas encore confirmé sur Mac" : "Pas encore testé"
-                    return SalonMenuItem(label: nom, detail: detail, icon: c?.etat == "verifie" ? "checkmark.seal.fill" : "circle", tint: c?.etat == "verifie" ? .green : c?.etat == "linux" ? .teal : .gray, action: {
+                    return SalonMenuItem(label: nom, detail: detail, icon: c?.etat == "verifie" ? "checkmark.seal.fill" : "circle", tint: c?.etat == "verifie" ? .green : c?.etat == "linux" ? .teal : .gray, image: URL(string: "https://cdn.cloudflare.steamstatic.com/steam/apps/\(app)/library_600x900.jpg"), action: {
                         if PCHome.jeuxSteam().contains(where: { $0.app == "steam:\(app)" }) { self.toast = "\(nom) est déjà installé"; return }
                         self.menu = SalonMenu(title: "Installer", subtitle: nom, items: [
                             SalonMenuItem(label: "Télécharger et installer", detail: detail, icon: "arrow.down.circle.fill", tint: .green, action: { self.menu = nil; self.lancer("steam.command", ["installer", String(app)], titre: "Installation de \(nom)") }),
@@ -4720,7 +4745,7 @@ extension Library {
                         return SalonMenuItem(label: nom, detail: "Incompatible — " + (b.raison ?? ""), icon: "xmark.shield.fill", tint: .red, action: { self.openBloque(nom, b, back: ici) })
                     }
                     let detail = installe ? "Installé" : etat == "verifie" ? "Vérifié sur Mac" : etat == "linux" ? "Fonctionne sous Linux — pas encore confirmé sur Mac" : (j["lanceur"] as? String).map { "Passe par le lanceur \($0) — pas testé" } ?? "Pas encore testé"
-                    return SalonMenuItem(label: nom, detail: detail, icon: installe ? "checkmark.circle.fill" : etat == "verifie" ? "checkmark.seal.fill" : "arrow.down.circle", tint: installe || etat == "verifie" ? .green : etat == "linux" ? .teal : .gray, action: {
+                    return SalonMenuItem(label: nom, detail: detail, icon: installe ? "checkmark.circle.fill" : etat == "verifie" ? "checkmark.seal.fill" : "arrow.down.circle", tint: installe || etat == "verifie" ? .green : etat == "linux" ? .teal : .gray, image: (j["image"] as? String).flatMap { URL(string: $0) }, action: {
                         if installe { self.toast = "\(nom) est déjà installé"; return }
                         self.menu = SalonMenu(title: "Installer", subtitle: nom, items: [
                             SalonMenuItem(label: "Télécharger et installer", detail: detail, icon: "arrow.down.circle.fill", tint: .green, action: { self.menu = nil; self.lancer("pc.command", ["installer", app], titre: "Installation de \(nom)") }),
