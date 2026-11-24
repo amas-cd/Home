@@ -160,7 +160,9 @@ public static class SteamGridDB
         {
             using var d = await Reseau.Json(API + "search/autocomplete/" + Uri.EscapeDataString(j.Nom), cle);
             if (d == null || !d.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array || data.GetArrayLength() == 0) return null;
-            cible = "game/" + data[0].GetProperty("id").GetInt64();
+            var trouve = data.EnumerateArray().FirstOrDefault(x => x.TryGetProperty("name", out var n) && Titres.Correspond(n.GetString() ?? "", j.Nom) && Titres.MemesNumeros(n.GetString() ?? "", j.Nom));
+            if (trouve.ValueKind != JsonValueKind.Object) return null;   // jamais un jeu sans rapport en automatique
+            cible = "game/" + trouve.GetProperty("id").GetInt64();
         }
         return quoi switch
         {
@@ -168,6 +170,70 @@ public static class SteamGridDB
             "fond" => await Premiere($"heroes/{cible}", cle),
             _ => await Premiere($"logos/{cible}", cle),
         };
+    }
+}
+
+/// Un résultat de recherche est-il bien le jeu cherché ? (les mêmes règles que `matchesGame` et `memesNumeros` sur Mac)
+public static class Titres
+{
+    static readonly HashSet<string> vides = ["the", "and", "les", "des", "une", "pour", "for", "with", "edition", "remastered", "deluxe", "demo"];
+    static string Plat(string s) => new string(s.Normalize(NormalizationForm.FormD).Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray()).ToLowerInvariant();
+    static List<string> Mots(string s) => new string(Plat(s).Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(m => m.Length >= 3 && !vides.Contains(m)).ToList();
+    /// Les mots significatifs du nom du jeu (3 lettres au moins, hors « the », « of »…) doivent se retrouver dans le titre proposé
+    public static bool Correspond(string titre, string jeu)
+    {
+        var g = Mots(jeu); var t = Plat(titre);
+        return g.Count == 0 || g.Count(t.Contains) >= Math.Max(1, (int)Math.Ceiling(g.Count * 0.6));
+    }
+    /// Les nombres du nom cherché (« 64 », « 2077 ») doivent être dans le titre proposé : pas de Mario Kart 8 quand on cherche Mario Kart 64
+    public static bool MemesNumeros(string titre, string cherche)
+    {
+        static HashSet<string> Nombres(string s) => new string(s.Select(c => char.IsDigit(c) ? c : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        var n = Nombres(cherche); return n.Count == 0 || n.IsSubsetOf(Nombres(titre));
+    }
+    /// Parmi des résultats, celui qui est le jeu cherché : le titre le plus court (le jeu lui-même, pas son édition spéciale ni son extension)
+    public static T? Meilleur<T>(IEnumerable<T> resultats, Func<T, string> titre, string jeu) where T : class =>
+        resultats.Where(r => Correspond(titre(r), jeu) && MemesNumeros(titre(r), jeu)).OrderBy(r => titre(r).Length).FirstOrDefault();
+}
+
+/// Les boutiques officielles, sans clé, cherchées par le nom du jeu (comme `EShop` et `PSStore` sur Mac) : elles donnent une jaquette
+/// carrée, celle qu'il faut à une tuile, et une grande image pour le fond. Une recherche par jeu, gardée en mémoire.
+public sealed record Boutique(string? Carre, string? Fond, string? FondPetit);
+public static class Boutiques
+{
+    static readonly Dictionary<string, Task<Boutique?>> faites = new();
+    public static Task<Boutique?> Chercher(string nom)
+    {
+        lock (faites) return faites.TryGetValue(nom, out var t) ? t : faites[nom] = Trouver(nom);
+    }
+    static async Task<Boutique?> Trouver(string nom)
+    {
+        var b = await EShop(nom) ?? await PlayStation(nom);
+        Journal.Ecrire($"images de « {nom} » : {(b == null ? "rien dans les boutiques" : b.Carre != null ? "jaquette carrée officielle" : "fond officiel")}");
+        return b;
+    }
+    record Fiche(string Titre, string? Carre, string? Banniere);
+    /// Nintendo eShop (Europe) : image carrée 500 px, bannière 2:1 (Switch) ou 16:9 (Switch 2), qui existe en 1600 px pour la plupart
+    static async Task<Boutique?> EShop(string nom)
+    {
+        using var d = await Reseau.Json("https://search.nintendo-europe.com/fr/select?q=" + Uri.EscapeDataString(nom) + "&fq=type%3AGAME&rows=8&wt=json&fl=title,image_url_sq_s,image_url_h2x1_s,image_url_h16x9_s");
+        if (d == null || !d.RootElement.TryGetProperty("response", out var r) || !r.TryGetProperty("docs", out var docs) || docs.ValueKind != JsonValueKind.Array) return null;
+        static string? Texte(JsonElement e, string cle) => e.TryGetProperty(cle, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        var fiches = docs.EnumerateArray().Select(x => new Fiche(Texte(x, "title") ?? "", Texte(x, "image_url_sq_s"), Texte(x, "image_url_h2x1_s") ?? Texte(x, "image_url_h16x9_s"))).ToList();
+        if (Titres.Meilleur(fiches, f => f.Titre, nom) is not { } f) return null;
+        var grande = f.Banniere != null && f.Banniere.EndsWith("image500w.jpg") ? f.Banniere[..^"image500w.jpg".Length] + "image1600w.jpg" : null;
+        return new Boutique(f.Carre, grande ?? f.Banniere, f.Banniere);
+    }
+    /// PlayStation Store (l'API du site, sans clé) : images de type 10 = jaquette carrée 1024 px, 12 = image 1920×1080
+    static async Task<Boutique?> PlayStation(string nom)
+    {
+        using var d = await Reseau.Json("https://store.playstation.com/store/api/chihiro/00_09_000/tumbler/BE/fr/999/" + Uri.EscapeDataString(nom) + "?suggested_size=12&mode=game");
+        if (d == null || !d.RootElement.TryGetProperty("links", out var liens) || liens.ValueKind != JsonValueKind.Array) return null;
+        static string? Image(JsonElement jeu, int type) => jeu.TryGetProperty("images", out var im) && im.ValueKind == JsonValueKind.Array
+            ? im.EnumerateArray().Where(i => i.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.Number && t.GetInt32() == type && i.TryGetProperty("url", out _)).Select(i => i.GetProperty("url").GetString()).FirstOrDefault() : null;
+        var fiches = liens.EnumerateArray().Where(l => l.TryGetProperty("top_category", out var c) && c.GetString() == "downloadable_game" && l.TryGetProperty("name", out _))
+            .Select(l => new Fiche(l.GetProperty("name").GetString() ?? "", Image(l, 10), Image(l, 12))).ToList();
+        return Titres.Meilleur(fiches, f => f.Titre, nom) is { } f && (f.Carre ?? f.Banniere) != null ? new Boutique(f.Carre, f.Banniere, null) : null;
     }
 }
 
@@ -210,7 +276,10 @@ public static class Images
         if (img != null) lock (memoire) memoire[cle] = img;
         return img;
     }
-    /// Les trois images d'un jeu. Ce qui manque sur disque est cherché à sa source : Steam, le catalogue des recomps, puis SteamGridDB si une clé est enregistrée.
+    /// Les trois images d'un jeu. Ce qui manque sur disque est cherché à sa source, la plus juste d'abord :
+    ///  - jaquette (la tuile est carrée) : SteamGridDB si une clé est enregistrée, puis la jaquette carrée officielle des boutiques
+    ///    (eShop, PlayStation Store), puis seulement les jaquettes en hauteur (catalogue des recomps, Steam) ;
+    ///  - fond : catalogue, Steam, boutiques, SteamGridDB ; logo : catalogue, Steam, SteamGridDB.
     public static async Task<Art> Charger(Jeu j, RecompInstalle? r)
     {
         var art = new Art();
@@ -219,13 +288,25 @@ public static class Images
             var f = Fichier(j, quoi);
             if (!File.Exists(f))
             {
-                var sources = new List<string>();
-                if (r != null && (quoi == "couverture" ? r.Couverture : quoi == "fond" ? r.Fond : r.Logo) is { Length: > 0 } u) sources.Add(u);
-                // Jaquette carrée de SteamGridDB d'abord (la tuile est carrée) ; celle de Steam est en hauteur
-                if (quoi == "couverture" && r == null && await SteamGridDB.Image(j, quoi) is { } carre) sources.Add(carre);
-                if (j.SteamId is { } s) sources.AddRange(Steam.Images(s, quoi));
-                if (quoi != "couverture" && r == null && j.SteamId == null && await SteamGridDB.Image(j, quoi) is { } g) sources.Add(g);
-                foreach (var src in sources) if (await Telecharger(src, f)) break;
+                var sources = new List<string?>();
+                var catalogue = r == null ? null : quoi == "couverture" ? r.Couverture : quoi == "fond" ? r.Fond : r.Logo;
+                var steam = j.SteamId is { } s ? Steam.Images(s, quoi) : [];
+                if (quoi == "couverture")
+                {
+                    sources.Add(await SteamGridDB.Image(j, quoi));
+                    if (sources[0] == null && j.SteamId == null) sources.Add((await Boutiques.Chercher(j.Nom))?.Carre);
+                    sources.Add(catalogue); sources.AddRange(steam);
+                }
+                else
+                {
+                    sources.Add(catalogue); sources.AddRange(steam);
+                    if (sources.All(string.IsNullOrEmpty))
+                    {
+                        if (quoi == "fond" && await Boutiques.Chercher(j.Nom) is { } b) { sources.Add(b.Fond); sources.Add(b.FondPetit); }
+                        sources.Add(await SteamGridDB.Image(j, quoi));
+                    }
+                }
+                foreach (var src in sources) if (!string.IsNullOrEmpty(src) && await Telecharger(src, f)) break;
             }
             var img = await Task.Run(() => Locale(f, quoi == "fond" ? 1920 : quoi == "logo" ? 960 : 500));
             if (quoi == "couverture") art.Couverture = img; else if (quoi == "fond") art.Fond = img; else art.Logo = img;

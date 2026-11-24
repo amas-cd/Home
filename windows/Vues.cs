@@ -664,7 +664,7 @@ public sealed class Ecran : Panel
             for (var c = 0; c < n; c++)
             {
                 var r = new RangeeJeux(lib) { IsVisible = false, VerticalAlignment = VerticalAlignment.Top, RenderTransform = Mouvement.Deplace(0, 0) };
-                r.Transitions = new Transitions { Mouvement.Transfo(0.42, Mouvement.Coule), Mouvement.Opacite(0.42, Mouvement.Coule) };
+                r.Transitions = new Transitions { Mouvement.Transfo(0.42, Mouvement.Coule), Mouvement.Opacite(0.42, Mouvement.Coule), Mouvement.Flou(0.42, Mouvement.Coule) };
                 rangees.Add(r); ecarts.Add(null); pile.Children.Add(r);
             }
         }
@@ -672,9 +672,17 @@ public sealed class Ecran : Panel
         {
             int tour = ((c - lib.IndexCategorie) % n + n) % n, d = tour > n / 2 ? tour - n : tour; var r = rangees[c];
             if (Math.Abs(d) > 1) { r.IsVisible = false; ecarts[c] = null; continue; }
-            r.Active = d == 0; r.Mettre(lib.JeuxDe(c), d == 0 ? lib.Selection : null, floue: d != 0);
+            r.Active = d == 0; r.Mettre(lib.JeuxDe(c), d == 0 ? lib.Selection : null, floue: false);
             if (ecarts[c] == d) continue;   // déjà à sa place
-            void Placer() { r.RenderTransform = Mouvement.Deplace(0, d * 236); r.Opacity = d == 0 ? 1 : d == 1 ? 0.45 : 0; }
+            // la rangée voisine est floue, comme sur Mac. Ce flou-là est vrai : la rangée ne bouge pas au repos, il n'est donc refait que
+            // pendant un changement de catégorie. La rangée en cours n'a aucun effet (un flou de 0 se recalcule quand même à chaque image).
+            void Placer()
+            {
+                r.RenderTransform = Mouvement.Deplace(0, d * 236); r.Opacity = d == 0 ? 1 : d == 1 ? 0.45 : 0;
+                if (r.Effect == null && d != 0) Mouvement.SansAnimer(r, () => r.Effect = new BlurEffect { Radius = 0 });
+                if (r.Effect != null) r.Effect = new BlurEffect { Radius = d == 0 ? 0 : 14 };
+                if (d == 0) Mouvement.Dans(0.5, () => { if (r.Active) Mouvement.SansAnimer(r, () => r.Effect = null); });
+            }
             // une rangée qui n'était pas là, ou qui passe d'un bout à l'autre de la pile, prend sa place d'un coup : elle ne traverse pas l'écran
             if (ecarts[c] is { } avant && Math.Abs(avant - d) <= 1) Placer(); else Mouvement.SansAnimer(r, Placer);
             r.IsVisible = true; r.IsHitTestVisible = d == 0; r.ZIndex = d == 0 ? 1 : 0; ecarts[c] = d;

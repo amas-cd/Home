@@ -133,6 +133,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 - **Pas de flou ni d'ombre calculés en direct** (`BlurEffect`, `DropShadowEffect`) : Avalonia les refait à chaque image dès que quelque
   chose bouge, et tout saccade. Un flou est une image réduite à quelques points puis étirée (`U.Flou`) ; derrière un menu, une photo
   réduite de la bibliothèque (`Ecran.Voiler`). Le zoom lent du fond du Mac n'est pas repris pour la même raison.
+  Seule exception : la rangée voisine, immobile au repos, a un vrai flou (jamais de `BlurEffect` de rayon 0 laissé en place).
 - **Écriture** : Mona Sans (GitHub, licence OFL), embarquée depuis `windows/polices/` ; sa version large très grasse remplace SF Pro
   Expanded Black, qu'Apple ne laisse pas redistribuer. **Icônes** : Fluent System Icons (Microsoft, MIT, paquet `FluentIcons.Avalonia`),
   en version pleine ; `Icones` traduit les noms de symboles du Mac, `U.Icone` les dessine comme des tracés (la police impose du noir).
@@ -141,7 +142,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 |---|---|
 | `Modele.cs` | `Jeu`, `Config`, `Menu` / `ElementMenu`, `Dossiers`, `Icones` (SF Symbols → Material, teintes) |
 | `Bibliotheque.cs` | L'équivalent de `Library` : état, navigation, lancement, fin de partie, tous les menus |
-| `Sources.cs` | `Steam`, `Epic`, `SteamGridDB`, `Images` |
+| `Sources.cs` | `Steam`, `Epic`, `SteamGridDB`, `Boutiques` (eShop et PlayStation Store par le nom du jeu, sans clé : jaquette carrée, fond), `Titres` (le résultat est-il le bon jeu ?), `Images` |
 | `Recomps.cs` | `Catalogue`, `GitHub`, `Installation`, `MenusRecomps` |
 | `Vues.cs` | `Mouvement` (courbes et durées), `Ecran`, `Tuile`, `RangeeJeux`, `FondVue`, `Ouverture` (écran de démarrage), `PastilleTache`, « en cours de jeu », saisie |
 | `VuesMenus.cs` | `VueMenu` : les trois formes de `MenuView` (rangée de pastilles, roue, grille d'affiches). `Menu.Genre` choisit la forme, comme sur Mac |
