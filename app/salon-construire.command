@@ -38,7 +38,7 @@ swift "$D/icone.swift" "$B/AppIcon.png" 2>/dev/null || true
 if [ -f "$B/AppIcon.png" ]; then mkdir -p "$B/AppIcon.iconset"; for sz in 16 32 128 256 512; do sips -z $sz $sz "$B/AppIcon.png" --out "$B/AppIcon.iconset/icon_${sz}x${sz}.png" >/dev/null; sips -z $((sz*2)) $((sz*2)) "$B/AppIcon.png" --out "$B/AppIcon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null; done
   iconutil -c icns "$B/AppIcon.iconset" -o "$B/Salon.app/Contents/Resources/AppIcon.icns" 2>/dev/null; fi
 [ -f "$B/Salon.app/Contents/Resources/AppIcon.icns" ] && [ -d "$V" ] && { mkdir -p "$V/Resources"; cp "$B/Salon.app/Contents/Resources/AppIcon.icns" "$V/Resources/"; }
-# Sons : « UI Utility Pack Vol 1 » de JC Sounds (CC-BY 4.0) copiés dans l'app, les six sons choisis à la racine et une sélection dans banque
+# Sons : les six sons originaux de Home à la racine, et la banque CC0 de Kenney (« Interface Sounds ») comme rechange
 # l'empreinte de la source : « Mettre à jour Home » ne recompile que si elle a changé
 cat "$D/main.swift" "$D/veille.swift" "$0" "$D/icone.swift" 2>/dev/null | shasum -a 256 | cut -c1-64 > "$B/Salon.app/Contents/Resources/source.sha"
 if [ -d "$D/sons" ]; then mkdir -p "$B/Salon.app/Contents/Resources/sons"; cp -R "$D/sons/." "$B/Salon.app/Contents/Resources/sons/"; fi
@@ -98,7 +98,7 @@ Home — launcher façon console (ex-Salon)
 • Médias : media/<nom du jeu tel qu'affiché>/cover.jpg (jaquette), fond.jpg (fond), fond.mp4 (fond animé, en boucle, muet).
 • Catégories : onglet « Tous » + Switch / Switch 2 / Mac / PC (automatiques) + les tiennes : touche + (ou bouton ⊕ en haut, ou Options → Nouvelle catégorie…).
 • Illustrations : reprises de NX Library (cache et choix manuels), sinon en ligne (nlib.cc par title id, SteamGridDB par nom avec ta clé), sinon icône de l'app.
-• Sons : « UI Utility Pack Vol 1 » de JC Sounds (CC-BY 4.0). Pour en changer : copie un son de Home.app/Contents/Resources/sons/banque dans le dossier « sons » sous le nom deplacer/onglet/ouvrir/retour/valider/lancer .wav. X → Sons pour couper.\n• Journal : /Applications/Home/log/salon.log (jaquettes, SteamGridDB, lancements).
+• Sons : six sons originaux créés pour Home ; banque de rechange Kenney « Interface Sounds » (CC0). Pour en changer : copie un son de Home.app/Contents/Resources/sons/banque dans le dossier « sons » sous le nom deplacer/onglet/ouvrir/retour/valider/lancer .wav. X → Sons pour couper.\n• Journal : /Applications/Home/log/salon.log (jaquettes, SteamGridDB, lancements).
 • Rocket League (Obelisk) : au premier lancement, autorise Salon dans Réglages Système → Confidentialité et sécurité → Accessibilité (à refaire après chaque recompilation, l'app étant signée localement).
 • Commandes : flèches ou stick/croix = choisir, L1/R1 ou Tab = catégorie, Entrée ou A = jouer, Y ou O = options, Échap ou ⌘Q = quitter, ⌘R = recharger, ⌘F = plein écran.
 TXT

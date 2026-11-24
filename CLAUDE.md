@@ -43,7 +43,7 @@ Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
 | `app/main.swift` | Toute l'app Home |
 | `app/veille.swift` | La petite app invisible qui ouvre Home à la connexion d'une manette |
 | `windows/` | Home pour Windows (C# / Avalonia) : la même interface, pour les jeux Steam, Epic et les recomps. Voir « Home pour Windows » |
-| `app/sons/` | Sons de l'interface (JC Sounds, CC-BY 4.0 : crédit obligatoire dans `THIRD_PARTY_NOTICES.md`) |
+| `app/sons/` | Les six sons de l'interface, originaux, créés pour Home (`lancer` = le jingle de l'ouverture) ; `banque/` = Kenney, CC0, en rechange |
 | `app/salon-construire.command` | Compile, signe et installe `/Applications/Home.app`. `HOME_BUILD_ONLY=<dossier>` : compile seulement. `HOME_VERSION=x.y.z` : version de l'app |
 | `moteur/outils/` | Les scripts que Home lance (voir plus bas) |
 | `moteur/patches/` | Les patchs d'Anas pour nxnative (`series` donne l'ordre) |

@@ -61,7 +61,7 @@ struct Game: Identifiable, Equatable {
 struct Art { var cover: NSImage?; var background: NSImage?; var logo: NSImage? }
 struct Stat: Codable { var lastPlayed: Date?; var minutes: Int }
 struct Entry: Codable { var chemin: String; var nom: String?; var categorie: String?; var masque: Bool? }
-struct Config: Codable { var jeux: [Entry]; var categories: [String]?; var sons: Bool?; var capture: Bool?; var espacePleinEcran: Bool?; var volumes: [String: Float]?; var volume: Float?; var ecranJeu: UInt32?; var ecranJeuChoisi: Bool?; var gamebanana: [String: Int]?; var reglages: [String: [String: String]]?; var cles: String?; var discret: Bool?; var garderCaches: Bool?; var nomsArt: [String: String]?; var mode: String?; var moteurs: String? }   // mode : "tout" | "nintendo" | "pc" (nil = pas encore choisi) ; moteurs : "tout" | "mng" | "nxnative"
+struct Config: Codable { var jeux: [Entry]; var categories: [String]?; var sons: Bool?; var capture: Bool?; var espacePleinEcran: Bool?; var volumes: [String: Float]?; var volume: Float?; var ecranJeu: UInt32?; var ecranJeuChoisi: Bool?; var gamebanana: [String: Int]?; var reglages: [String: [String: String]]?; var cles: String?; var discret: Bool?; var garderCaches: Bool?; var nomsArt: [String: String]?; var mode: String?; var moteurs: String?; var ouverture: Bool? }   // mode : "tout" | "nintendo" | "pc" (nil = pas encore choisi) ; moteurs : "tout" | "mng" | "nxnative"
 struct Candidate: Identifiable {
     let id: String; let thumb: URL?; let full: URL?; let author: String; var game: String = ""; var source: String = "SteamGridDB"; var width = 0, height = 0
     /// Le même format pour toutes les propositions d'un emplacement : jaquette carrée (la tuile l'est), fond large (≥ 3:2) ; les logos sont filtrés par leur nom (fichiers « logo »)
@@ -133,15 +133,20 @@ func firstFile(_ dir: URL, _ names: [String]) -> URL? {
     return nil
 }
 
-// MARK: - Sons d'interface : « UI Utility Pack Vol 1 » de JC Sounds (CC-BY 4.0, crédit dans THIRD_PARTY_NOTICES.md), embarqués dans l'app.
+// MARK: - Sons d'interface : six sons originaux, créés pour Home (app/sons), embarqués dans l'app. « lancer » est le jingle de Home.
 // Remplaçables par les tiens : ~/Library/Application Support/Salon/sons/<nom>.wav|mp3|aiff (nom = deplacer, onglet, ouvrir, retour, valider, lancer).
-// Une sélection d'autres sons du même pack est dans Home.app/Contents/Resources/sons/banque pour en choisir d'autres.
+// La banque « Interface Sounds » de Kenney (CC0) reste dans Home.app/Contents/Resources/sons/banque pour en choisir d'autres.
+// Ces sons ont un écho voulu de 1 à 2 s : chaque son a deux lecteurs qui alternent, et un nouveau « deplacer » ou « onglet » éteint
+// (fondu très court, sans clic) celui qui résonne encore, pour que les échos ne s'empilent pas en naviguant vite.
+// Leur volume est déjà équilibré entre eux : le même niveau pour tous, seul le volume général de Home s'applique.
 final class Sounds {
     static let shared = Sounds()
     var enabled = true
     var gain: Float = 1.0                    // suit le volume du jeu sélectionné / en cours (réglage unique du Salon)
-    private var players: [String: AVAudioPlayer] = [:]
-    private static let volume: [String: Float] = ["deplacer": 0.35, "onglet": 0.4, "ouvrir": 0.45, "retour": 0.4, "valider": 0.5, "lancer": 0.6]
+    private var players: [String: [AVAudioPlayer]] = [:]
+    private var tour: [String: Int] = [:]
+    private static let niveau: Float = 0.8   // le même pour les six sons
+    private static let navigation: Set<String> = ["deplacer", "onglet"]   // ceux qui se coupent l'un l'autre
     private static let fallback = ["deplacer": "Tink", "onglet": "Pop", "ouvrir": "Purr", "retour": "Bottle", "valider": "Glass", "lancer": "Hero"]
     private func url(_ name: String) -> URL? {
         for ext in ["wav", "mp3", "aiff", "aif", "m4a"] { let u = salonRoot.appendingPathComponent("sons/\(name).\(ext)"); if FileManager.default.fileExists(atPath: u.path) { return u } }
@@ -149,12 +154,22 @@ final class Sounds {
         if let f = Sounds.fallback[name] { return URL(fileURLWithPath: "/System/Library/Sounds/\(f).aiff") }
         return nil
     }
+    private func eteindre(_ p: AVAudioPlayer) {
+        guard p.isPlaying else { return }
+        p.setVolume(0, fadeDuration: 0.05)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) { if p.volume == 0 { p.stop() } }   // relancé entre-temps : son volume est remonté, il continue
+    }
     func play(_ name: String) {
         guard enabled else { return }
-        if players[name] == nil, let u = url(name), let p = try? AVAudioPlayer(contentsOf: u) { p.prepareToPlay(); players[name] = p }
-        guard let p = players[name] else { return }
-        p.volume = (Sounds.volume[name] ?? 0.4) * max(0.15, gain); p.currentTime = 0; p.play()
+        if players[name] == nil, let u = url(name) { players[name] = (0..<2).compactMap { _ in let p = try? AVAudioPlayer(contentsOf: u); p?.prepareToPlay(); return p } }
+        guard let paire = players[name], !paire.isEmpty else { return }
+        // ce qui résonne encore et doit se taire : le même son, et pour la navigation l'autre son de navigation
+        for (n, l) in players where n == name || (Sounds.navigation.contains(name) && Sounds.navigation.contains(n)) { l.forEach(eteindre) }
+        let i = ((tour[name] ?? 0) + 1) % paire.count; tour[name] = i
+        let p = paire[i]; p.stop(); p.currentTime = 0; p.volume = Sounds.niveau * max(0.15, gain); p.play()
     }
+    /// Éteint tout ce qui résonne (le jingle au moment où un jeu prend le son)
+    func taire() { players.values.forEach { $0.forEach(eteindre) } }
 }
 
 // MARK: - Boutique Nintendo eShop (Europe) : la bannière officielle 2:1 d'un jeu Switch, par title id
@@ -370,6 +385,7 @@ final class Library: ObservableObject {
     @Published var running: Game? = nil
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
+    @Published var ouverture = false   // l'animation d'ouverture (logo et jingle), au vrai lancement de l'app seulement
     @Published var accueil: AccueilEtat? = nil   // l'écran d'accueil (mode d'utilisation), par-dessus tout le reste
     var apresTache: (() -> Void)? = nil   // ce que l'assistant fait une fois la tâche en cours réussie (se connecter, ajouter un jeu…)
     @Published var tache: Tache? = nil { didSet { majDock() } }   // la construction / mise à jour en cours, avec sa barre de progression
@@ -882,6 +898,8 @@ final class Library: ObservableObject {
                 p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
                 if p.runModal() == .OK, let u = p.url { self.config.cles = u.path; self.saveConfig() }
                 self.openAdvancedSettings() }),
+            SalonMenuItem(label: "Animation d'ouverture : \((config.ouverture ?? true) ? "activée" : "désactivée")", icon: "sparkles", tint: .purple, action: {
+                self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); self.openAdvancedSettings() }),
             SalonMenuItem(label: "Journaux pour Claude", icon: "doc.text.magnifyingglass", tint: .gray, action: { self.menu = nil; self.lancer("journaux.command", titre: "Copie des journaux") }),
         ], hero: "gearshape.fill", back: { self.menu = self.plusMenu() })
     }
@@ -1929,6 +1947,36 @@ struct Hint: View {
     }
 }
 
+// MARK: - Ouverture : au lancement de l'app, le logo de Home au centre sur fond noir, avec le jingle (« lancer »), puis un fondu vers
+// la grille des jeux. Environ 1,9 s en tout, courbes douces ; n'importe quelle touche la passe (AppDelegate.nav), un clic aussi.
+struct OuvertureView: View {
+    @ObservedObject var lib: Library
+    var fige = false
+    @State private var la = false      // le logo est arrivé
+    @State private var part = false    // il s'en va
+    var body: some View {
+        ZStack {
+            Color.black
+            RadialGradient(colors: [Color(red: 0.16, green: 0.14, blue: 0.30).opacity(la || fige ? 0.55 : 0), .clear], center: .center, startRadius: 0, endRadius: 620)
+            VStack(spacing: 22) {
+                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 132, height: 132).shadow(color: .black.opacity(0.5), radius: 24, y: 12)
+                Text("Home").font(.system(size: 46, weight: .semibold)).tracking(0.5).foregroundStyle(.white)
+            }
+            .scaleEffect(fige ? 1 : part ? 1.05 : la ? 1 : 0.93).opacity(fige ? 1 : part ? 0 : la ? 1 : 0).blur(radius: part ? 6 : 0)
+        }
+        .ignoresSafeArea().contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false } }
+        .onAppear {
+            guard !fige else { return }
+            withAnimation(.timingCurve(0.22, 0.8, 0.25, 1, duration: 0.75).delay(0.12)) { la = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.25) {
+                withAnimation(.easeInOut(duration: 0.55)) { part = true }
+                withAnimation(.easeInOut(duration: 0.65)) { lib.ouverture = false }   // le fond noir s'efface pendant que la grille apparaît
+            }
+        }
+    }
+}
+
 // MARK: - Écran d'accueil (premier lancement, mode d'utilisation)
 // Un mélange voulu de trois consoles : le fond sombre et vivant et la grande typo fine de la PS5, les grandes tuiles à halo de la Xbox
 // Series, les pastilles rondes, les couleurs franches et l'aide des boutons en bas de la Switch 2. Les trois couleurs sont celles des
@@ -2579,6 +2627,7 @@ struct Screen: View {
             if let m = lib.menu { Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { Color.black.opacity(0.6).ignoresSafeArea(); PickerView(lib: lib) }
             if let e = lib.accueil { AccueilView(lib: lib, etat: e).transition(.opacity).zIndex(5) }
+            if lib.ouverture { OuvertureView(lib: lib).transition(.opacity).zIndex(20) }
             if let t = lib.tache {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 64).padding(.bottom, 92)
                     .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .flou))
@@ -2904,11 +2953,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let img = r.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                     try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("accueil-\(i + 1).png")) }
             }
+            let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
+            if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
+                try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
             exit(0)
         }
         Atelier.installerEmbarque()
         lib.load()
-        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
+        // l'ouverture : le logo et le jingle, sauf si le réglage la coupe ; l'écran du premier lancement attend qu'elle soit passée
+        let ouvre = lib.config.ouverture ?? true
+        if ouvre { lib.ouverture = true; Sounds.shared.play("lancer") }
+        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + (ouvre ? 2.4 : 1.2)) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -3014,6 +3069,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func nav(_ k: String) {
+        if lib.ouverture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false }; return }   // n'importe quelle touche ou bouton passe l'ouverture
         if lib.accueil != nil { lib.accueilNav(k); return }
         if let p = lib.picker {
             switch k { case "left": if lib.pickIndex > 0 { lib.pickIndex -= 1; Sounds.shared.play("deplacer") }; case "right": if lib.pickIndex < p.items.count - 1 { lib.pickIndex += 1; Sounds.shared.play("deplacer") }
