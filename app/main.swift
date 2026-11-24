@@ -567,13 +567,16 @@ final class Library: ObservableObject {
         if let d = try? Data(contentsOf: salonRoot.appendingPathComponent("statistiques.json")), let s = try? JSONDecoder().decode([String: Stat].self, from: d) { stats = s }
         if deplacements.contains(where: { stats[$0.key] != nil }) { for (a, b) in deplacements { if let v = stats[a] { stats[b] = v; stats[a] = nil } }; saveStats() }
         list.sort { (stats[$0.id]?.lastPlayed ?? .distantPast) > (stats[$1.id]?.lastPlayed ?? .distantPast) }   // dernière partie en premier ; jamais joués après, dans l'ordre des noms
+        for c in Library.chantiersOuverts() where !list.contains(where: { $0.id == c.id }) {
+            list.insert(Game(id: c.id, name: c.titre, url: Atelier.home.appendingPathComponent("constructions"), titleID: nil, category: "Switch", icon: NSImage(), video: nil), at: 0)
+        }
         games = list
         let order = Library.base
         let found = Set(list.map { $0.category }).union(config.categories ?? [])
         categories = [Library.all] + Array(found).sorted { (order.firstIndex(of: $0) ?? 99, $0) < (order.firstIndex(of: $1) ?? 99, $1) }
         if categoryIndex >= categories.count { categoryIndex = 0 }
         if selected > visible.count { selected = max(0, visible.count - 1) }
-        for g in list { resolveArt(g) }
+        for g in list where !g.id.hasPrefix("construction:") { resolveArt(g) }   // un chantier n'a pas encore d'images : sa tuile porte ses initiales
         log("Bibliothèque : " + list.map { g in "\(g.name) [\(art[g.id]?.cover != nil ? "jaquette" : "-") \(art[g.id]?.background != nil ? "fond" : "-") \(art[g.id]?.logo != nil ? "logo" : "-")]" }.joined(separator: ", "))
     }
     func saveConfig() { if let d = try? JSONEncoder().encode(config) { try? d.write(to: salonRoot.appendingPathComponent("jeux.json")) } }
@@ -717,7 +720,7 @@ final class Library: ObservableObject {
     func openOptions() {
         guard let g = current, running == nil else { return }
         Sounds.shared.play("ouvrir")
-        menu = optionsMenu(g)
+        menu = g.id.hasPrefix("construction:") ? chantierMenu(g) : optionsMenu(g)
     }
     func optionsMenu(_ g: Game) -> SalonMenu {
         let a = art[g.id]; let st = stats[g.id]
@@ -1260,6 +1263,7 @@ final class Library: ObservableObject {
     func launch() {
         if running == nil, !showOptions, picker == nil, current == nil, selected >= visible.count { openAddMenu(); return }   // la case +
         guard running == nil, !showOptions, picker == nil, let g = current else { return }
+        if g.id.hasPrefix("construction:") { Sounds.shared.play("ouvrir"); menu = chantierMenu(g); return }   // un jeu en construction : avancement, reprise ou abandon
         if enFond(g) { Sounds.shared.play("valider"); reprendre(); return }   // il tourne encore derrière : on y retourne
         if let f = fond, f.jeu.id != g.id, f.app?.isTerminated == false || f.direct?.isRunning == true { toast = "\(f.jeu.name) est encore ouvert : ferme-le d'abord"; Sounds.shared.play("retour"); return }   // jamais deux jeux à la fois
         if g.pc, let b = Compat.bloque(g) { openBloque(g.name, b); return }   // un jeu que son éditeur refuse sur Mac et Linux : pas lancé, la raison affichée
@@ -2287,6 +2291,8 @@ struct RangeeJeux: View {
                     ForEach(Array(jeux.enumerated()), id: \.element.id) { i, game in
                         Tile(image: lib.cover(game), selected: active && i == lib.selected)
                             .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: active && i == lib.selected) } }
+                            .overlay(alignment: .topTrailing) { if game.id.hasPrefix("construction:"), !lib.chantierEnCours(game.id) {
+                                Image(systemName: "pause.fill").font(.system(size: 15, weight: .black)).foregroundStyle(.black).frame(width: 34, height: 34).background(Circle().fill(.white)).shadow(color: .black.opacity(0.4), radius: 6).padding(10) } }
                             .overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }
                             .id(game.id).onTapGesture { guard active else { return }; if lib.selected == i { lib.launch() } else { lib.selected = i } }
                     }
@@ -3280,7 +3286,7 @@ struct Screen: View {
                 .frame(height: 294, alignment: .top).animation(coule, value: lib.categoryIndex)
                 .offset(y: appeared ? 0 : 36).opacity(appeared ? 1 : 0).animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45), value: appeared)
                 .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { appeared = true } }
-                HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie"); Spacer() }
+                HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : lib.current!.id.hasPrefix("construction:") ? "Construction" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie"); Spacer() }
                     .padding(.horizontal, 84).padding(.bottom, 40).foregroundStyle(.white)
             }
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
@@ -4457,7 +4463,8 @@ extension Library {
         guard var t = tache else { return }
         tacheProcess = nil; t.fini = true
         if code == 0 {
-            t.fraction = 1; if !t.etape.contains("déjà à jour") { t.etape = "Terminé" }; tache = t; Sounds.shared.play("valider"); load()
+            t.fraction = 1; if !t.etape.contains("déjà à jour") { t.etape = "Terminé" }; tache = t; Sounds.shared.play("valider")
+            Library.noterChantiers(Library.chantiers().filter { !t.jeux.contains($0.id) }); load()
             if let c = tacheScript, !t.etape.contains("déjà à jour") { Library.noterDuree(c, Date().timeIntervalSince(t.debut)) }
             if let a = apresTache { apresTache = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { a() } }
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { if self.tache?.log == t.log { withAnimation(.easeInOut(duration: 0.6)) { self.tache = nil } } }
@@ -4631,6 +4638,56 @@ extension Library {
         a.modModule = reg.modModule; a.mods = modsCode(g); a.icone = iconePourBuild(g)
         lancerConstruction(a)
     }
+    // MARK: Chantiers — un jeu en construction a sa tuile
+    /// La construction d'un nouveau jeu dure de vingt minutes à plusieurs heures. Tant qu'elle n'a pas abouti, Home la garde en mémoire
+    /// (constructions/.en-cours.json : ce qui a été lancé, et son journal) et lui donne une tuile dans la bibliothèque : on y voit
+    /// l'avancement, et si la construction a été coupée (Home fermé, Mac éteint), on la reprend d'ici — elle repart du dossier de travail.
+    struct Chantier: Codable { var id: String; var titre: String; var args: [String]; var log: String; var debut: Date }
+    static var chantiersURL: URL { Atelier.home.appendingPathComponent("constructions/.en-cours.json") }
+    static func chantiers() -> [Chantier] { (try? Data(contentsOf: chantiersURL)).flatMap { try? JSONDecoder().decode([Chantier].self, from: $0) } ?? [] }
+    static func noterChantiers(_ c: [Chantier]) {
+        try? FileManager.default.createDirectory(at: chantiersURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if c.isEmpty { try? FileManager.default.removeItem(at: chantiersURL) } else if let d = try? JSONEncoder().encode(c) { try? d.write(to: chantiersURL, options: .atomic) }
+    }
+    /// Les chantiers encore ouverts : celui dont le journal dit que la construction a abouti (même pendant que Home était fermé) est retiré
+    static func chantiersOuverts() -> [Chantier] {
+        let tous = chantiers()
+        let ouverts = tous.filter { c in
+            guard let h = try? FileHandle(forReadingFrom: URL(fileURLWithPath: c.log)) else { return true }
+            let fin = (try? h.seekToEnd()) ?? 0; try? h.seek(toOffset: fin > 4000 ? fin - 4000 : 0)
+            let t = String(decoding: h.readDataToEndOfFile(), as: UTF8.self); try? h.close()
+            return !(t.contains("done in :") || t.contains("] done:") || t.contains("\"msg\": \"done: "))
+        }
+        if ouverts.count != tous.count { noterChantiers(ouverts) }
+        return ouverts
+    }
+    func chantier(_ g: Game) -> Chantier? { Library.chantiers().first { $0.id == g.id } }
+    func chantierEnCours(_ id: String) -> Bool { if let t = tache, !t.fini, t.jeux.contains(id) { return true }; return false }
+    /// Relance la construction d'un chantier avec ce qui avait été demandé : elle reprend dans son dossier de travail
+    func reprendreChantier(_ c: Chantier) {
+        menu = nil
+        guard lancer("construire-jeu.command", c.args, env: config.cles.map { ["HOME_CLES": $0] } ?? [:], titre: "Construction de \(c.titre)", jeux: [c.id]), let t = tache else { return }
+        var tous = Library.chantiers(); if let i = tous.firstIndex(where: { $0.id == c.id }) { tous[i].log = t.log.path; Library.noterChantiers(tous) }
+    }
+    func chantierMenu(_ g: Game) -> SalonMenu {
+        guard let c = chantier(g) else { return SalonMenu(title: g.name, items: [SalonMenuItem(label: "Construction terminée", icon: "checkmark.circle.fill", tint: .green, action: { self.menu = nil; self.load() })]) }
+        if chantierEnCours(c.id) {
+            return SalonMenu(title: c.titre, subtitle: "En construction", items: [
+                SalonMenuItem(label: "Voir l'avancement", icon: "chart.bar.fill", tint: .blue, action: { self.openTacheMenu() }),
+            ], hero: "hammer.fill")
+        }
+        return SalonMenu(title: c.titre, subtitle: "Construction arrêtée", items: [
+            SalonMenuItem(label: "Reprendre", detail: "La construction repart de là où elle peut", icon: "play.fill", tint: .green, action: { self.reprendreChantier(c) }),
+            SalonMenuItem(label: "Abandonner", detail: "Son dossier de travail va à la Corbeille", icon: "trash.fill", destructive: true, action: {
+                // le dossier de travail porte le nom du jeu : on ne jette que celui qui lui correspond sans doute possible
+                let racine = Atelier.home.appendingPathComponent("constructions"), fm = FileManager.default
+                func norme(_ x: String) -> String { x.lowercased().filter { $0.isLetter || $0.isNumber } }
+                let dossiers = ((try? fm.contentsOfDirectory(at: racine, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []).filter { $0.hasDirectoryPath && norme($0.lastPathComponent) == norme(c.titre) }
+                if dossiers.count == 1 { try? fm.trashItem(at: dossiers[0], resultingItemURL: nil) }
+                Library.noterChantiers(Library.chantiers().filter { $0.id != c.id }); self.menu = nil; self.load()
+                self.toast = dossiers.count == 1 ? "Construction abandonnée : son dossier est à la Corbeille" : "Construction abandonnée (dossier de travail à retirer dans Avancé → Construction → Libérer de la place)" }),
+        ], hero: "hammer.fill")
+    }
     func lancerConstruction(_ a: Assistant) {
         var args = ["--moteur", a.moteur]
         if let b = a.base { args += ["--base", b.path] } else if let t = a.travail { args += ["--depuis-build", t] } else { toast = "Aucun jeu de base choisi"; return }
@@ -4640,7 +4697,13 @@ extension Library {
         for x in a.mods { args += [a.moteur == "mng" ? "--mod" : "--exefs-mod", x] }
         if let s = a.sortie { args += ["--sortie", s.path] }
         if let i = a.icone { args += ["--icone", i] }
-        lancer("construire-jeu.command", args, env: config.cles.map { ["HOME_CLES": $0] } ?? [:], titre: a.sortie == nil ? "Construction du jeu" : "\(a.base == nil ? "Reconstruction" : "Mise à jour") de \(a.titre ?? "du jeu")", jeux: Set(a.sortie.map { [$0.standardizedFileURL.path] } ?? []))
+        // un nouveau jeu (pas de sortie connue) devient un chantier : il a sa tuile jusqu'à ce que la construction aboutisse
+        let nom = a.titre ?? a.base?.deletingPathExtension().lastPathComponent ?? "Jeu Switch"
+        let cid: String? = a.sortie == nil ? "construction:" + nom : nil
+        let ok = lancer("construire-jeu.command", args, env: config.cles.map { ["HOME_CLES": $0] } ?? [:], titre: a.sortie == nil ? "Construction de \(nom)" : "\(a.base == nil ? "Reconstruction" : "Mise à jour") de \(a.titre ?? "du jeu")", jeux: Set(cid.map { [$0] } ?? []).union(a.sortie.map { [$0.standardizedFileURL.path] } ?? []))
+        if ok, let cid, let t = tache {
+            Library.noterChantiers(Library.chantiers().filter { $0.id != cid } + [Chantier(id: cid, titre: nom, args: args, log: t.log.path, debut: Date())]); load()
+        }
     }
     /// Une étape de l'assistant : une grande illustration, une explication, un ou deux choix
     func assistant(_ a: Assistant, _ i: Int, retour: @escaping () -> Void) {
