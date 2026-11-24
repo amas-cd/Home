@@ -2917,10 +2917,14 @@ struct Screen: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 10) {
                     ForEach(Array(lib.categories.enumerated()), id: \.offset) { i, c in
-                        Text(c).font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, 22).padding(.vertical, 10)
-                            .background(Capsule().fill(.white.opacity(i == lib.categoryIndex ? 1 : 0.10)))
-                            .foregroundStyle(i == lib.categoryIndex ? .black : .white)
+                        // des onglets nus, dans l'écriture de Home : la catégorie en cours est blanche et soulignée, les autres s'effacent
+                        let ici = i == lib.categoryIndex
+                        Text(c.uppercased()).font(.system(size: 17, weight: .black).width(.expanded)).tracking(1.2).fixedSize()
+                            .shadow(color: .black.opacity(0.55), radius: 5)
+                            .opacity(ici ? 1 : 0.5)
+                            .padding(.vertical, 9).padding(.trailing, 18)
+                            .overlay(alignment: .bottomLeading) { Capsule().fill(.white).frame(width: ici ? 26 : 0, height: 3) }
+                            .contentShape(Rectangle())
                             .animation(glisse, value: lib.categoryIndex)
                             .onTapGesture { lib.categoryIndex = i; lib.selected = 0; Sounds.shared.play("onglet") }
                     }
@@ -2938,7 +2942,11 @@ struct Screen: View {
                                 Circle().fill(.white).frame(width: 14, height: 14).offset(x: max(0, 120 * CGFloat(lib.macVolume) - 7)).shadow(color: .black.opacity(0.4), radius: 3)
                             }
                             .frame(width: 120, height: 26).contentShape(Rectangle())
-                            .gesture(DragGesture(minimumDistance: 0).onChanged { g in lib.macStep(Float(min(1, max(0, g.location.x / 120))) - lib.macVolume, quiet: true, barre: false) })
+                            .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                                let avant = Int((lib.macVolume * 20).rounded())
+                                lib.macStep(Float(min(1, max(0, g.location.x / 120))) - lib.macVolume, quiet: true, barre: false)
+                                if Int((lib.macVolume * 20).rounded()) != avant { Sounds.shared.play("volume") }   // le même clic qu'à la manette, à chaque cran de 5 %
+                            })
                             .animation(.linear(duration: 0.06), value: lib.macVolume)
                             Text(lib.macMuted ? "muet" : "\(Int((lib.macVolume * 100).rounded()))").font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit()).frame(width: 34, alignment: .trailing)
                         }.padding(.horizontal, 16).frame(height: 44).background(.black.opacity(0.42), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
