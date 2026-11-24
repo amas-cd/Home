@@ -2003,23 +2003,27 @@ struct Background: View {
         .clipped().ignoresSafeArea()
     }
 }
-/// Le mouvement de Home quand on se déplace (tuiles, pastilles, tuiles de l'accueil) : court, net, sans rebond
+/// Le mouvement de Home quand on se déplace (pastilles, tuiles de l'accueil) : court, net, sans rebond
 let glisse = Animation.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.24)
+/// Le mouvement de la bibliothèque : plus ample, doux au départ comme à l'arrivée
+let coule = Animation.timingCurve(0.32, 0.0, 0.16, 1, duration: 0.42)
 struct Tile: View {
     let image: NSImage; let selected: Bool; var isIcon = false
-    static func cote(_ visee: Bool) -> CGFloat { visee ? 244 : 180 }
+    static let cote: CGFloat = 180, zoom: CGFloat = 1.34
     var body: some View {
-        let c = Tile.cote(selected), r: CGFloat = selected ? 34 : 26
         Color.black.overlay {
-            if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(selected ? 38 : 28) } }
-            else { Image(nsImage: image).resizable().scaledToFill() }
+            if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(28) } }
+            else { Image(nsImage: image).resizable().interpolation(.high).scaledToFill() }
         }
-        .frame(width: c, height: c).clipped()
-        .clipShape(RoundedRectangle(cornerRadius: r, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: r, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
-        .shadow(color: .black.opacity(selected ? 0.6 : 0.35), radius: selected ? 24 : 10, y: selected ? 14 : 6)
-        .brightness(selected ? 0 : -0.12).offset(y: selected ? -10 : 0)
-        .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.3), value: selected)
+        .frame(width: Tile.cote, height: Tile.cote).clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 3))
+        .shadow(color: .black.opacity(selected ? 0.55 : 0.3), radius: selected ? 16 : 8, y: selected ? 10 : 5)
+        .brightness(selected ? 0 : -0.12)
+        // la taille de dessin ne change jamais (redessiner l'image à chaque étape saccadait) : la tuile est agrandie d'un bloc, par le bas
+        .scaleEffect(selected ? Tile.zoom : 1, anchor: .bottom)
+        .padding(.horizontal, selected ? Tile.cote * (Tile.zoom - 1) / 2 : 0)
+        .animation(coule, value: selected)
     }
 }
 struct Hint: View {
@@ -2656,14 +2660,15 @@ struct DockProgression: View {
 struct AddTile: View {
     let selected: Bool
     var body: some View {
-        let c = Tile.cote(selected), r: CGFloat = selected ? 34 : 26
         ZStack {
-            RoundedRectangle(cornerRadius: r, style: .continuous).fill(.white.opacity(selected ? 0.14 : 0.04))
-            RoundedRectangle(cornerRadius: r, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0.3), style: StrokeStyle(lineWidth: selected ? 4 : 2, dash: selected ? [] : [7, 7]))
-            Image(systemName: "plus").font(.system(size: selected ? 60 : 44, weight: .light)).foregroundStyle(.white.opacity(selected ? 1 : 0.7))
+            RoundedRectangle(cornerRadius: 26, style: .continuous).fill(.white.opacity(selected ? 0.14 : 0.04))
+            RoundedRectangle(cornerRadius: 26, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0.3), style: StrokeStyle(lineWidth: selected ? 3 : 2, dash: selected ? [] : [7, 7]))
+            Image(systemName: "plus").font(.system(size: 44, weight: .light)).foregroundStyle(.white.opacity(selected ? 1 : 0.7))
         }
-        .frame(width: c, height: c)
-        .animation(.easeOut(duration: 0.16), value: selected)
+        .frame(width: Tile.cote, height: Tile.cote)
+        .scaleEffect(selected ? Tile.zoom : 1, anchor: .bottom)
+        .padding(.horizontal, selected ? Tile.cote * (Tile.zoom - 1) / 2 : 0)
+        .animation(coule, value: selected)
     }
 }
 struct PickerView: View {
@@ -2835,12 +2840,12 @@ struct Screen: View {
                             AddTile(selected: lib.selected >= lib.visible.count).id("salon-plus")
                                 .onTapGesture { if lib.selected >= lib.visible.count { lib.openAddMenu() } else { lib.selected = lib.visible.count; Sounds.shared.play("deplacer") } }
                         }
-                        .padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 30)
+                        .padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 90)   // la place de la tuile agrandie, qui dépasse vers le haut
                         .id("categorie-\(lib.categoryIndex)")
                         .transition(.asymmetric(insertion: .offset(y: 70 * CGFloat(lib.sensCategorie)).combined(with: .opacity), removal: .offset(y: -70 * CGFloat(lib.sensCategorie)).combined(with: .opacity)))
                         .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.32), value: lib.categoryIndex)
                     }.scrollClipDisabled()
-                     .onChange(of: lib.selected) { _, _ in withAnimation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.34)) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
+                     .onChange(of: lib.selected) { _, _ in withAnimation(coule) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
                      .onChange(of: lib.categoryIndex) { _, _ in if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } }
                 }
                 .offset(y: appeared ? 0 : 36).opacity(appeared ? 1 : 0).animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45), value: appeared)
@@ -2861,7 +2866,6 @@ struct Screen: View {
                 // Écran « en cours de jeu » : derrière le jeu (bureau), ou visible quand le jeu est sur l'autre écran / en fenêtre
                 NowPlayingView(lib: lib, game: r).transition(.opacity)
             }
-            if barreVolume {
                 VStack { HStack(spacing: 12) {
                         let v = lib.flashGeneral ? lib.macVolume : lib.volume, muted = lib.flashGeneral ? lib.macMuted : lib.gameMuted
                         Image(systemName: v == 0 ? "speaker.slash.fill" : v < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill").font(.system(size: 18, weight: .semibold))
@@ -2869,8 +2873,7 @@ struct Screen: View {
                         Text(muted ? "Muet" : "\(Int((v * 100).rounded())) %").font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit()).frame(width: 52, alignment: .trailing)
                         Text(lib.flashGeneral ? "Volume général" : lib.volumeLabel).font(.system(size: 13, weight: .medium, design: .rounded)).opacity(0.6)
                     }.padding(.horizontal, 18).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.top, 90); Spacer() }
-                .transition(.offset(y: -14).combined(with: .opacity))
-            }
+                .opacity(barreVolume ? 1 : 0).offset(y: barreVolume ? 0 : -16).animation(.easeInOut(duration: 0.5), value: barreVolume).allowsHitTesting(false)
             if let t = lib.toast {
                 VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.bottom, 130) }
                     .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }
@@ -2879,11 +2882,11 @@ struct Screen: View {
         // chaque réglage la montre (ou la garde) ; 2 s après le dernier, elle repart vers le haut en fondu, comme elle est venue
         .task(id: lib.volumeFlash) {
             guard Date().timeIntervalSince(lib.volumeFlash) < 1 else { return }
-            withAnimation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.32)) { barreVolume = true }
+            barreVolume = true
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if !Task.isCancelled { withAnimation(.timingCurve(0.5, 0, 0.8, 0.3, duration: 0.38)) { barreVolume = false } }
+            if !Task.isCancelled { barreVolume = false }
         }
-        .onReceive(clock) { now = $0 }.animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.3), value: lib.current?.id).animation(.easeInOut(duration: 0.22), value: lib.menu?.title).animation(.easeInOut(duration: 0.22), value: lib.picker?.game.id)
+        .onReceive(clock) { now = $0 }.animation(.easeInOut(duration: 0.4), value: lib.current?.id).animation(.easeInOut(duration: 0.22), value: lib.menu?.title).animation(.easeInOut(duration: 0.22), value: lib.picker?.game.id)
     }
 }
 
