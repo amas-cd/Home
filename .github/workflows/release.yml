@@ -62,7 +62,15 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "$C" "$T" >/dev/null
           security list-keychains -d user -s "$T" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/home-dev.p12"
-          security find-identity -p codesigning "$T" | grep -c '"Home Dev"' | sed 's/^/certificats « Home Dev » trouvés : /'
+          # un certificat fait soi-même n'est reconnu pour signer que si la machine lui fait confiance : on le lui dit, pour la signature de code
+          # seulement, le temps de cette compilation (la machine de GitHub est jetée ensuite)
+          if security find-certificate -c "Home Dev" -p "$T" > "$RUNNER_TEMP/home-dev.pem" 2>/dev/null && [ -s "$RUNNER_TEMP/home-dev.pem" ]; then
+            sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/home-dev.pem" || echo "confiance refusée"
+          else echo "le .p12 ne contient pas de certificat nommé « Home Dev »"; fi
+          # ce que le trousseau contient (les noms seulement), pour comprendre si la signature ne se fait pas
+          echo "certificats : $(security find-certificate -a "$T" | grep -c '"labl"')" ; security find-certificate -a "$T" | sed -n 's/.*"labl"<blob>="\(.*\)"/  \1/p'
+          echo "clés privées : $(security dump-keychain "$T" | grep -c 'class: 0x00000010')"
+          security find-identity -p codesigning "$T" | sed 's/[0-9A-F]\{40\}/<empreinte>/' | tail -4
 
       - name: Compiler Home.app
         env:
