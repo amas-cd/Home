@@ -2,7 +2,7 @@
 
 Launcher de jeux façon console, à la manette. Sur **Mac** (Apple Silicon) : les jeux Switch recompilés pour le Mac
 (nxnative, MacNativeGames), les jeux PC Epic et Steam, et les apps Mac. Sur **Windows** : les jeux Steam et Epic installés,
-et les recomps PC.
+et les jeux Switch que Home recompile lui-même avec ScarletNX, à partir du dump et des clés de ta propre console.
 
 Home ne contient aucun jeu, aucune clé et aucun fichier système : chacun utilise les copies de sa propre console et les jeux
 qu'il possède.
@@ -20,6 +20,8 @@ Ouvre la dernière [release](https://github.com/amas-cd/Home/releases/latest).
 **Windows (64 bits)**
 1. Télécharge `Home-win64-setup.exe` et lance-le. Il installe Home pour ton compte seulement, sans droits d'administrateur.
 2. Home propose ensuite ses mises à jour tout seul, depuis les releases de ce dépôt.
+3. Pour un jeu Switch : « Ajouter un jeu → Switch », donne ton dump (.xci ou .nsp) et ton `prod.keys`. Home télécharge ScarletNX,
+   construit le jeu et crée sa tuile. Il faut une carte graphique avec Vulkan 1.3. Home ne fournit ni jeu ni clé.
 
 Chaque fichier est accompagné de son `.sha256` pour vérifier le téléchargement.
 

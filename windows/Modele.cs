@@ -8,16 +8,16 @@ using FluentIcons.Common;
 namespace Home;
 
 /// D'où vient un jeu : décide comment on le lance et où on cherche ses images
-public enum Origine { Steam, Epic, Recomp, App, Switch }
+public enum Origine { Steam, Epic, App, Switch }
 
 public sealed class Jeu
 {
-    public string Id = "";        // "steam:<appid>", "epic:<AppName>", "recomp:<id>", "app:<chemin>"
+    public string Id = "";        // "steam:<appid>", "epic:<AppName>", "switch:<title id>", "construction:<n>", "app:<chemin>"
     public string Nom = "";
     public Origine Origine;
     public string Cible = "";     // ce qu'on ouvre : une adresse steam:// ou com.epicgames.launcher://, ou un .exe
     public string Dossier = "";   // le dossier du jeu : sert à savoir s'il tourne encore (Steam et Epic rendent la main tout de suite)
-    public string Categorie => Origine switch { Origine.Steam => "Steam", Origine.Epic => "Epic Games", Origine.Recomp => "Recomps", Origine.Switch => "Switch", _ => "Apps" };
+    public string Categorie => Origine switch { Origine.Steam => "Steam", Origine.Epic => "Epic Games", Origine.Switch => "Switch", _ => "Apps" };
     /// Un jeu Switch en cours de construction : sa tuile existe déjà, elle ouvre son chantier
     public bool EnConstruction => Id.StartsWith("construction:");
     public string? SteamId => Id.StartsWith("steam:") ? Id[6..] : null;
@@ -34,18 +34,6 @@ public sealed class Config
     public bool Sons { get; set; } = true;
     public bool Fenetre { get; set; }                         // en fenêtre plutôt qu'en plein écran
     public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
-}
-
-/// Un recomp installé par Home : d'où il vient, où il est, comment on le lance
-public sealed class RecompInstalle
-{
-    public string Id { get; set; } = ""; public string Nom { get; set; } = ""; public string Jeu { get; set; } = "";
-    public string Depot { get; set; } = ""; public string Version { get; set; } = ""; public string Dossier { get; set; } = "";
-    public string? Exe { get; set; }            // chemin complet du jeu, une fois connu
-    public string? Installeur { get; set; }     // nom du setup (TotK-Setup.exe) : le jeu se construit avec, à partir des fichiers du joueur
-    public string? ExeAttendu { get; set; }     // nom du jeu que le setup produit (totk.exe)
-    public string? Couverture { get; set; } public string? Fond { get; set; } public string? Logo { get; set; }
-    public bool HorsCatalogue { get; set; }
 }
 
 public sealed class ElementMenu
@@ -67,7 +55,7 @@ public sealed class Menu
 }
 /// Une question posée au clavier (recherche, clé SteamGridDB)
 public sealed class Saisie { public string Titre = ""; public string? Aide; public Action<string> Valider = _ => { }; }
-/// Une tâche de fond (téléchargement et installation d'un recomp) : son étape, sa progression
+/// Une tâche de fond (construction d'un jeu, mise à jour de Home) : son étape, sa progression
 public sealed class Tache { public string Titre = ""; public string Etape = "Démarrage…"; public double? Fraction; public bool Fini; public string? Erreur; }
 
 /// Une touche affichée dans les aides : lettre de la manette (A, B…) ou touche du clavier
@@ -79,7 +67,7 @@ public sealed record Aides(string Ok, string Retour, string Options, string Plus
 
 public static class Dossiers
 {
-    /// Tout ce que Home écrit : réglages, images, catalogue, recomps installés. HOME_DONNEES le déplace (tests).
+    /// Tout ce que Home écrit : réglages, images, moteur ScarletNX et jeux Switch construits. HOME_DONNEES le déplace (tests).
     public static readonly string Racine = Environment.GetEnvironmentVariable("HOME_DONNEES") is { Length: > 0 } d ? d
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Home");
     public static string Fichier(params string[] p) { var c = Path.Combine([Racine, .. p]); Directory.CreateDirectory(Path.GetDirectoryName(c)!); return c; }

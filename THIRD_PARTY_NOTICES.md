@@ -1,7 +1,7 @@
 # Projets tiers
 
 Home ne contient aucun jeu, aucune clé et aucun fichier système Nintendo. Il compile ou lance des projets tiers,
-récupérés sur le Mac de chacun :
+récupérés sur le Mac ou le PC de chacun :
 
 | Projet | Licence | Utilisation |
 |---|---|---|
@@ -10,6 +10,9 @@ récupérés sur le Mac de chacun :
 | Obelisk (com.zagrios.obelisk) | voir sa licence | Bibliothèque Epic / Steam / GOG ; Home lit ses installations, il ne l'inclut pas |
 | [Legendary](https://github.com/derrod/legendary) | GPL-3.0 | Connexion Epic pour le lancement direct ; installé à part |
 | [Background Music](https://github.com/kyleneideck/BackgroundMusic) | GPL-2.0 | Volume par jeu ; Home parle à son périphérique audio, il ne l'inclut pas |
+| [ScarletNX](https://github.com/scarletnx/ScarletNX) | GPL-3.0-or-later, © 2026 the ScarletNX contributors | Home pour Windows : recompile et lance les jeux Switch. Programme à part, téléchargé sur le PC depuis [scarletnx/nightly](https://github.com/scarletnx/nightly/releases) à la version de `windows/SCARLETNX-REF` ; Home n'inclut ni ne modifie son code |
+| [Mona Sans](https://github.com/github/mona-sans) | OFL-1.1, © 2023 GitHub | L'écriture de Home pour Windows (`windows/polices`, avec sa licence) |
+| [Fluent System Icons](https://github.com/microsoft/fluentui-system-icons), par le paquet [FluentIcons](https://github.com/davidxuang/FluentIcons) | MIT | Les icônes de Home pour Windows |
 | Kenney « Interface Sounds » | CC0 | Banque de sons de rechange (`app/sons/banque`) |
 
 Les six sons de l'interface (`app/sons/*.wav`) sont des sons originaux, créés pour Home : ils ne viennent d'aucun projet tiers.

@@ -44,7 +44,7 @@ Il n'y a qu'un dépôt : le code, et les releases que Home lit sans jeton pour s
 |---|---|
 | `app/main.swift` | Toute l'app Home |
 | `app/veille.swift` | La petite app invisible qui ouvre Home à la connexion d'une manette |
-| `windows/` | Home pour Windows (C# / Avalonia) : la même interface, pour les jeux Steam, Epic et les recomps. Voir « Home pour Windows » |
+| `windows/` | Home pour Windows (C# / Avalonia) : la même interface, pour les jeux Steam, Epic et les jeux Switch construits avec ScarletNX. Voir « Home pour Windows » |
 | `app/sons/` | Les six sons de l'interface, originaux, créés pour Home (`lancer` = le jingle de l'ouverture) ; `banque/` = Kenney, CC0, en rechange |
 | `app/salon-construire.command` | Compile, signe et installe `/Applications/Home.app`. `HOME_BUILD_ONLY=<dossier>` : compile seulement. `HOME_VERSION=x.y.z` : version de l'app |
 | `moteur/outils/` | Les scripts que Home lance (voir plus bas) |
@@ -123,13 +123,25 @@ Style du code : lignes denses, commentaires en français qui expliquent **pourqu
 SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec Avalonia 11, qui recopie l'interface de
 `app/main.swift` (mêmes tailles, marges, couleurs, mêmes noms de symboles dans les menus, traduits par `Icones`).
 
-- **Ce qu'elle lance** : les jeux Steam et Epic Games installés (détectés seuls), les apps ajoutées à la main, et les **recomps**.
-- **Recomps** : sur Windows, nxnative et MacNativeGames n'existent pas (Apple et Metal seulement). À leur place, Home installe les
-  recomps PC de leurs auteurs (TotK Recomp = `valentderah/totk-pc-recomp`, Zelda 64…). Source 1 : le catalogue public de
-  RecompLauncher (`https://recomplauncher.com/pc-catalog.json`, relu au plus une fois par jour). Source 2 : une recherche GitHub
-  pour ce qui n'y est pas, signalée « hors catalogue ». Home ne télécharge que depuis `github.com/<dépôt>/releases/download/`,
-  vérifie le SHA-256 quand il est publié, et refuse un fichier que le catalogue marque `red`. Aucun recomp ne contient de jeu.
-- **Pas sur Windows** : construction des jeux Switch, mods, TOTK / SMO Online, HUD en jeu, capture, volume (ni par jeu, ni la barre du
+- **Ce qu'elle lance** : les jeux Steam et Epic Games installés (détectés seuls), les apps ajoutées à la main, et les **jeux Switch
+  qu'elle construit elle-même**.
+- **Jeux Switch** (`Switch.cs`) : sur Windows, nxnative et MacNativeGames n'existent pas (Apple et Metal seulement). À leur place,
+  Home construit le jeu avec [ScarletNX](https://github.com/scarletnx/ScarletNX) (GPL-3.0-or-later), un recompilateur général : on
+  donne une fois le dump (.xci, .nsp) et `prod.keys` tirés de sa console, Home lance `scarletnx -r --extract-container` et crée la tuile.
+  - ScarletNX est un programme à part : Home le télécharge depuis `github.com/scarletnx/nightly/releases/download/`, à la version
+    figée dans `windows/SCARLETNX-REF` (avec son empreinte SHA-256), et le lance. On ne recopie jamais son code ; s'il faut le
+    modifier, c'est dans un fork en GPL, après l'avoir dit à Anas. ScarletNX ne garde que ses 30 dernières nightlies : si la version
+    figée a disparu, Home prend la dernière et vérifie l'empreinte que GitHub publie. Mets `SCARLETNX-REF` à jour de temps en temps.
+  - Tout est dans `%LOCALAPPDATA%\Home\scarletnx` (le `--data` de ScarletNX) : `moteur/`, `prod.keys` et `title.keys` copiés (**secrets**,
+    jamais ailleurs), `recompiled/<title id>/` = un jeu construit (`<id>.exe`, `<id>.abi` écrit à la fin, `<id>.ini`, `<id>_data/`).
+    Le jeu se suffit à lui-même : le dump d'origine ne sert plus. Il se lance par `scarletnx --game <dossier>`.
+  - Un jeu en construction est un **chantier** (`constructions.json`, tuile `construction:<n>`) : Reprendre, Abandonner, journal.
+  - Mods : un dossier par mod dans `<id>_data/mods/`, avec `romfs/` et/ou `exefs/` ; désactivés dans `mods_off=` du `.ini`. Un mod de
+    code (`exefs/`) fait recompiler le jeu (`scarletnx -r`).
+  - En ligne : seul le réglage `network=` du jeu est proposé (« Internet »). Ne présente « Jouer en ligne » comme fonctionnel pour un
+    jeu qu'après un essai réel de ce jeu avec ce mod. ScarletNX a `swkbd_text` pour répondre au clavier, mais à tous les claviers.
+  - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
+- **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
   haut), choix des images dans Home (un fichier à la place), mode d'utilisation.
 - **Graphisme** : l'app Mac fait foi. `windows/` la recopie vue par vue ; une vue reste en place et on change ses propriétés (c'est ce
   qui l'anime), et on n'anime jamais une taille (seulement `RenderTransform` et l'opacité). « Animations réduites » : `Mouvement.Reduit`.
@@ -147,7 +159,8 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `Modele.cs` | `Jeu`, `Config`, `Menu` / `ElementMenu`, `Dossiers`, `Icones` (SF Symbols → Material, teintes) |
 | `Bibliotheque.cs` | L'équivalent de `Library` : état, navigation, lancement, fin de partie, tous les menus |
 | `Sources.cs` | `Steam`, `Epic`, `SteamGridDB`, `Boutiques` (eShop et PlayStation Store par le nom du jeu, sans clé : jaquette carrée, fond), `Titres` (le résultat est-il le bon jeu ?), `Images` |
-| `Recomps.cs` | `Catalogue`, `GitHub`, `Installation`, `MenusRecomps` |
+| `Switch.cs` | `Moteur` (ScarletNX : version figée, téléchargement vérifié), `Ini`, `Chantier`, `Construction` (recompiler, lancer, reprendre), `MenusSwitch` (assistant, chantier, mods, Internet, Libérer de la place) |
+| `SCARLETNX-REF` | La version de ScarletNX que Home installe, et l'empreinte de ses archives |
 | `Vues.cs` | `Mouvement` (courbes et durées), `Ecran`, `Tuile`, `RangeeJeux`, `FondVue`, `Ouverture` (écran de démarrage), `PastilleTache`, « en cours de jeu », saisie |
 | `VuesMenus.cs` | `VueMenu` : les trois formes de `MenuView` (rangée de pastilles, roue, grille d'affiches). `Menu.Genre` choisit la forme, comme sur Mac |
 | `ANIMATIONS.md` | La fiche des animations de l'app Mac (courbes, durées, distances) : la référence de `Vues.cs` et `VuesMenus.cs` |
@@ -155,7 +168,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `MiseAJour.cs` | Mise à jour de Home depuis les releases de amas-cd/Home |
 | `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |
 
-Données sur le PC : `%LOCALAPPDATA%\Home` (`jeux.json`, `statistiques.json`, `recomps.json`, `media/`, `cache/`, `recomps/<id>/`,
+Données sur le PC : `%LOCALAPPDATA%\Home` (`jeux.json`, `statistiques.json`, `constructions.json`, `media/`, `cache/`, `scarletnx/`,
 `log/home.log`, `steamgriddb-api-key` = **secret**).
 
 **Règle de parité** : un changement de l'interface ou d'un menu dans `app/main.swift` se reporte dans `windows/` dans le même
@@ -164,13 +177,14 @@ commit quand il a un sens sur Windows (et inversement). Si ce n'est pas reporté
 **Vérifier sur le Mac** (personne n'a de PC sous la main ; un ami d'Anas teste les releases) :
 ```bash
 dotnet build windows/Home.csproj
-HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=recomps HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
+HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=options HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
 ```
-`HOME_DEMO=1` remplit la bibliothèque avec les recomps en vedette du catalogue. `HOME_SCENARIO` enchaîne des écrans ou des touches
-(`options`, `plus`, `ajout`, `recomps`, `fiche`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
+`HOME_DEMO=1` remplit la bibliothèque avec des tuiles d'exemple (aucun jeu n'est là). `HOME_SCENARIO` enchaîne des écrans ou des touches
+(`options`, `plus`, `ajout`, `switch`, `mods`, `place`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
 la fenêtre puis quitte : lis le PNG. Cette image ne montre ni les flous ni un mouvement en cours : pour les voir, lance sans
-`HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille)
-ne se teste pas sur Mac.
+`HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille,
+ScarletNX : aucun jeu ne tourne sur macOS) ne se teste pas sur Mac. Dans un compte rendu, sépare toujours « compilé », « vu à l'écran »
+et « essayé avec un vrai jeu ».
 
 Le workflow compile `windows/` sur `windows-latest` (job `windows`), puis fabrique le setup avec Inno Setup
 (`windows/installeur.iss` : installation pour l'utilisateur seul dans `%LOCALAPPDATA%\Programs\Home`) et le publie sous le nom

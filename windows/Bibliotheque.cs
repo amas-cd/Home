@@ -11,7 +11,6 @@ public sealed class Bibliotheque
     public event Action? Change;
     public Config Config = Json.Lire<Config>(FichierConfig);
     public Dictionary<string, Stat> Stats = Json.Lire<Dictionary<string, Stat>>(FichierStats);
-    public List<RecompInstalle> Recomps = new();
     public List<Jeu> Jeux = new();
     public readonly Dictionary<string, Art> Arts = new();
     public List<string> Categories = ["Tous"];
@@ -44,46 +43,38 @@ public sealed class Bibliotheque
     public List<Jeu> JeuxDe(int categorie) => Jeux.Where(j => !Config.Masques.Contains(j.Id) && (categorie == 0 || j.Categorie == Categories.ElementAtOrDefault(categorie)))
         .OrderByDescending(j => Stats.TryGetValue(j.Id, out var s) ? s.DernierePartie ?? DateTime.MinValue : DateTime.MinValue).ThenBy(j => j.Nom, StringComparer.CurrentCultureIgnoreCase).ToList();
     public Jeu? Courant { get { var v = Visibles; return Selection < v.Count ? v[Selection] : null; } }
-    /// D'où vient un jeu, pour l'afficher à côté de son nom : la console d'origine d'un recomp, ou la boutique. L'icône est un logo
-    /// (« logo:switch », « logo:steam », « logo:epic » : les images de app/logos) ou un symbole.
-    public (string nom, string icone) ConsoleDe(Jeu j)
+    /// D'où vient un jeu, pour l'afficher à côté de son nom : sa console, ou sa boutique. L'icône est un logo (« logo:switch »,
+    /// « logo:steam », « logo:epic » : les images de app/logos) ou un symbole.
+    public (string nom, string icone) ConsoleDe(Jeu j) => j.Origine switch
     {
-        if (j.Origine == Origine.Steam) return ("Steam", "logo:steam");
-        if (j.Origine == Origine.Epic) return ("Epic Games", "logo:epic");
-        if (j.Origine == Origine.App) return ("App Windows", "pc");
-        if (j.Origine == Origine.Switch) return j.EnConstruction ? ("En construction", "hammer") : ("Nintendo Switch", "logo:switch");
-        var origine = RecompDe(j) is { } r ? Catalogue.Par(r.Id)?.Origine : null;
-        if (string.IsNullOrEmpty(origine)) return ("Recomp", "gamecontroller");
-        var nom = Catalogue.NomOrigine(origine); var cle = (origine + " " + nom).ToLowerInvariant();
-        return (nom, cle.Contains("switch") ? "logo:switch" : "gamecontroller");
-    }
-    public RecompInstalle? RecompDe(Jeu j) => j.Origine == Origine.Recomp ? Recomps.FirstOrDefault(r => "recomp:" + r.Id == j.Id) : null;
+        Origine.Steam => ("Steam", "logo:steam"), Origine.Epic => ("Epic Games", "logo:epic"),
+        Origine.Switch => j.EnConstruction ? ("En construction", "hammer") : ("Nintendo Switch", "logo:switch"),
+        _ => ("App Windows", "pc"),
+    };
 
     public void Recharger(string? selectionner = null)
     {
         Sons.Actifs = Config.Sons; Mouvement.Reduit = Config.AnimationsReduites;
-        Recomps = Json.Lire<List<RecompInstalle>>(Installation.Registre);
         var jeux = new List<Jeu>();
         jeux.AddRange(Steam.Jeux()); jeux.AddRange(Epic.Jeux()); jeux.AddRange(Construction.Jeux());
         // un jeu en construction a déjà sa tuile : on voit où il en est, et on le reprend si c'est coupé
         foreach (var c in Construction.Chantiers()) jeux.Add(new Jeu { Id = c.Id, Nom = c.Titre, Origine = Origine.Switch });
-        foreach (var r in Recomps.Where(r => Demo || Directory.Exists(r.Dossier)))
-            jeux.Add(new Jeu { Id = "recomp:" + r.Id, Nom = r.Jeu != "" && !r.HorsCatalogue ? r.Jeu : r.Nom, Origine = Origine.Recomp, Cible = r.Exe ?? "", Dossier = r.Dossier });
+        if (Demo) jeux.AddRange(Exemples());
         foreach (var e in Config.Jeux.Where(e => Demo || File.Exists(e.Chemin)))
             jeux.Add(new Jeu { Id = "app:" + e.Chemin, Nom = e.Nom ?? Path.GetFileNameWithoutExtension(e.Chemin), Origine = Origine.App, Cible = e.Chemin, Dossier = Path.GetDirectoryName(e.Chemin) ?? "" });
         foreach (var j in jeux) if (Config.Noms.TryGetValue(j.Id, out var n)) j.Nom = n;
         var avant = selectionner ?? Courant?.Id; var categorie = Categories.ElementAtOrDefault(IndexCategorie);
         Jeux = jeux;
-        Categories = ["Tous", .. new[] { "Switch", "Steam", "Epic Games", "Recomps", "Apps" }.Where(c => jeux.Any(j => j.Categorie == c && !Config.Masques.Contains(j.Id)))];
+        Categories = ["Tous", .. new[] { "Switch", "Steam", "Epic Games", "Apps" }.Where(c => jeux.Any(j => j.Categorie == c && !Config.Masques.Contains(j.Id)))];
         IndexCategorie = selectionner != null ? 0 : Math.Max(0, Categories.IndexOf(categorie ?? "Tous"));
         var i = Visibles.FindIndex(j => j.Id == avant); Selection = i >= 0 ? i : Math.Min(Selection, Visibles.Count);
-        Journal.Ecrire($"bibliothèque : {jeux.Count(j => j.Origine == Origine.Steam)} Steam, {jeux.Count(j => j.Origine == Origine.Epic)} Epic, {jeux.Count(j => j.Origine == Origine.Recomp)} recomps, {jeux.Count(j => j.Origine == Origine.App)} apps");
+        Journal.Ecrire($"bibliothèque : {jeux.Count(j => j.Origine == Origine.Steam)} Steam, {jeux.Count(j => j.Origine == Origine.Epic)} Epic, {jeux.Count(j => j.Origine == Origine.Switch)} Switch, {jeux.Count(j => j.Origine == Origine.App)} apps");
         foreach (var j in jeux) if (!Arts.ContainsKey(j.Id)) ChargerArt(j);
         Signaler();
     }
     public async void ChargerArt(Jeu j)
     {
-        var art = await Images.Charger(j, RecompDe(j));
+        var art = await Images.Charger(j);
         Arts[j.Id] = art; Signaler();
     }
 
@@ -177,11 +168,6 @@ public sealed class Bibliotheque
         try
         {
             string cible = j.Cible, dossier = j.Dossier;
-            if (RecompDe(j) is { } r)
-            {
-                if (await PreparerRecomp(r) is not { } exe) return;
-                cible = exe; if (!exe.StartsWith(r.Dossier, StringComparison.OrdinalIgnoreCase)) dossier = Path.GetDirectoryName(exe)!;
-            }
             Son("valider"); FermerMenus();
             Process? p = null;
             if (OperatingSystem.IsWindows())
@@ -208,7 +194,7 @@ public sealed class Bibliotheque
         var i = Visibles.FindIndex(x => x.Id == j.Id); if (i >= 0) Selection = i;
         Devant?.Invoke(); Son("ouvrir"); Signaler();
     }
-    /// Attend la fin de la partie. Une app lancée directement : on attend son processus. Steam, Epic et les recomps : on regarde si un
+    /// Attend la fin de la partie. Une app lancée directement : on attend son processus. Steam, Epic et les jeux Switch : on regarde si un
     /// programme du dossier du jeu tourne (le launcher rend la main tout de suite, et beaucoup de jeux se relancent eux-mêmes).
     static bool Attendre(Jeu j, Process? p, string dossier)
     {
@@ -223,73 +209,14 @@ public sealed class Bibliotheque
             else if (DateTime.Now - debut > TimeSpan.FromSeconds(120)) return false;   // jamais démarré (lancement annulé, mise à jour du launcher…)
         }
     }
-    /// Le programme d'un recomp. Certains (TotK Recomp) se construisent d'abord avec leur setup, à partir des fichiers du joueur :
-    /// Home lance le setup, puis retrouve le jeu produit.
-    async Task<string?> PreparerRecomp(RecompInstalle r)
-    {
-        if (r.Exe != null && File.Exists(r.Exe)) return r.Exe;
-        if (r.ExeAttendu != null && Installation.Trouver(r.Dossier, r.ExeAttendu) is { } e) return Retenir(r, e);
-        if (r.Installeur != null && Installation.Trouver(r.Dossier, r.Installeur) is { } setup)
-        {
-            var cat = Catalogue.Par(r.Id);
-            Ouvrir(new Menu
-            {
-                Titre = r.Nom, SousTitre = "Première fois : le jeu doit être construit", Symbole = "hammer",
-                Texte = "Ce jeu se construit une seule fois, sur ce PC, à partir de tes propres fichiers (le dump de ta console). Le setup de l'auteur te les demande, puis fait le travail."
-                    + (cat?.Besoin is { Length: > 0 } b ? "\n\nIl te faut : " + b : "") + (cat?.Note is { } n ? "\n\n" + n : "")
-                    + $"\n\nConseil : choisis comme dossier d'installation\n{Path.Combine(r.Dossier, "jeu")}\nHome retrouvera le jeu tout seul.",
-                Elements =
-                {
-                    new("Lancer le setup", "hammer", () => _ = LancerSetup(r, setup), r.Installeur),
-                    new("Le jeu est déjà construit", "folder", () => _ = MontrerDossier(r), "Montrer à Home le dossier où il est installé"),
-                },
-            });
-            return null;
-        }
-        if (Installation.Deviner(r.Dossier) is { } devine) return Retenir(r, devine);
-        if (ChoisirFichier != null && await ChoisirFichier($"Quel programme lance {r.Nom} ?", ["*.exe"]) is { } choisi) return Retenir(r, choisi);
-        return null;
-    }
-    string Retenir(RecompInstalle r, string exe)
-    {
-        r.Exe = exe; Json.Ecrire(Installation.Registre, Recomps);
-        var j = Jeux.FirstOrDefault(x => x.Id == "recomp:" + r.Id); if (j != null) j.Cible = exe;
-        return exe;
-    }
-    async Task LancerSetup(RecompInstalle r, string setup)
-    {
-        FermerMenus();
-        if (!OperatingSystem.IsWindows()) { Dire("Le setup ne se lance que sur Windows"); return; }
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(r.Dossier, "jeu"));
-            using var p = Process.Start(new ProcessStartInfo(setup) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(setup)! });
-            Dire("Le setup est ouvert. Reviens ici quand il a fini.");
-            if (p != null) await p.WaitForExitAsync();
-            Devant?.Invoke();
-            if (r.ExeAttendu != null && Installation.Trouver(r.Dossier, r.ExeAttendu) is { } e) { Retenir(r, e); Dire($"{r.Nom} est prêt"); }
-            else await MontrerDossier(r);
-        }
-        catch (Exception e) { Journal.Ecrire($"setup de {r.Id} : {e.Message}"); Dire("Le setup n'a pas pu être lancé"); }
-    }
-    async Task MontrerDossier(RecompInstalle r)
-    {
-        FermerMenus();
-        if (ChoisirDossier == null || await ChoisirDossier($"Dans quel dossier as-tu installé {r.Nom} ?") is not { } d) return;
-        var exe = (r.ExeAttendu != null ? Installation.Trouver(d, r.ExeAttendu) : null) ?? Installation.Deviner(d);
-        if (exe != null) { Retenir(r, exe); Dire($"{r.Nom} est prêt"); } else Dire($"{r.ExeAttendu ?? "Le jeu"} n'est pas dans ce dossier");
-    }
-
     // MARK: Menus
     /// Les options d'un jeu : un menu court, en rangée de pastilles comme sur Mac. Les images et le nom sont dans « Apparence ».
     public void OuvrirOptions()
     {
         if (Courant is not { } j) return;
         if (j.EnConstruction) { MenusSwitch.Chantier(this, j); return; }
-        var r = RecompDe(j); var cat = r != null ? Catalogue.Par(r.Id) : null;
-        var m = new Menu { Titre = j.Nom, SousTitre = j.Categorie + (r != null ? $" · {r.Nom} {r.Version}" : ""), Logo = Arts.GetValueOrDefault(j.Id)?.Logo, Symbole = "gamecontroller" };
+        var m = new Menu { Titre = j.Nom, SousTitre = ConsoleDe(j).nom, Logo = Arts.GetValueOrDefault(j.Id)?.Logo, Symbole = "gamecontroller" };
         m.Elements.Add(new("Jouer", "play.fill", () => { FermerMenus(); Lancer(); }, DerniereFois(j)));
-        if (r != null && cat != null && cat.Version != r.Version) m.Elements.Add(new("Mettre à jour", "arrow.down.circle", () => MenusRecomps.Fiche(this, cat, OuvrirOptions), $"{r.Version} → {cat.Version}"));
         if (j.Origine == Origine.Switch)
         {
             m.Elements.Add(new("Mods", "puzzlepiece", () => MenusSwitch.Mods(this, j), "Ajouter, activer, désactiver, supprimer"));
@@ -298,9 +225,7 @@ public sealed class Bibliotheque
         }
         m.Elements.Add(new("Apparence", "paintbrush", () => OuvrirApparence(j), "Jaquette, fond, logo et nom"));
         if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier), j.Dossier));
-        if (r != null) m.Elements.Add(new("Page GitHub du recomp", "safari", () => Systeme.Ouvrir("https://github.com/" + r.Depot), r.Depot));
         m.Elements.Add(new("Masquer", "eye.slash", () => { Config.Masques.Add(j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le jeu reste installé ; Menu → Jeux masqués pour le remettre"));
-        if (r != null) m.Elements.Add(new("Désinstaller", "trash", () => ConfirmerDesinstallation(j, r), "Le dossier du recomp part à la Corbeille") { Destructif = true });
         if (j.Origine == Origine.Switch) m.Elements.Add(new("Désinstaller", "trash", () => Ouvrir(new Menu
         {
             Titre = "Désinstaller " + j.Nom + " ?", Symbole = "trash", Retour = OuvrirOptions,
@@ -332,26 +257,8 @@ public sealed class Bibliotheque
                 new("Changer la jaquette", "photo", () => _ = ChoisirImage(j, "couverture"), "Depuis un fichier image"),
                 new("Changer le fond", "photo.fill", () => _ = ChoisirImage(j, "fond"), "Depuis un fichier image"),
                 new("Changer le logo", "textformat", () => _ = ChoisirImage(j, "logo"), "Depuis un fichier image (PNG transparent)"),
-                new("Rechercher les images", "magnifyingglass", () => RechercherImages(j), SteamGridDB.Cle != null ? "Steam, catalogue, SteamGridDB" : "Sans clé SteamGridDB : Steam et catalogue seulement"),
+                new("Rechercher les images", "magnifyingglass", () => RechercherImages(j), SteamGridDB.Cle != null ? "SteamGridDB, boutiques officielles, Steam" : "Boutiques officielles et Steam (sans clé SteamGridDB)"),
                 new("Renommer", "pencil", () => Demander("Nouveau nom", j.Nom, n => { Config.Noms[j.Id] = n; Enregistrer(); FermerMenus(); Recharger(); }), j.Nom),
-            },
-        });
-    }
-    void ConfirmerDesinstallation(Jeu j, RecompInstalle r)
-    {
-        Ouvrir(new Menu
-        {
-            Titre = "Désinstaller " + j.Nom + " ?", Symbole = "trash", Retour = OuvrirOptions,
-            Texte = $"Le dossier du recomp part à la Corbeille :\n{r.Dossier}\n\nSi le jeu a été construit ailleurs, ce dossier-là n'est pas touché. Tes fichiers de jeu d'origine non plus.",
-            Elements =
-            {
-                new("Annuler", "xmark", OuvrirOptions),
-                new("Mettre à la Corbeille", "trash", () =>
-                {
-                    if (Directory.Exists(r.Dossier) && !Systeme.Corbeille(r.Dossier)) { Dire("Le dossier n'a pas pu être mis à la Corbeille"); return; }
-                    Recomps.RemoveAll(x => x.Id == r.Id); Json.Ecrire(Installation.Registre, Recomps); Journal.Ecrire($"recomp désinstallé : {r.Id}");
-                    FermerMenus(); Recharger(); Dire(j.Nom + " est désinstallé");
-                }) { Destructif = true },
             },
         });
     }
@@ -372,8 +279,8 @@ public sealed class Bibliotheque
     {
         var m = new Menu { Titre = "Home", SousTitre = "Version " + Version, Symbole = "gear" };
         if (MiseAJour.Version is { } nouvelle) m.Elements.Add(new("Mettre à jour Home", "arrow.down.circle", () => _ = MiseAJour.Installer(this), $"{Version} → {nouvelle} · Home se ferme, s'installe et se rouvre"));
-        m.Elements.Add(new("Ajouter un jeu", "plus", OuvrirAjout, "Recomps, apps et jeux Windows"));
-        m.Elements.Add(new("Actualiser la bibliothèque", "arrow.clockwise", () => { FermerMenus(); Recharger(); Dire("Bibliothèque actualisée"); }, "Relit Steam, Epic Games et les recomps"));
+        m.Elements.Add(new("Ajouter un jeu", "plus", OuvrirAjout, "Jeux Switch, apps et jeux Windows"));
+        m.Elements.Add(new("Actualiser la bibliothèque", "arrow.clockwise", () => { FermerMenus(); Recharger(); Dire("Bibliothèque actualisée"); }, "Relit Steam, Epic Games et les jeux Switch"));
         if (Config.Masques.Count > 0) m.Elements.Add(new("Jeux masqués", "eye", OuvrirMasques, $"{Config.Masques.Count} masqué{(Config.Masques.Count > 1 ? "s" : "")}"));
         // « Nom : état » : la roue montre l'état dans une capsule, à côté du choix visé
         m.Elements.Add(new("Sons de l'interface : " + (Config.Sons ? "activés" : "coupés"), Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, "Les sons des menus et de la bibliothèque") { Section = "Réglages" });
@@ -383,7 +290,7 @@ public sealed class Bibliotheque
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
         m.Elements.Add(new("Libérer de la place", "trash", () => MenusSwitch.LibererPlace(this), "Ce que les constructions ont laissé et qui ne sert plus") { Teinte = Icones.Orange });
-        m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, recomps, journal") { Section = MiseAJour.Version == null ? null : "Home" });
+        m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, jeux Switch, journal") { Section = MiseAJour.Version == null ? null : "Home" });
         m.Elements.Add(new("Quitter Home", "power", () => Quitter?.Invoke()) { Destructif = true });
         Ouvrir(m);
     }
@@ -418,7 +325,6 @@ public sealed class Bibliotheque
             Elements =
             {
                 new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir de ton dump et de tes clés") { Teinte = Icones.Rouge },
-                new("Recomps", "gamecontroller", () => MenusRecomps.Ouvrir(this), "Jeux console recompilés pour Windows : catalogue, puis GitHub"),
                 new("App ou jeu Windows", "desktopcomputer", () => _ = AjouterApp(), "Choisir un programme (.exe) ou un raccourci"),
                 new() { Libelle = "Steam et Epic Games", Detail = $"Leurs jeux installés apparaissent tout seuls : {steam} Steam, {epic} Epic Games", Icone = "pc", Info = true, Section = "Détectés automatiquement" },
             },
@@ -431,14 +337,15 @@ public sealed class Bibliotheque
         FermerMenus(); Recharger(selectionner: "app:" + f);
     }
 
-    /// Démonstration (HOME_DEMO=1, sur Mac) : les recomps en vedette du catalogue, comme s'ils étaient installés, pour vérifier l'interface
-    public async Task ChargerDemo()
-    {
-        if (!await Catalogue.Charger()) return;
-        var liste = Catalogue.Vedettes.Select(Catalogue.Par).Where(r => r != null).Take(8).Select(r => new RecompInstalle
-            { Id = r!.Id, Nom = r.Nom, Jeu = r.Jeu, Depot = r.Depot, Version = r.Version, Dossier = Path.Combine(Dossiers.Racine, "recomps", r.Id), Couverture = r.Couverture, Fond = r.Fond, Logo = r.Logo }).ToList();
-        Json.Ecrire(Installation.Registre, liste);
-        Config.Jeux = [new Entree { Chemin = @"C:\Jeux\Exemple.exe", Nom = "Une app Windows" }];
-        Recharger();
-    }
+    /// Démonstration (HOME_DEMO=1, sur Mac) : des tuiles d'exemple, pour vérifier l'interface sans rien d'installé. Les noms servent à
+    /// chercher les images dans les boutiques officielles ; aucun jeu n'est là.
+    static IEnumerable<Jeu> Exemples() =>
+    [
+        new() { Id = "switch:exemple1", Nom = "The Legend of Zelda: Tears of the Kingdom", Origine = Origine.Switch },
+        new() { Id = "switch:exemple2", Nom = "Super Mario Odyssey", Origine = Origine.Switch },
+        new() { Id = "switch:exemple3", Nom = "Mario Kart 8 Deluxe", Origine = Origine.Switch },
+        new() { Id = "epic:exemple", Nom = "Rocket League", Origine = Origine.Epic },
+        new() { Id = "epic:exemple2", Nom = "Bloodborne", Origine = Origine.Epic },
+        new() { Id = "app:exemple", Nom = "Une app Windows", Origine = Origine.App },
+    ];
 }

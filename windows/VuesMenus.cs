@@ -3,7 +3,7 @@
 //    seul le choix visé a son nom et sa précision. Gauche / droite pour choisir ;
 //  - un menu long est une ROUE à gauche : le choix visé en grand, les autres de plus en plus petits et effacés autour. À droite, le
 //    choix visé en image : son symbole dans un disque de sa couleur (ou sa jaquette), entouré de deux anneaux ;
-//  - le catalogue des recomps est une GRILLE d'affiches, cinq par rang.
+//  - une GRILLE d'affiches, cinq par rang, pour un menu qui montre des images (`Menu.Grille`).
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
@@ -66,7 +66,7 @@ sealed class VueMenu : Panel
             if (m.SousTitre != null) colonne.Children.Add(new TextBlock { Text = m.SousTitre.ToUpper(), FontSize = 15, FontWeight = FontWeight.ExtraBold, FontFamily = U.Police, LetterSpacing = 2, Foreground = Brushes.White, Opacity = 0.6 });
             var titre = U.Titre(m.Titre, 44, 1, place: 1500); titre.Margin = new Thickness(0, 4, 0, 0); titre.HorizontalAlignment = HorizontalAlignment.Left; colonne.Children.Add(titre);
         }
-        // sur Windows, quelques menus courts expliquent ce qu'ils vont faire (désinstaller, construire un recomp) : le texte tient au-dessus des pastilles
+        // sur Windows, quelques menus courts expliquent ce qu'ils vont faire (désinstaller, construire un jeu) : le texte tient au-dessus des pastilles
         if (m.Texte != null) { var t = U.Texte(m.Texte, 18, FontWeight.Normal, 0.82); t.TextWrapping = TextWrapping.Wrap; t.MaxWidth = 940; t.HorizontalAlignment = HorizontalAlignment.Left; t.Margin = new Thickness(0, 18, 0, 0); colonne.Children.Add(t); }
         var piste = new Canvas { Height = Grand, Width = Grand + (n - 1) * (Petit + Espace), Margin = new Thickness(0, 34, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         var places = new Panel[n]; var disques = new Panel[n]; var pleins = new Border[n]; var creux = new Border[n];

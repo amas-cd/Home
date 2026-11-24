@@ -64,7 +64,6 @@ sealed class Fenetre : Window
             if (Icones.Inconnues().ToList() is { Count: > 0 } inconnues) Journal.Ecrire("icônes inconnues : " + string.Join(", ", inconnues));
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
-            if (Bibliotheque.Demo) await lib.ChargerDemo(); else _ = Catalogue.Charger().ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(lib.Signaler));   // le catalogue sert aussi à proposer les mises à jour des recomps
             Scenario();
             // Une fois par démarrage, sans rien installer : le menu propose la mise à jour, c'est le joueur qui la lance
             if (OperatingSystem.IsWindows() && await MiseAJour.Verifier()) lib.Dire($"Home {MiseAJour.Version} est disponible : Menu → Mettre à jour Home");
@@ -107,10 +106,12 @@ sealed class Fenetre : Window
                 case "plus": lib.OuvrirPlus(); break;
                 case "ajout": lib.OuvrirAjout(); break;
                 case "ouverture": ecran.Ouvrir(fige: true); break;
-                case "recomps": MenusRecomps.Ouvrir(lib); break;
-                case "fiche": if (Catalogue.Par("totk-pc-recomp") is { } r) MenusRecomps.Fiche(lib, r, lib.FermerMenus); break;
-                case "saisie": lib.Demander("Rechercher un recomp", "Nom du jeu, au clavier", _ => { }); break;
-                case "tache": lib.Tache = new Tache { Titre = "Installation de TotK Recomp", Etape = "Téléchargement… 96 Mo sur 160", Fraction = 0.51 }; lib.Dire("Bibliothèque actualisée"); break;
+                case "switch": lib.Ouvrir(new Menu { Titre = "Construire le jeu", SousTitre = "Zelda.xci", Symbole = "hammer", Texte = "Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même, le fichier d'origine ne sert plus.",
+                    Elements = { new("Construire", "hammer", () => { }, "Avec 1 mise à jour ou DLC"), new("Ajouter une mise à jour ou un DLC", "plus", () => { }, "Une mise à jour au plus, autant de DLC que tu veux"), new("Zelda-1.2.1.nsp", "xmark", () => { }, "Retirer de la liste") } }); break;
+                case "mods": if (lib.Courant is { } jm) MenusSwitch.Mods(lib, jm); break;
+                case "place": MenusSwitch.LibererPlace(lib); break;
+                case "saisie": lib.Demander("Nouveau nom", "Au clavier", _ => { }); break;
+                case "tache": lib.Tache = new Tache { Titre = "Construction de Zelda", Etape = "Recompilation du code…" }; lib.Dire("Bibliothèque actualisée"); break;
                 default: lib.Nav(s); break;
             }
             await Task.Delay(1200);

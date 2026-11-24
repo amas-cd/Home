@@ -1,4 +1,4 @@
-// Home pour Windows — d'où viennent les jeux (Steam, Epic Games) et leurs images (Steam, SteamGridDB, catalogue des recomps).
+// Home pour Windows — d'où viennent les jeux (Steam, Epic Games) et leurs images (SteamGridDB, boutiques officielles, Steam).
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -191,9 +191,14 @@ public static class Titres
         static HashSet<string> Nombres(string s) => new string(s.Select(c => char.IsDigit(c) ? c : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
         var n = Nombres(cherche); return n.Count == 0 || n.IsSubsetOf(Nombres(titre));
     }
-    /// Parmi des résultats, celui qui est le jeu cherché : le titre le plus court (le jeu lui-même, pas son édition spéciale ni son extension)
-    public static T? Meilleur<T>(IEnumerable<T> resultats, Func<T, string> titre, string jeu) where T : class =>
-        resultats.Where(r => Correspond(titre(r), jeu) && MemesNumeros(titre(r), jeu)).OrderBy(r => titre(r).Length).FirstOrDefault();
+    /// Parmi des résultats, celui qui est le jeu cherché : celui qui reprend le plus de mots du nom (« Super Mario Odyssey », pas
+    /// « Super Mario Run »), puis le titre le plus court (le jeu lui-même, pas son édition spéciale ni son extension)
+    public static T? Meilleur<T>(IEnumerable<T> resultats, Func<T, string> titre, string jeu) where T : class
+    {
+        var mots = Mots(jeu);
+        return resultats.Where(r => Correspond(titre(r), jeu) && MemesNumeros(titre(r), jeu))
+            .OrderByDescending(r => { var t = Plat(titre(r)); return mots.Count(t.Contains); }).ThenBy(r => titre(r).Length).FirstOrDefault();
+    }
 }
 
 /// Les boutiques officielles, sans clé, cherchées par le nom du jeu (comme `EShop` et `PSStore` sur Mac) : elles donnent une jaquette
@@ -278,9 +283,9 @@ public static class Images
     }
     /// Les trois images d'un jeu. Ce qui manque sur disque est cherché à sa source, la plus juste d'abord :
     ///  - jaquette (la tuile est carrée) : SteamGridDB si une clé est enregistrée, puis la jaquette carrée officielle des boutiques
-    ///    (eShop, PlayStation Store), puis seulement les jaquettes en hauteur (catalogue des recomps, Steam) ;
+    ///    (eShop, PlayStation Store), puis seulement la jaquette en hauteur de Steam ;
     ///  - fond : catalogue, Steam, boutiques, SteamGridDB ; logo : catalogue, Steam, SteamGridDB.
-    public static async Task<Art> Charger(Jeu j, RecompInstalle? r)
+    public static async Task<Art> Charger(Jeu j)
     {
         var art = new Art();
         foreach (var quoi in Emplacements)
@@ -289,17 +294,16 @@ public static class Images
             if (!File.Exists(f))
             {
                 var sources = new List<string?>();
-                var catalogue = r == null ? null : quoi == "couverture" ? r.Couverture : quoi == "fond" ? r.Fond : r.Logo;
                 var steam = j.SteamId is { } s ? Steam.Images(s, quoi) : [];
                 if (quoi == "couverture")
                 {
                     sources.Add(await SteamGridDB.Image(j, quoi));
                     if (sources[0] == null && j.SteamId == null) sources.Add((await Boutiques.Chercher(j.Nom))?.Carre);
-                    sources.Add(catalogue); sources.AddRange(steam);
+                    sources.AddRange(steam);
                 }
                 else
                 {
-                    sources.Add(catalogue); sources.AddRange(steam);
+                    sources.AddRange(steam);
                     if (sources.All(string.IsNullOrEmpty))
                     {
                         if (quoi == "fond" && await Boutiques.Chercher(j.Nom) is { } b) { sources.Add(b.Fond); sources.Add(b.FondPetit); }
