@@ -27,6 +27,7 @@
     <!-- L'écriture de Home sur Windows : Mona Sans (GitHub, licence OFL, voir polices/LICENCE-OFL.txt), à la place de SF Pro
          qu'Apple ne laisse pas redistribuer. La version large et très grasse sert aux titres. -->
     <AvaloniaResource Include="polices\*.ttf" />
+    <AvaloniaResource Include="SCARLETNX-REF" />
   </ItemGroup>
   <ItemGroup>
     <!-- Les logos des consoles et des boutiques sont ceux de la version Mac : une seule copie dans le dépôt -->

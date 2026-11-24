@@ -1,0 +1,5 @@
+# La version de ScarletNX que Home installe (https://github.com/scarletnx/nightly/releases), et l'empreinte SHA-256 de ses archives.
+# ScarletNX ne garde que ses 30 dernières nightlies : si celle-ci a disparu, Home prend la dernière publiée et le note dans son journal.
+tag=nightly-2026-11-24-aafad85
+x86_64=22cd40bf78d928ce06e489e2d36b9da2011d538b9266db43a867ace2750cc2c7
+aarch64=f6e2440a8557f7be5c079af103234d60a390bb08b3ba8b9b86638861b0132340

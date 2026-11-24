@@ -51,6 +51,7 @@ public sealed class Bibliotheque
         if (j.Origine == Origine.Steam) return ("Steam", "logo:steam");
         if (j.Origine == Origine.Epic) return ("Epic Games", "logo:epic");
         if (j.Origine == Origine.App) return ("App Windows", "pc");
+        if (j.Origine == Origine.Switch) return j.EnConstruction ? ("En construction", "hammer") : ("Nintendo Switch", "logo:switch");
         var origine = RecompDe(j) is { } r ? Catalogue.Par(r.Id)?.Origine : null;
         if (string.IsNullOrEmpty(origine)) return ("Recomp", "gamecontroller");
         var nom = Catalogue.NomOrigine(origine); var cle = (origine + " " + nom).ToLowerInvariant();
@@ -63,7 +64,9 @@ public sealed class Bibliotheque
         Sons.Actifs = Config.Sons; Mouvement.Reduit = Config.AnimationsReduites;
         Recomps = Json.Lire<List<RecompInstalle>>(Installation.Registre);
         var jeux = new List<Jeu>();
-        jeux.AddRange(Steam.Jeux()); jeux.AddRange(Epic.Jeux());
+        jeux.AddRange(Steam.Jeux()); jeux.AddRange(Epic.Jeux()); jeux.AddRange(Construction.Jeux());
+        // un jeu en construction a déjà sa tuile : on voit où il en est, et on le reprend si c'est coupé
+        foreach (var c in Construction.Chantiers()) jeux.Add(new Jeu { Id = c.Id, Nom = c.Titre, Origine = Origine.Switch });
         foreach (var r in Recomps.Where(r => Demo || Directory.Exists(r.Dossier)))
             jeux.Add(new Jeu { Id = "recomp:" + r.Id, Nom = r.Jeu != "" && !r.HorsCatalogue ? r.Jeu : r.Nom, Origine = Origine.Recomp, Cible = r.Exe ?? "", Dossier = r.Dossier });
         foreach (var e in Config.Jeux.Where(e => Demo || File.Exists(e.Chemin)))
@@ -71,7 +74,7 @@ public sealed class Bibliotheque
         foreach (var j in jeux) if (Config.Noms.TryGetValue(j.Id, out var n)) j.Nom = n;
         var avant = selectionner ?? Courant?.Id; var categorie = Categories.ElementAtOrDefault(IndexCategorie);
         Jeux = jeux;
-        Categories = ["Tous", .. new[] { "Steam", "Epic Games", "Recomps", "Apps" }.Where(c => jeux.Any(j => j.Categorie == c && !Config.Masques.Contains(j.Id)))];
+        Categories = ["Tous", .. new[] { "Switch", "Steam", "Epic Games", "Recomps", "Apps" }.Where(c => jeux.Any(j => j.Categorie == c && !Config.Masques.Contains(j.Id)))];
         IndexCategorie = selectionner != null ? 0 : Math.Max(0, Categories.IndexOf(categorie ?? "Tous"));
         var i = Visibles.FindIndex(j => j.Id == avant); Selection = i >= 0 ? i : Math.Min(Selection, Visibles.Count);
         Journal.Ecrire($"bibliothèque : {jeux.Count(j => j.Origine == Origine.Steam)} Steam, {jeux.Count(j => j.Origine == Origine.Epic)} Epic, {jeux.Count(j => j.Origine == Origine.Recomp)} recomps, {jeux.Count(j => j.Origine == Origine.App)} apps");
@@ -165,6 +168,7 @@ public sealed class Bibliotheque
     {
         var j = Courant;
         if (j == null) { OuvrirAjout(); return; }
+        if (j.EnConstruction) { MenusSwitch.Chantier(this, j); return; }
         if (EnCours != null) return;
         _ = LancerJeu(j);
     }
@@ -181,7 +185,15 @@ public sealed class Bibliotheque
             Son("valider"); FermerMenus();
             Process? p = null;
             if (OperatingSystem.IsWindows())
-                p = Process.Start(new ProcessStartInfo(cible) { UseShellExecute = true, WorkingDirectory = File.Exists(cible) ? Path.GetDirectoryName(cible)! : "" });
+            {
+                if (j.Origine == Origine.Switch)
+                {   // un jeu construit par ScarletNX se lance par le moteur (`--game`), qui recompile de lui-même si ses mods de code ont changé
+                    var psi = new ProcessStartInfo(Moteur.Exe ?? cible) { UseShellExecute = false, WorkingDirectory = dossier };
+                    foreach (var a in Moteur.Exe != null ? new[] { "--data", Moteur.Donnees, "--game", dossier, "-f" } : new[] { "-f" }) psi.ArgumentList.Add(a);
+                    p = Process.Start(psi);
+                }
+                else p = Process.Start(new ProcessStartInfo(cible) { UseShellExecute = true, WorkingDirectory = File.Exists(cible) ? Path.GetDirectoryName(cible)! : "" });
+            }
             else if (!Demo) { Dire("Les jeux ne se lancent que sur Windows"); return; }
             Journal.Ecrire($"lancement : {j.Nom} ({j.Id})");
             EnCours = j; EnCoursDepuis = DateTime.Now;
@@ -273,15 +285,32 @@ public sealed class Bibliotheque
     public void OuvrirOptions()
     {
         if (Courant is not { } j) return;
+        if (j.EnConstruction) { MenusSwitch.Chantier(this, j); return; }
         var r = RecompDe(j); var cat = r != null ? Catalogue.Par(r.Id) : null;
         var m = new Menu { Titre = j.Nom, SousTitre = j.Categorie + (r != null ? $" · {r.Nom} {r.Version}" : ""), Logo = Arts.GetValueOrDefault(j.Id)?.Logo, Symbole = "gamecontroller" };
         m.Elements.Add(new("Jouer", "play.fill", () => { FermerMenus(); Lancer(); }, DerniereFois(j)));
         if (r != null && cat != null && cat.Version != r.Version) m.Elements.Add(new("Mettre à jour", "arrow.down.circle", () => MenusRecomps.Fiche(this, cat, OuvrirOptions), $"{r.Version} → {cat.Version}"));
+        if (j.Origine == Origine.Switch)
+        {
+            m.Elements.Add(new("Mods", "puzzlepiece", () => MenusSwitch.Mods(this, j), "Ajouter, activer, désactiver, supprimer"));
+            // dit ce que c'est, pas « Jouer en ligne » : aucun mod en ligne n'a encore été essayé avec un vrai jeu
+            m.Elements.Add(new("Internet : " + (MenusSwitch.Internet(j) ? "activé" : "coupé"), "globe", () => MenusSwitch.BasculerInternet(this, j), "La connexion du PC pour ce jeu. Un mod en ligne en a besoin"));
+        }
         m.Elements.Add(new("Apparence", "paintbrush", () => OuvrirApparence(j), "Jaquette, fond, logo et nom"));
         if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier), j.Dossier));
         if (r != null) m.Elements.Add(new("Page GitHub du recomp", "safari", () => Systeme.Ouvrir("https://github.com/" + r.Depot), r.Depot));
         m.Elements.Add(new("Masquer", "eye.slash", () => { Config.Masques.Add(j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le jeu reste installé ; Menu → Jeux masqués pour le remettre"));
         if (r != null) m.Elements.Add(new("Désinstaller", "trash", () => ConfirmerDesinstallation(j, r), "Le dossier du recomp part à la Corbeille") { Destructif = true });
+        if (j.Origine == Origine.Switch) m.Elements.Add(new("Désinstaller", "trash", () => Ouvrir(new Menu
+        {
+            Titre = "Désinstaller " + j.Nom + " ?", Symbole = "trash", Retour = OuvrirOptions,
+            Texte = $"Le dossier du jeu part à la Corbeille, avec ses mods et les sauvegardes qu'il contient :\n{j.Dossier}\n\nTant que la Corbeille n'est pas vidée, tu peux le remettre. Ton fichier de jeu d'origine n'est pas touché.",
+            Elements =
+            {
+                new("Annuler", "xmark", OuvrirOptions),
+                new("Mettre à la Corbeille", "trash", () => { if (!Systeme.Corbeille(j.Dossier)) { Dire("Le dossier n'a pas pu être mis à la Corbeille"); return; } Journal.Ecrire($"jeu Switch désinstallé : {j.Id}"); FermerMenus(); Recharger(); Dire(j.Nom + " est désinstallé"); }) { Destructif = true },
+            },
+        }), "Le jeu construit part à la Corbeille") { Destructif = true });
         if (j.Origine == Origine.App) m.Elements.Add(new("Retirer de Home", "trash", () => { Config.Jeux.RemoveAll(e => "app:" + e.Chemin == j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le programme n'est pas supprimé") { Destructif = true });
         Ouvrir(m);
     }
@@ -353,6 +382,7 @@ public sealed class Bibliotheque
             "Réduites : les mouvements deviennent un fondu très court"));
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
+        m.Elements.Add(new("Libérer de la place", "trash", () => MenusSwitch.LibererPlace(this), "Ce que les constructions ont laissé et qui ne sert plus") { Teinte = Icones.Orange });
         m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, recomps, journal") { Section = MiseAJour.Version == null ? null : "Home" });
         m.Elements.Add(new("Quitter Home", "power", () => Quitter?.Invoke()) { Destructif = true });
         Ouvrir(m);
@@ -387,6 +417,7 @@ public sealed class Bibliotheque
             Titre = "Ajouter un jeu", Symbole = "plus",
             Elements =
             {
+                new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir de ton dump et de tes clés") { Teinte = Icones.Rouge },
                 new("Recomps", "gamecontroller", () => MenusRecomps.Ouvrir(this), "Jeux console recompilés pour Windows : catalogue, puis GitHub"),
                 new("App ou jeu Windows", "desktopcomputer", () => _ = AjouterApp(), "Choisir un programme (.exe) ou un raccourci"),
                 new() { Libelle = "Steam et Epic Games", Detail = $"Leurs jeux installés apparaissent tout seuls : {steam} Steam, {epic} Epic Games", Icone = "pc", Info = true, Section = "Détectés automatiquement" },

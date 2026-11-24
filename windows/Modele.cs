@@ -8,7 +8,7 @@ using FluentIcons.Common;
 namespace Home;
 
 /// D'où vient un jeu : décide comment on le lance et où on cherche ses images
-public enum Origine { Steam, Epic, Recomp, App }
+public enum Origine { Steam, Epic, Recomp, App, Switch }
 
 public sealed class Jeu
 {
@@ -17,7 +17,9 @@ public sealed class Jeu
     public Origine Origine;
     public string Cible = "";     // ce qu'on ouvre : une adresse steam:// ou com.epicgames.launcher://, ou un .exe
     public string Dossier = "";   // le dossier du jeu : sert à savoir s'il tourne encore (Steam et Epic rendent la main tout de suite)
-    public string Categorie => Origine switch { Origine.Steam => "Steam", Origine.Epic => "Epic Games", Origine.Recomp => "Recomps", _ => "Apps" };
+    public string Categorie => Origine switch { Origine.Steam => "Steam", Origine.Epic => "Epic Games", Origine.Recomp => "Recomps", Origine.Switch => "Switch", _ => "Apps" };
+    /// Un jeu Switch en cours de construction : sa tuile existe déjà, elle ouvre son chantier
+    public bool EnConstruction => Id.StartsWith("construction:");
     public string? SteamId => Id.StartsWith("steam:") ? Id[6..] : null;
 }
 

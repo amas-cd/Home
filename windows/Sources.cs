@@ -307,6 +307,8 @@ public static class Images
                     }
                 }
                 foreach (var src in sources) if (!string.IsNullOrEmpty(src) && await Telecharger(src, f)) break;
+                // un jeu Switch que les boutiques ne connaissent pas garde l'icône de son propre dump, que ScarletNX a posée dans son dossier
+                if (quoi == "couverture" && j.Origine == Origine.Switch && !File.Exists(f) && Path.Combine(Construction.Data(j.Dossier), "icon.jpg") is var icone && File.Exists(icone)) { try { File.Copy(icone, f, true); } catch { } }
             }
             var img = await Task.Run(() => Locale(f, quoi == "fond" ? 1920 : quoi == "logo" ? 960 : 500));
             if (quoi == "couverture") art.Couverture = img; else if (quoi == "fond") art.Fond = img; else art.Logo = img;
