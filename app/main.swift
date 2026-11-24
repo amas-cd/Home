@@ -3012,7 +3012,7 @@ struct Screen: View {
             if lib.ouverture { OuvertureView(lib: lib).zIndex(20) }
             if let t = lib.tache {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, 30)   // sur la ligne des aides, à la marge de l'écran
-                    .transition(.asymmetric(insertion: .offset(y: 16).combined(with: .opacity), removal: .flou))
+                    .transition(.asymmetric(insertion: .offset(y: 16).combined(with: .opacity), removal: .opacity)).zIndex(15)   // part en fondu ; le rang fixe garde la vue dessinée pendant qu'elle s'efface
             }
             if let r = lib.running {
                 // Écran « en cours de jeu » : derrière le jeu (bureau), ou visible quand le jeu est sur l'autre écran / en fenêtre
@@ -4159,7 +4159,7 @@ extension Library {
         var items: [SalonMenuItem] = []
         if t.fini {
             items.append(SalonMenuItem(label: "Ouvrir dans le dossier", detail: t.log.lastPathComponent, icon: "folder.fill", action: { self.menu = nil; NSWorkspace.shared.activateFileViewerSelecting([t.log]) }))
-            items.append(SalonMenuItem(label: "Fermer", icon: "xmark.circle.fill", tint: .gray, action: { self.menu = nil; self.tache = nil }))
+            items.append(SalonMenuItem(label: "Fermer", icon: "xmark.circle.fill", tint: .gray, action: { self.menu = nil; withAnimation(.easeInOut(duration: 0.5)) { self.tache = nil } }))
         } else {
             items.append(SalonMenuItem(label: "Continuer", detail: t.etape, icon: "play.fill", action: { self.menu = nil }))
             items.append(SalonMenuItem(label: "Ouvrir le journal dans le dossier", detail: t.log.lastPathComponent, icon: "folder.fill", action: { self.menu = nil; NSWorkspace.shared.activateFileViewerSelecting([t.log]) }))

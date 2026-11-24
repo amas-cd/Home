@@ -96,7 +96,7 @@ qui se réveille ne doivent ni le couper ni lancer un jeu. Le jingle `app/sons/l
 | Élément | États | Courbe, durée |
 |---|---|---|
 | Arrivée | monte de 16 à 0 avec un fondu | ressort doux, 0,6 |
-| Départ | s'efface en se floutant : flou 0 → 20, opacité → 0, échelle → 0,97 | `CubicEaseInOut`, 0,5 à 0,6 |
+| Départ | s'efface en fondu : opacité 1 → 0 | `CubicEaseInOut`, 0,5 à 0,6 |
 | Anneau (44 de diamètre, trait 4, bouts ronds) | l'arc suit l'avancement, départ en haut | `CubicEaseInOut`, 0,9 |
 | Anneau sans mesure | un arc de 28 % qui fait un tour | linéaire, 1,1 par tour, sans fin |
 | Pourcentage | les chiffres changent en fondu | `CubicEaseOut`, 0,4 |
