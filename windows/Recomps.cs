@@ -162,24 +162,8 @@ public static class Installation
         var telecharge = Dossiers.Fichier("telechargements", Dossiers.NomSur(r.Id) + ext);
         try
         {
-            string empreinte;
-            using (var rep = await Reseau.Http.GetAsync(r.Adresse, HttpCompletionOption.ResponseHeadersRead))
-            {
-                rep.EnsureSuccessStatusCode();
-                var total = rep.Content.Headers.ContentLength ?? 0; long lu = 0; var tampon = new byte[1 << 17]; var dernier = DateTime.MinValue;
-                using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                await using var entree = await rep.Content.ReadAsStreamAsync();
-                await using (var sortie = File.Create(telecharge))
-                {
-                    int n;
-                    while ((n = await entree.ReadAsync(tampon)) > 0)
-                    {
-                        await sortie.WriteAsync(tampon.AsMemory(0, n)); sha.AppendData(tampon, 0, n); lu += n;
-                        if (DateTime.Now - dernier > TimeSpan.FromMilliseconds(200)) { dernier = DateTime.Now; t.Fraction = total > 0 ? 0.85 * lu / total : null; t.Etape = $"Téléchargement… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); lib.Signaler(); }
-                    }
-                }
-                empreinte = Convert.ToHexString(sha.GetHashAndReset());
-            }
+            var empreinte = await Reseau.Telecharger(r.Adresse, telecharge, (lu, total) =>
+                { t.Fraction = total > 0 ? 0.85 * lu / total : null; t.Etape = $"Téléchargement… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); lib.Signaler(); });
             // Le fichier reçu doit être exactement celui que l'auteur a publié
             if (r.Sha256 != null && !empreinte.Equals(r.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("le fichier reçu n'est pas celui que l'auteur a publié (empreinte différente) : rien n'a été installé");

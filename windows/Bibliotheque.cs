@@ -277,13 +277,15 @@ public sealed class Bibliotheque
     public void OuvrirPlus()
     {
         var m = new Menu { Titre = "Home", SousTitre = "Version " + Version, Symbole = "gear" };
+        if (MiseAJour.Version is { } nouvelle) m.Elements.Add(new("Mettre à jour Home", "arrow.down.circle", () => _ = MiseAJour.Installer(this), $"{Version} → {nouvelle} · Home se ferme, s'installe et se rouvre"));
         m.Elements.Add(new("Ajouter un jeu", "plus", OuvrirAjout, "Recomps, apps et jeux Windows"));
         m.Elements.Add(new("Actualiser la bibliothèque", "arrow.clockwise", () => { FermerMenus(); Recharger(); Dire("Bibliothèque actualisée"); }, "Relit Steam, Epic Games et les recomps"));
         if (Config.Masques.Count > 0) m.Elements.Add(new("Jeux masqués", "eye", OuvrirMasques, $"{Config.Masques.Count} masqué{(Config.Masques.Count > 1 ? "s" : "")}"));
         m.Elements.Add(new("Sons de l'interface", Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, Config.Sons ? "Activés" : "Coupés") { Section = "Réglages" });
         m.Elements.Add(new("Affichage", "rectangle", () => { Config.Fenetre = !Config.Fenetre; Enregistrer(); AppliquerFenetre?.Invoke(); OuvrirPlus(); }, Config.Fenetre ? "En fenêtre" : "Plein écran"));
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
-        m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, recomps, journal") { Section = "Home" });
+        if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
+        m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, recomps, journal") { Section = MiseAJour.Version == null ? null : "Home" });
         m.Elements.Add(new("Quitter Home", "power", () => Quitter?.Invoke()) { Destructif = true });
         Ouvrir(m);
     }

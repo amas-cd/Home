@@ -1,5 +1,5 @@
 # Construit Home.app sur un Mac de GitHub, Home pour Windows sur un PC de GitHub, et publie une release avec les deux.
-# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home.zip (Mac) et Home-Windows.zip,
+# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home.zip (Mac) et Home-Setup.exe (Windows),
 #   que Home télécharge pour se mettre à jour. Un tag v* poussé fait pareil.
 # - Un push sur main, ou Run workflow sans version : construction seule, l'app est gardée 7 jours dans les artefacts du run.
 name: Construire Home
@@ -87,19 +87,25 @@ jobs:
           VERSION: ${{ needs.construire.outputs.version }}
         run: dotnet publish windows/Home.csproj -c Release -r win-x64 --self-contained true -p:Version="${VERSION}" -p:DebugType=none -o dist/Home
 
-      - name: Archive
+      # Le setup (windows/installeur.iss) : installe pour l'utilisateur seul, et sert aussi aux mises à jour que Home lance lui-même
+      - name: Setup
         shell: pwsh
+        env:
+          HOME_VERSION: ${{ needs.construire.outputs.version }}
         run: |
-          Compress-Archive -Path dist/Home -DestinationPath dist/Home-Windows.zip
-          (Get-FileHash dist/Home-Windows.zip -Algorithm SHA256).Hash.ToLower() + "  Home-Windows.zip" | Out-File -Encoding ascii dist/Home-Windows.zip.sha256
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc windows\installeur.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          (Get-FileHash dist/Home-Setup.exe -Algorithm SHA256).Hash.ToLower() + "  Home-Setup.exe" | Out-File -Encoding ascii dist/Home-Setup.exe.sha256
 
       - name: Garder l'app (artefact)
         uses: actions/upload-artifact@v4
         with:
           name: Home-Windows-${{ needs.construire.outputs.version }}
           path: |
-            dist/Home-Windows.zip
-            dist/Home-Windows.zip.sha256
+            dist/Home-Setup.exe
+            dist/Home-Setup.exe.sha256
           retention-days: 7
 
   # La release ne sort que si les deux apps ont compilé : jamais une version Mac sans sa version Windows
@@ -119,5 +125,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.construire.outputs.version }}
         run: |
-          gh release create "v${VERSION}" dist/Home.zip dist/Home.zip.sha256 dist/Home-Windows.zip dist/Home-Windows.zip.sha256 \
+          gh release create "v${VERSION}" dist/Home.zip dist/Home.zip.sha256 dist/Home-Setup.exe dist/Home-Setup.exe.sha256 \
             --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "Home ${VERSION}" --generate-notes
+
+      # Ce dépôt est privé : Home pour Windows lit ses mises à jour dans un dépôt public qui ne reçoit que le setup.
+      # Il faut le secret RELEASES_TOKEN (jeton limité à ce dépôt public, « Contents : écriture »). Sans lui, l'étape ne fait rien.
+      - name: Recopier le setup dans le dépôt public
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          VERSION: ${{ needs.construire.outputs.version }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then echo "::warning::RELEASES_TOKEN absent : le setup n'est pas recopié dans amas-cd/Home-releases, pas de mise à jour automatique sur Windows"; exit 0; fi
+          gh release create "v${VERSION}" dist/Home-Setup.exe dist/Home-Setup.exe.sha256 \
+            --repo amas-cd/Home-releases --title "Home ${VERSION}" --notes "Home ${VERSION} pour Windows."

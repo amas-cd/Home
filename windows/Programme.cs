@@ -62,6 +62,8 @@ sealed class Fenetre : Window
             lib.Recharger();
             if (Bibliotheque.Demo) await lib.ChargerDemo(); else _ = Catalogue.Charger();   // le catalogue sert aussi à proposer les mises à jour des recomps
             Scenario();
+            // Une fois par démarrage, sans rien installer : le menu propose la mise à jour, c'est le joueur qui la lance
+            if (OperatingSystem.IsWindows() && await MiseAJour.Verifier()) lib.Dire($"Home {MiseAJour.Version} est disponible : Menu → Mettre à jour Home");
         };
     }
     void AppliquerFenetre() => WindowState = lib.Config.Fenetre || Environment.GetEnvironmentVariable("HOME_FENETRE") == "1" ? WindowState.Normal : WindowState.FullScreen;

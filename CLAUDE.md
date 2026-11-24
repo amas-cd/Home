@@ -129,6 +129,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `Recomps.cs` | `Catalogue`, `GitHub`, `Installation`, `MenusRecomps` |
 | `Vues.cs` | `Ecran`, `Tuile`, `FondVue`, le panneau des menus, « en cours de jeu », tâche, saisie |
 | `Manette.cs` | `Manette` (XInput), `Sons` (les .wav de `app/sons`), `Systeme` (processus d'un dossier, Corbeille) |
+| `MiseAJour.cs` | Mise à jour de Home depuis le dépôt public des setups |
 | `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |
 
 Données sur le PC : `%LOCALAPPDATA%\Home` (`jeux.json`, `statistiques.json`, `recomps.json`, `media/`, `cache/`, `recomps/<id>/`,
@@ -147,8 +148,15 @@ HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=recomps
 la fenêtre puis quitte : lis le PNG. Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille)
 ne se teste pas sur Mac.
 
-Le workflow compile `windows/` sur `windows-latest` (job `windows`) et la release contient `Home.zip` et `Home-Windows.zip` ;
-elle ne sort que si les deux compilent.
+Le workflow compile `windows/` sur `windows-latest` (job `windows`), puis fabrique `Home-Setup.exe` avec Inno Setup
+(`windows/installeur.iss` : installation pour l'utilisateur seul dans `%LOCALAPPDATA%\Programs\Home`). La release contient
+`Home.zip` et `Home-Setup.exe` ; elle ne sort que si les deux compilent.
+
+**Mises à jour sur Windows** (`MiseAJour.cs`) : ce dépôt est privé, donc le workflow recopie le setup dans le dépôt public
+**amas-cd/Home-releases** (rien d'autre n'y va : ni code, ni app Mac). Home y lit la dernière version au démarrage, sans jeton,
+et propose « Mettre à jour Home » : il télécharge le setup, vérifie son SHA-256, le lance en silencieux et se rouvre.
+La recopie a besoin du secret GitHub `RELEASES_TOKEN` (jeton d'Anas limité au dépôt public, « Contents : écriture »). Ne le lis
+jamais, ne le mets jamais dans un fichier : c'est Anas qui le crée et le range dans Settings → Secrets → Actions.
 
 ## Les scripts (`moteur/outils/`)
 

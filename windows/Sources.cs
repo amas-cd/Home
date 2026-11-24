@@ -17,6 +17,25 @@ public static class Reseau
         h.DefaultRequestHeaders.UserAgent.ParseAdd("Home-Windows");   // GitHub refuse les requêtes sans User-Agent
         return h;
     }
+    /// Télécharge un fichier en donnant l'avancement, et rend son empreinte SHA-256 calculée au passage
+    public static async Task<string> Telecharger(string url, string fichier, Action<long, long> avance)
+    {
+        using var rep = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        rep.EnsureSuccessStatusCode();
+        var total = rep.Content.Headers.ContentLength ?? 0; long lu = 0; var tampon = new byte[1 << 17]; var dernier = DateTime.MinValue;
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        await using var entree = await rep.Content.ReadAsStreamAsync();
+        await using (var sortie = File.Create(fichier))
+        {
+            int n;
+            while ((n = await entree.ReadAsync(tampon)) > 0)
+            {
+                await sortie.WriteAsync(tampon.AsMemory(0, n)); sha.AppendData(tampon, 0, n); lu += n;
+                if (DateTime.Now - dernier > TimeSpan.FromMilliseconds(200)) { dernier = DateTime.Now; avance(lu, total); }
+            }
+        }
+        return Convert.ToHexString(sha.GetHashAndReset());
+    }
     public static async Task<JsonDocument?> Json(string url, string? jeton = null)
     {
         try
