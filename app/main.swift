@@ -151,8 +151,8 @@ final class Sounds {
     private var players: [String: [AVAudioPlayer]] = [:]
     private var tour: [String: Int] = [:]
     private static let niveau: Float = 0.8   // le même pour les six sons
-    private static let navigation: Set<String> = ["deplacer", "onglet", "volume"]   // ceux qui se coupent l'un l'autre
-    private static let fallback = ["deplacer": "Tink", "onglet": "Pop", "ouvrir": "Purr", "retour": "Bottle", "valider": "Glass", "lancer": "Hero", "volume": "Tink"]
+    private static let navigation: Set<String> = ["deplacer", "tuile", "onglet", "volume"]   // ceux qui se coupent l'un l'autre
+    private static let fallback = ["deplacer": "Tink", "onglet": "Pop", "ouvrir": "Purr", "retour": "Bottle", "valider": "Glass", "lancer": "Hero", "volume": "Tink", "tuile": "Tink"]
     private func url(_ name: String) -> URL? {
         for ext in ["wav", "mp3", "aiff", "aif", "m4a"] { let u = salonRoot.appendingPathComponent("sons/\(name).\(ext)"); if FileManager.default.fileExists(atPath: u.path) { return u } }
         if let u = Bundle.main.resourceURL?.appendingPathComponent("sons/\(name).wav"), FileManager.default.fileExists(atPath: u.path) { return u }
@@ -642,6 +642,20 @@ final class Library: ObservableObject {
                     }
                 }
             }
+            // Le logo, quand rien ne l'a donné (pas de clé SteamGridDB, ou rien chez lui) : Wikipédia a le logo détouré de beaucoup de jeux.
+            // On prend le fichier dont le nom colle le plus au jeu (« … Logo.png », pas « … 3D Logo » ni « … Sideswipe Logo »).
+            if a.logo == nil, got.logo == nil {
+                func mots(_ x: String) -> [String] { x.lowercased().folding(options: .diacriticInsensitive, locale: nil).split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init) }
+                let voulus = Set(mots(nomSGDB) + ["logo", "png", "svg"])
+                let c = (await Wiki.candidates(.logo, name: nomSGDB)).min { x, y in
+                    let ex = mots(x.author).filter { !voulus.contains($0) }.count, ey = mots(y.author).filter { !voulus.contains($0) }.count
+                    return ex != ey ? ex < ey : x.width > y.width }
+                if let c, mots(c.author).filter({ !voulus.contains($0) }).count <= 1 {
+                    // un .svg est demandé en image (Wikimedia le dessine), en 1024 px de large
+                    let u = c.full?.pathExtension.lowercased() == "svg" ? (c.thumb?.absoluteString).flatMap { URL(string: $0.replacingOccurrences(of: #"/\d+px-"#, with: "/1024px-", options: .regularExpression)) } : c.full
+                    if let i = await prendre(u, "logo.png") { got.logo = trimTransparent(i); log("Logo de \(g.name) : Wikipédia (\(c.author))") }
+                }
+            }
             if got.background == nil, a.background == nil, let t = g.storeID, let d = try? await URLSession.shared.data(from: URL(string: "https://api.nlib.cc/nx/\(t)/banner")!).0, let i = NSImage(data: d) { try? d.write(to: cache.appendingPathComponent("hero.jpg")); got.background = i }   // dernier recours : bannière nlib (1280 px)
             for i in [got.cover, got.background, got.logo] { Library.decoder(i) }   // décodées ici, hors du fil principal
             await MainActor.run {
@@ -686,7 +700,7 @@ final class Library: ObservableObject {
     }
 
     // Navigation
-    func move(_ delta: Int) { guard running == nil, !showOptions, picker == nil else { return }; let n = min(max(selected + delta, 0), visible.count); if n != selected { selected = n; Sounds.shared.play("deplacer") } }
+    func move(_ delta: Int) { guard running == nil, !showOptions, picker == nil else { return }; let n = min(max(selected + delta, 0), visible.count); if n != selected { selected = n; Sounds.shared.play("tuile") } }   // d'un jeu à l'autre : un son à part, plus neutre que celui des menus
     var sensCategorie = 1   // le sens du dernier changement de catégorie (1 = suivante) : la rangée des jeux entre et sort dans ce sens
     func moveCategory(_ delta: Int) { guard running == nil, !showOptions, picker == nil, !categories.isEmpty else { return }; sensCategorie = delta >= 0 ? 1 : -1; categoryIndex = (categoryIndex + delta + categories.count) % categories.count; selected = 0; Sounds.shared.play("onglet") }
     func toggleSounds() { config.sons = !(config.sons ?? true); Sounds.shared.enabled = config.sons ?? true; saveConfig(); toast = Sounds.shared.enabled ? "Sons activés" : "Sons coupés" }
