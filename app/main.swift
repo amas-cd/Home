@@ -4829,7 +4829,39 @@ extension Library {
     func bienvenueBouger(_ d: Int) { let n = max(0, min(2, bienvenueIndex + d)); if n != bienvenueIndex { bienvenueIndex = n; Sounds.shared.play("deplacer") } }
     func bienvenueValider() {
         Sounds.shared.play("valider"); withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false }
-        appliquerMode(mode: Library.modesAccueil[bienvenueIndex], moteurs: "tout", ensuite: nil)
+        // la suite du premier lancement, dans l'ordre où les choses servent : les clés de la console (sans elles aucun jeu Switch ne se
+        // construit), puis l'installation des composants, puis seulement les comptes Epic et Steam (qui demandent ces composants)
+        let mode = Library.modesAccueil[bienvenueIndex]
+        config.mode = mode; config.moteurs = "tout"; saveConfig()
+        let comptes: () -> Void = { if self.modePC { self.accueilComptes() } }
+        let installer: () -> Void = { self.appliquerMode(mode: mode, moteurs: "tout", ensuite: comptes) }
+        if modeNintendo { accueilCles(puis: installer) } else { installer() }
+    }
+    /// Premier lancement, jeux Switch : le fichier prod.keys de la console. Home le cherche lui-même ; « Plus tard » passe l'étape
+    /// (il sera redemandé à la première construction, et se règle dans Avancé → Construction).
+    func accueilCles(puis: @escaping () -> Void) {
+        let ici: () -> Void = { self.accueilCles(puis: puis) }
+        menu = SalonMenu(title: "Clés de la console", items: [
+            SalonMenuItem(label: config.cles == nil ? "Choisir prod.keys" : "prod.keys : choisi", detail: "Le fichier de clés extrait de ta propre console", icon: "key.fill", tint: .yellow, action: {
+                self.proposer("Quelles clés ?", icone: "key.fill", chercher: {
+                    let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".switch/prod.keys")
+                    return (FileManager.default.fileExists(atPath: cache.path) ? [cache] : []) + Library.fichiersCandidats(ext: [], noms: ["prod.keys"])
+                }, finder: {
+                    let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
+                    p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+                    return p.runModal() == .OK ? p.urls : nil
+                }, back: ici) { u in self.config.cles = u[0].path; self.saveConfig(); self.menu = nil; puis() } }),
+            SalonMenuItem(label: config.cles == nil ? "Plus tard" : "Continuer", icon: "arrow.right.circle.fill", tint: .gray, action: { self.menu = nil; puis() }),
+        ], hero: "key.fill", text: "Home s'en sert pour construire tes jeux Switch. Elles restent sur ce Mac.", back: { self.menu = nil; puis() })
+    }
+    /// Premier lancement, jeux PC : les comptes, une fois les composants installés
+    func accueilComptes() {
+        let ici: () -> Void = { self.accueilComptes() }
+        menu = SalonMenu(title: "Tes bibliothèques", items: [
+            SalonMenuItem(label: "Epic Games", detail: "Se connecter", icon: "logo:epic", tint: .purple, action: { self.openCompteEpic(back: ici) }),
+            SalonMenuItem(label: "Steam", detail: "Se connecter", icon: "logo:steam", tint: .blue, action: { self.openCompteSteam(back: ici) }),
+            SalonMenuItem(label: "Plus tard", detail: "Menu → Comptes", icon: "arrow.right.circle.fill", tint: .gray, action: { self.menu = nil }),
+        ], hero: "person.crop.circle.fill")
     }
     func bienvenueIgnorer() { config.mode = "tout"; config.moteurs = "tout"; saveConfig(); Sounds.shared.play("retour"); withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false } }
     func openModeUtilisation(premier: Bool = false) {
