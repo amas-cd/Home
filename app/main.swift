@@ -1650,7 +1650,10 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
                 let k = min(1.0, (Recorder.legere ? 1280.0 : 1920.0) / Double(display.width))
                 cfg.width = Int(Double(display.width) * k) / 2 * 2; cfg.height = Int(Double(display.height) * k) / 2 * 2
                 cfg.minimumFrameInterval = CMTime(value: 1, timescale: 30); cfg.queueDepth = 6; cfg.showsCursor = false
-                cfg.capturesAudio = true; cfg.excludesCurrentProcessAudio = true; cfg.sampleRate = 48000; cfg.channelCount = 2
+                cfg.capturesAudio = true; cfg.sampleRate = 48000; cfg.channelCount = 2
+                // Avec le mélangeur, le son du jeu est rejoué par Home : exclure le son de Home donnerait des clips muets. On le garde donc
+                // (les clips portent alors aussi les sons de Home, au volume réglé) ; sans mélangeur, le son de Home reste hors des clips.
+                cfg.excludesCurrentProcessAudio = !Mixeur.disponible
                 size = CGSize(width: cfg.width, height: cfg.height)
                 try? FileManager.default.removeItem(at: tmp); try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
                 let s = SCStream(filter: filter, configuration: cfg, delegate: self)
