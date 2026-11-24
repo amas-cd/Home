@@ -4656,7 +4656,7 @@ extension Library {
             guard let h = try? FileHandle(forReadingFrom: URL(fileURLWithPath: c.log)) else { return true }
             let fin = (try? h.seekToEnd()) ?? 0; try? h.seek(toOffset: fin > 4000 ? fin - 4000 : 0)
             let t = String(decoding: h.readDataToEndOfFile(), as: UTF8.self); try? h.close()
-            return !(t.contains("done in :") || t.contains("] done:") || t.contains("\"msg\": \"done: "))
+            return !(t.contains("done in :") || t.contains("] done:") || t.contains("\"msg\": \"done: ") || t.contains("\nTerminé ("))   // la dernière ligne d'une construction réussie
         }
         if ouverts.count != tous.count { noterChantiers(ouverts) }
         return ouverts
