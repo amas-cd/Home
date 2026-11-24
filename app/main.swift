@@ -864,8 +864,11 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Écrans", icon: "display.2", action: { self.openScreensSettings() }),
             SalonMenuItem(label: "Son", detail: "Général \(Int((macVolume * 100).rounded())) %\(macMuted ? " (muet)" : "") · sons de Home \((config.sons ?? true) ? "activés" : "coupés")", icon: "speaker.wave.2.fill", action: { self.openSoundSettings() }),
             SalonMenuItem(label: "Capture", detail: capture, icon: "record.circle", action: { self.config.capture = !(self.config.capture ?? true); self.saveConfig(); self.menu = self.plusMenu() }),
-            SalonMenuItem(label: "Recharger", icon: "arrow.clockwise", action: { self.menu = nil; self.load(); self.toast = "Liste rechargée" }),
-            SalonMenuItem(label: "Avancé", icon: "ellipsis.circle.fill", action: { self.openAdvancedSettings() }),
+            SalonMenuItem(label: "Avancé", icon: "ellipsis.circle.fill", tint: .gray, action: { self.openAdvancedSettings() }),
+            SalonMenuItem(label: "Redémarrer", icon: "arrow.clockwise", tint: .cyan, action: {   // Home se ferme et se rouvre : la liste, les images et les réglages sont relus
+                self.menu = nil; Sounds.shared.play("retour")
+                let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", "sleep 0.8; /usr/bin/open \"$0\"", Bundle.main.bundlePath]; try? p.run()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) } }),
             SalonMenuItem(label: "Quitter", icon: "power", destructive: true, action: { self.menu = nil; Sounds.shared.play("retour"); DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) } }),
         ], hero: "house.fill")
     }
@@ -953,12 +956,16 @@ final class Library: ObservableObject {
         let ici: () -> Void = { self.openAvanceSwitch() }
         menu = SalonMenu(title: "Construction", items: [
             SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Ton fichier prod.keys", icon: "key.fill", tint: .yellow, action: {
-                let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
-                p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
-                if p.runModal() == .OK, let u = p.url { self.config.cles = u.path; self.saveConfig() }
-                ici() }),
-            SalonMenuItem(label: "Construction silencieuse : \((config.discret ?? true) ? "oui" : "non")", detail: (config.discret ?? true) ? "Plus lente, le Mac reste frais" : "Plus rapide, le Mac chauffe", icon: "thermometer.medium", tint: .teal, action: {
-                self.config.discret = !(self.config.discret ?? true); self.saveConfig(); ici() }),
+                self.proposer("Quelles clés ?", icone: "key.fill", chercher: {
+                    let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".switch/prod.keys")   // l'emplacement habituel, dans un dossier caché
+                    return (FileManager.default.fileExists(atPath: cache.path) ? [cache] : []) + Library.fichiersCandidats(ext: [], noms: ["prod.keys"])
+                }, finder: {
+                    let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
+                    p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+                    return p.runModal() == .OK ? p.urls : nil
+                }, back: ici) { u in self.config.cles = u[0].path; self.saveConfig(); ici() } }),
+            SalonMenuItem(label: "Construction silencieuse : \((config.discret ?? false) ? "oui" : "non")", detail: (config.discret ?? false) ? "Plus lente, le Mac reste frais" : "Plus rapide, le Mac chauffe", icon: "thermometer.medium", tint: .teal, action: {
+                self.config.discret = !(self.config.discret ?? false); self.saveConfig(); ici() }),
             SalonMenuItem(label: "Garder les caches : \((self.config.garderCaches ?? true) ? "oui" : "non")", detail: (self.config.garderCaches ?? true) ? "Reconstructions courtes" : "Moins de place, reconstructions longues", icon: "externaldrive.fill", tint: .orange, action: {
                 self.config.garderCaches = !(self.config.garderCaches ?? true); self.saveConfig(); ici() }),
             SalonMenuItem(label: "Libérer de la place", detail: "Allège les dossiers de construction", icon: "externaldrive.badge.minus", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }),
@@ -1098,10 +1105,27 @@ final class Library: ObservableObject {
         try? k.write(to: salonRoot.appendingPathComponent("steamgriddb-api-key"), atomically: true, encoding: .utf8)
         toast = "Clé enregistrée"; load()
     }
-    func addGame() {
-        let p = NSOpenPanel(); p.allowedContentTypes = [.application]; p.directoryURL = URL(fileURLWithPath: "/Applications"); p.message = "Choisis l'app du jeu à ajouter"
-        guard p.runModal() == .OK, let u = p.url else { return }
-        config.jeux.append(Entry(chemin: u.path, nom: nil, categorie: nil, masque: nil)); saveConfig(); load()
+    /// Ajouter une app Mac : Home propose les jeux installés (les apps que leur éditeur range dans « Jeux ») qui ne sont pas encore là
+    func addGame(back: (() -> Void)? = nil) {
+        let deja = Set(games.map { $0.url.standardizedFileURL.path } + config.jeux.map { URL(fileURLWithPath: $0.chemin).standardizedFileURL.path })
+        proposer("Quelle app ?", icone: "app.fill", chercher: {
+            let fm = FileManager.default
+            let dossiers = [URL(fileURLWithPath: "/Applications"), fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")]
+            var apps: [URL] = []
+            for d in dossiers { for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [] {
+                if u.pathExtension == "app" { apps.append(u) }
+                else if u.hasDirectoryPath { apps += ((try? fm.contentsOfDirectory(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []).filter { $0.pathExtension == "app" } }
+            } }
+            return apps.filter { u in
+                guard !deja.contains(u.standardizedFileURL.path), let c = Bundle(url: u)?.object(forInfoDictionaryKey: "LSApplicationCategoryType") as? String else { return false }
+                return c.contains("games")
+            }.sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+        }, finder: {
+            let p = NSOpenPanel(); p.allowedContentTypes = [.application]; p.directoryURL = URL(fileURLWithPath: "/Applications"); p.message = "Choisis l'app du jeu à ajouter"
+            return p.runModal() == .OK ? p.urls : nil
+        }, back: back ?? { self.menu = nil }) { u in
+            self.menu = nil; self.config.jeux.append(Entry(chemin: u[0].path, nom: nil, categorie: nil, masque: nil)); self.saveConfig(); self.load()
+        }
     }
 
     // Lancement. Le Salon ne se cache plus : le jeu passe devant (sur son propre espace s'il est en plein écran) et le Salon
@@ -4071,7 +4095,7 @@ extension Library {
         guard let fh = try? FileHandle(forWritingTo: logURL) else { toast = "Journal impossible : \(logURL.path)"; return false }
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [s.path] + args
         var e = ProcessInfo.processInfo.environment; for (k, v) in Dossiers.env { e[k] = v }; e["HOME_MOTEURS"] = moteursVoulus; for (k, v) in env { e[k] = v }; e["HOME_TACHE"] = "1"
-        if config.discret ?? true { e["HOME_DISCRET"] = "1" }        // construction silencieuse : cœurs économes, Mac frais
+        if config.discret ?? false { e["HOME_DISCRET"] = "1" }        // construction silencieuse : cœurs économes, Mac frais
         if config.garderCaches ?? true { e["GARDER_CACHES"] = "1" }  // caches de shaders gardés (par défaut) : reconstructions courtes et froides
         p.environment = e
         p.standardInput = FileHandle.nullDevice
@@ -4207,6 +4231,57 @@ extension Library {
         assistant(a, 0, retour: { self.openUpdateMenu(g) })
     }
     func majMoteur() { lancer("mettre-a-jour-et-rebuild.command", env: ["SALON_SANS_VEILLE": "1"], titre: "Mise à jour du moteur nxnative", jeux: Set(games.filter { $0.titleID != nil }.map { $0.id })) }
+    /// Les fichiers de ce Mac qui peuvent convenir (par extension, ou par nom exact) : Téléchargements, Bureau, Documents et les disques
+    /// branchés, sur trois niveaux de dossiers. Les plus récents d'abord ; ceux dont le nom contient un mot de `priorite` passent devant.
+    nonisolated static func fichiersCandidats(ext: [String], noms: [String] = [], priorite: [String] = [], exclus: [URL] = []) -> [URL] {
+        let fm = FileManager.default, maison = fm.homeDirectoryForCurrentUser
+        var racines = ["Downloads", "Desktop", "Documents"].map { maison.appendingPathComponent($0) }
+        racines += (fm.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeIsRootFileSystemKey], options: [.skipHiddenVolumes]) ?? []).filter { (try? $0.resourceValues(forKeys: [.volumeIsRootFileSystemKey]).volumeIsRootFileSystem) == false && $0.path.hasPrefix("/Volumes/") }
+        let e = Set(ext.map { $0.lowercased() }), n = Set(noms.map { $0.lowercased() }), hors = Set(exclus.map { $0.standardizedFileURL.path })
+        var trouves: [(URL, Date)] = []; var vus = 0
+        for r in racines {
+            guard let it = fm.enumerator(at: r, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
+            for case let u as URL in it {
+                vus += 1; if vus > 30000 { break }   // un dossier énorme ne bloque pas la recherche
+                if it.level >= 3 { it.skipDescendants() }
+                guard e.contains(u.pathExtension.lowercased()) || n.contains(u.lastPathComponent.lowercased()), !hors.contains(u.standardizedFileURL.path) else { continue }
+                trouves.append((u, (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast))
+            }
+        }
+        func devant(_ u: URL) -> Bool { let t = u.lastPathComponent.lowercased(); return priorite.contains { t.contains($0) } }
+        return trouves.sorted { a, b in devant(a.0) != devant(b.0) ? devant(a.0) : a.1 > b.1 }.prefix(40).map { $0.0 }
+    }
+    /// Choisir un fichier sans passer par le Finder : Home cherche ce qui convient et le propose ; « Chercher ailleurs… » ouvre le Finder.
+    /// S'il ne trouve rien, le Finder s'ouvre tout de suite.
+    func proposer(_ titre: String, sousTitre: String? = nil, icone: String = "doc.fill", plusieurs: Bool = false, chercher: @escaping () -> [URL], finder: @escaping () -> [URL]?, back: @escaping () -> Void, puis: @escaping ([URL]) -> Void) {
+        menu = SalonMenu(title: titre, subtitle: sousTitre, items: [SalonMenuItem(label: "Recherche…", icon: "magnifyingglass", info: true, action: {})], back: back, roue: true)
+        let taille = ByteCountFormatter(); taille.countStyle = .file
+        func lieu(_ u: URL) -> String {
+            let d = u.deletingLastPathComponent().lastPathComponent
+            let ou = ["Downloads": "Téléchargements", "Desktop": "Bureau"][d] ?? d
+            let o = (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 }.map { " · " + taille.string(fromByteCount: Int64($0)) } ?? ""
+            return ou + o
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let trouves = chercher()
+            DispatchQueue.main.async {
+                guard self.menu?.title == titre, self.menu?.items.first?.label == "Recherche…" else { return }   // on est parti entre-temps
+                if trouves.isEmpty { if let u = finder(), !u.isEmpty { puis(u) } else { back() }; return }
+                func montrer(_ choisis: [URL]) {
+                    var items: [SalonMenuItem] = []
+                    if plusieurs, !choisis.isEmpty { items.append(SalonMenuItem(label: "Continuer", detail: "\(choisis.count) choisi\(choisis.count > 1 ? "s" : "")", icon: "arrow.right.circle.fill", tint: .green, action: { puis(choisis) })) }
+                    items += trouves.map { u in
+                        let pris = choisis.contains(u)
+                        return SalonMenuItem(label: u.deletingPathExtension().lastPathComponent, detail: lieu(u), icon: pris ? "checkmark.circle.fill" : icone, tint: pris ? .green : nil, action: {
+                            if plusieurs { montrer(pris ? choisis.filter { $0 != u } : choisis + [u]) } else { puis([u]) } })
+                    }
+                    items.append(SalonMenuItem(label: "Chercher ailleurs…", detail: "Avec le Finder", icon: "folder.fill", tint: .gray, action: { if let u = finder(), !u.isEmpty { puis(u) } }))
+                    self.menu = SalonMenu(title: titre, subtitle: sousTitre, items: items, back: back, roue: true)
+                }
+                montrer([])
+            }
+        }
+    }
     private func choisir(_ message: String, plusieurs: Bool, dossiers: Bool) -> [URL]? {
         let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = dossiers; p.allowsMultipleSelection = plusieurs; p.message = message
         p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
@@ -4242,10 +4317,12 @@ extension Library {
         switch a.etapes[i] {
         case "base":
             var items = [SalonMenuItem(label: a.base?.lastPathComponent ?? "Choisir le jeu…", detail: a.base == nil ? ".nsp, .xci, .nup, ou le dossier d'un jeu extrait" : "Choisir un autre fichier", icon: "folder.fill.badge.plus", action: {
-                guard let u = self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, ou le dossier du jeu", plusieurs: false, dossiers: true)?.first else { return }
-                var b = a; b.base = u
-                if u.pathExtension.lowercased() == "nup" { b.etapes = b.etapes.filter { $0 != "maj" && $0 != "dlc" }; b.updates = []; b.dlc = [] }   // un .nup Switch 2 contient déjà sa mise à jour
-                suite(b) })]
+                self.proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.fichiersCandidats(ext: ["nsp", "xci", "nup"]) },
+                              finder: { self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, ou le dossier du jeu", plusieurs: false, dossiers: true) },
+                              back: { self.assistant(a, i, retour: retour) }) { u in
+                    var b = a; b.base = u[0]
+                    if u[0].pathExtension.lowercased() == "nup" { b.etapes = b.etapes.filter { $0 != "maj" && $0 != "dlc" }; b.updates = []; b.dlc = [] }   // un .nup Switch 2 contient déjà sa mise à jour
+                    suite(b) } })]
             if a.base != nil { items.append(SalonMenuItem(label: "Continuer", icon: "arrow.right.circle.fill", tint: .green, action: { suite(a) })) }
             menu = SalonMenu(title: "Le jeu", subtitle: nom, items: items, hero: "gamecontroller.fill",
                              step: i + 1, steps: n, back: prec)
@@ -4259,16 +4336,18 @@ extension Library {
             ], hero: "cpu", step: i + 1, steps: n, back: prec)
         case "maj":
             var items = [SalonMenuItem(label: a.updates.isEmpty ? "Choisir la mise à jour…" : noms(a.updates), detail: a.updates.isEmpty ? "Un fichier .nsp" : "Choisir d'autres fichiers", icon: "doc.badge.plus", action: {
-                guard let u = self.choisir("Mise à jour de \(nom) (.nsp)", plusieurs: true, dossiers: false), !u.isEmpty else { return }
-                var b = a; b.updates = u; suite(b) })]
+                self.proposer("Quelle mise à jour ?", sousTitre: nom, icone: "arrow.down.circle.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp"], priorite: ["upd", "update", "maj", "patch"], exclus: [a.base].compactMap { $0 } + a.dlc) },
+                              finder: { self.choisir("Mise à jour de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
+                              back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.updates = u; suite(b) } })]
             if !a.updates.isEmpty { items.append(SalonMenuItem(label: "Continuer", icon: "arrow.right.circle.fill", tint: .green, action: { suite(a) })) }
             else if a.sortie == nil { items.append(SalonMenuItem(label: "Pas de mise à jour", icon: "arrow.right.circle", tint: .gray, action: { suite(a) })) }
             menu = SalonMenu(title: "La mise à jour", subtitle: nom, items: items, hero: "arrow.down.circle.fill",
                              step: i + 1, steps: n, back: prec)
         case "dlc":
             var items = [SalonMenuItem(label: a.dlc.isEmpty ? "Choisir les DLC…" : noms(a.dlc), detail: a.dlc.isEmpty ? "Un ou plusieurs fichiers .nsp" : "Choisir d'autres fichiers", icon: "puzzlepiece.extension.fill", action: {
-                guard let u = self.choisir("DLC de \(nom) (.nsp)", plusieurs: true, dossiers: false), !u.isEmpty else { return }
-                var b = a; b.dlc = u; suite(b) })]
+                self.proposer("Quels DLC ?", sousTitre: nom, icone: "puzzlepiece.extension.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp"], priorite: ["dlc"], exclus: [a.base].compactMap { $0 } + a.updates) },
+                              finder: { self.choisir("DLC de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
+                              back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.dlc = u; suite(b) } })]
             items.append(SalonMenuItem(label: a.dlc.isEmpty ? "Pas de DLC" : "Continuer", icon: "arrow.right.circle\(a.dlc.isEmpty ? "" : ".fill")", tint: a.dlc.isEmpty ? .gray : .green, action: { suite(a) }))
             menu = SalonMenu(title: "Les contenus additionnels", subtitle: nom, items: items, hero: "puzzlepiece.extension.fill", step: i + 1, steps: n, back: prec)
         default:
@@ -4514,8 +4593,12 @@ extension Library {
     }
     /// Installer un jeu depuis son installateur Windows (setup.exe, .msi) : il tourne sur le moteur Rosetta de Voile (32 bits), dans un
     /// Windows neuf réservé à ce jeu ; à la fin, Home demande lequel des programmes installés est le jeu
-    func installerDepuisSetup() {
-        guard let u = choisirWindows("L'installateur du jeu (setup.exe ou .msi)", ["exe", "msi"]) else { return }
+    func installerDepuisSetup(fichier: URL? = nil) {
+        guard let u = fichier else {
+            proposer("Quel installateur ?", icone: "shippingbox.fill", chercher: { Library.fichiersCandidats(ext: ["exe", "msi"], priorite: ["setup", "install"]) },
+                     finder: { self.choisirWindows("L'installateur du jeu (setup.exe ou .msi)", ["exe", "msi"]).map { [$0] } },
+                     back: { self.openAddMenu() }) { self.installerDepuisSetup(fichier: $0[0]) }
+            return }
         guard let n = demanderNom(u.deletingPathExtension().lastPathComponent.replacingOccurrences(of: #"(?i)[ _-]*(setup|install(er)?)[ _-]*"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces), "Le nom du jeu que cet installateur installe.") else { return }
         if let b = Compat.entree(nom: n), b.etat == "bloque" { openBloque(n, b); return }
         menu = nil; toast = "Préparation de Windows, puis l'installateur s'ouvre (une minute)…"
@@ -4656,7 +4739,7 @@ extension Library {
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
             SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
-            SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: { self.menu = nil; self.addGame() }),
+            SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: { self.addGame(back: ici) }),
             SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: { self.ajouterExe() }),
         ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games", "Steam", "Jeu Windows", "Jeu Windows préinstallé"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
