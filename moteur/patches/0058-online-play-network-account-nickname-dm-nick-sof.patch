@@ -1,0 +1,547 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 01:16:41 +0000
+Subject: [PATCH] Online play: network, account nickname (DM_NICK), software
+ keyboard and companion server for the online mods
+
+Upstream-Status: fork-only
+Reason: Tears of the Kingdom Online and Super Mario Odyssey Online on the Mac
+Issue: LNPANDY/NX2Apple#214
+---
+ dm/host/front.h       |   4 +-
+ dm/host/front_mac.m   |  29 +++++++-
+ dm/host/hle_account.c | 116 ++++++++++++++++++++++++-------
+ dm/host/hle_net.c     | 157 ++++++++++++++++++++++++++++++++++++++----
+ dm/host/hle_oe.c      |   5 ++
+ dm/host/hle_offline.c |  37 ++++++----
+ dm/host/hle_swkbd.c   |   8 ++-
+ dm/mac/launcher.c     |  19 ++++-
+ 8 files changed, 314 insertions(+), 61 deletions(-)
+
+diff --git a/dm/host/front.h b/dm/host/front.h
+index d36e61c..6cdbbb9 100644
+--- a/dm/host/front.h
++++ b/dm/host/front.h
+@@ -3,8 +3,8 @@
+ #include <stdlib.h>
+ // Metal reads HUD switches when the first device is made. Called before host preload and again after the launcher applies its settings; explicit environment values win.
+ static inline void front_hud_env(void) {
+-    const char *e = getenv("DM_METAL_HUD");
+-    if (!e || !atoi(e)) return;
++    // Metal's HUD is readied in every start; the game layer's developerHUDProperties mode then shows or hides it (front_mac.m: DM_METAL_HUD at the start,
++    // Cmd-Shift-F while playing). An MTL_HUD_ENABLED already in the environment wins
+     setenv("MTL_HUD_ENABLED", "1", 0);
+     // Spatial scaling has no temporal exposure: showing that HUD metric makes the MetalFX rows flicker.
+     setenv("MTL_HUD_HIDE_METALFX_METRICS", "1", 0);
+diff --git a/dm/host/front_mac.m b/dm/host/front_mac.m
+index 92d90ad..c95aeed 100644
+--- a/dm/host/front_mac.m
++++ b/dm/host/front_mac.m
+@@ -656,6 +656,25 @@ - (void)windowDidFailToEnterFullScreen:(NSWindow *)w { (void)w; if (g_fs_failed)
+ // Metal reads MTL_HUD_ENABLED when the process makes its first device, which can be before the window: set from DM_METAL_HUD before main (set in front_run, the HUD did not show)
+ __attribute__((constructor)) static void hud_env(void) { front_hud_env(); }
+ 
++// ⌘⇧F (Window menu): shows or hides Apple's performance HUD (frame rate, frame and GPU time, memory) over the game while it runs. front_hud_env readies Metal's HUD
++// in every start, and the game layer's developerHUDProperties mode decides: default shows it, disabled hides it, as the iOS front end does (DM_METAL_HUD sets the start)
++static int g_hud_shown;
++static void hud_apply(void) {
++    if (!g_layer) return;
++    g_layer.developerHUDProperties = @{@"mode": g_hud_shown ? @"default" : @"disabled"};
++}
++@interface DmHudToggle : NSObject
++- (void)toggleHud:(id)sender;
++@end
++@implementation DmHudToggle
++- (void)toggleHud:(id)sender {
++    (void)sender;
++    g_hud_shown = !g_hud_shown; hud_apply();
++    LOG("front end: performance HUD %s (Cmd-Shift-F)", g_hud_shown ? "shown" : "hidden");
++}
++@end
++static DmHudToggle *g_hud_toggle;
++
+ // ---------- Cheats: the menu and the panel (hle_cheats.c holds every state; these only show it and call it) ----------
+ 
+ // A string of the engine as an NSString that is never nil: cheat names, sections and notes come from the player's files,
+@@ -1522,9 +1541,10 @@ void front_run(void (*guest)(void)) {
+         g_layer.device = MTLCreateSystemDefaultDevice();
+         g_layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+         g_layer.contentsScale = win.backingScaleFactor;
+-        // Apple's HUD over the game (frame rate, frame and GPU time, memory): front_hud_env turns it on before the first device. The layer's developerHUDProperties
+-        // stay unset: mode=default forces this layer's HUD on, so the Metal HUD menu's Hide HUD left it on screen
+-        if (getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD"))) LOG("front end: Metal performance HUD on (DM_METAL_HUD)");
++        // Apple's HUD over the game (frame rate, frame and GPU time, memory): front_hud_env readies it before the first device in every start, and this layer's
++        // developerHUDProperties mode shows it (default) or hides it (disabled): DM_METAL_HUD at the start, then Cmd-Shift-F in the Window menu (hud_apply)
++        g_hud_shown = getenv("DM_METAL_HUD") && atoi(getenv("DM_METAL_HUD")); hud_apply();
++        if (g_hud_shown) LOG("front end: Metal performance HUD on (DM_METAL_HUD)");
+         v.layer = g_layer; [(DmGameView *)v fitDrawable];
+         [win center];
+         [win makeKeyAndOrderFront:nil];
+@@ -1556,6 +1576,9 @@ void front_run(void (*guest)(void)) {
+             dispatch_async(dispatch_get_main_queue(), ^{ [g_cheats_menu showPanel:nil]; });
+         [[bar addItemWithTitle:@"Window" action:nil keyEquivalent:@""] setSubmenu:wm];
+         [wm addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"].keyEquivalentModifierMask = NSEventModifierFlagControl | NSEventModifierFlagCommand;
++        g_hud_toggle = [DmHudToggle new];
++        NSMenuItem *hudItem = [wm addItemWithTitle:@"Show / Hide FPS" action:@selector(toggleHud:) keyEquivalent:@"f"];
++        hudItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift; hudItem.target = g_hud_toggle;
+         NSApp.mainMenu = bar;
+         const char *fs = getenv("DM_FULLSCREEN");   // 1 (or any value but 0): start in fullscreen; 0, the settings window's Window, or unset: a window
+         if (fs && strcmp(fs, "0")) {
+diff --git a/dm/host/hle_account.c b/dm/host/hle_account.c
+index efe0975..b3cfb7d 100644
+--- a/dm/host/hle_account.c
++++ b/dm/host/hle_account.c
+@@ -102,30 +102,98 @@ HLE_FORCE("_ZN2nn7account16GetUserExistenceEPbRKNS0_3UidE", "whether a user exis
+     *out = uid->v[0] == k_uid.v[0] && uid->v[1] == k_uid.v[1]; return RES_OK;
+ }
+ HLE_FORCE("_ZN2nn7account15ShowUserCreatorEv", "user creation applet; the host already has its local user", Result, h_acc_ShowCreator, void) { DM_APPLET("user creator"); return RES_OK; }
+-// Every user on a console has a profile image, a 256x256 JPEG, and games decode it without checking the Result: Burnout Paradise Remastered handed the empty buffer of a failed load to
+-// nn::image::JpegDecoder, which asserted (GitHub issue #1118). The local user's is a plain 256x256 baseline JPEG (670 bytes); the size is the image's, the copy what the buffer holds
+-static const char k_profile_jpeg[] =
+-    "\xff\xd8\xff\xe0\x00\x10\x4a\x46\x49\x46\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00\x43\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\x09\x09\x08\x0a\x0c"
+-    "\x14\x0d\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c\x20\x24\x2e\x27\x20\x22\x2c\x23\x1c\x1c\x28\x37\x29\x2c\x30\x31\x34\x34\x34\x1f\x27"
+-    "\x39\x3d\x38\x32\x3c\x2e\x33\x34\x32\xff\xdb\x00\x43\x01\x09\x09\x09\x0c\x0b\x0c\x18\x0d\x0d\x18\x32\x21\x1c\x21\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32"
+-    "\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\x32\xff\xc0"
+-    "\x00\x11\x08\x01\x00\x01\x00\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01\xff\xc4\x00\x15\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05"
+-    "\xff\xc4\x00\x14\x10\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xc4\x00\x15\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x05\xff\xc4\x00\x14\x11\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\xff\xda\x00\x0c\x03\x01\x00\x02\x11\x03\x11\x00\x3f"
+-    "\x00\x8e\x02\xe2\x50\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+-    "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x3f\xff\xd9";
+-HLE_FORCE("_ZN2nn7account16LoadProfileImageEPmPvmRKNS0_3UidE", "user profile image: the local user's, a plain 256x256 JPEG", Result, h_acc_LoadImage, uint64_t *n, void *buf, uint64_t sz, const Uid *uid) {
+-    (void)uid; uint64_t len = sizeof k_profile_jpeg - 1;
+-    if (buf) memcpy(buf, k_profile_jpeg, sz < len ? sz : len);
+-    if (n) *n = len; return RES_OK;
++// A 256x256 JPEG, as the console's profile images are (a yellow disc on green): mods that show players' faces need one
++// (Tears of the Kingdom Online aborts with "Can't get the last opened user's profile image" when the call fails).
++// DM_PROFILE_IMAGE=<a JPEG file> (up to 128 KB) replaces it.
++static const uint8_t k_profile_jpg[] = {
++    255,216,255,224,0,16,74,70,73,70,0,1,1,0,0,1,0,1,0,0,255,219,0,67,0,13,9,10,11,10,8,13,
++    11,10,11,14,14,13,15,19,32,21,19,18,18,19,39,28,30,23,32,46,41,49,48,46,41,45,44,51,58,74,62,51,
++    54,70,55,44,45,64,87,65,70,76,78,82,83,82,50,62,90,97,90,80,96,74,81,82,79,255,219,0,67,1,14,14,
++    14,19,17,19,38,21,21,38,79,53,45,53,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,
++    79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,79,255,192,
++    0,17,8,1,0,1,0,3,1,34,0,2,17,1,3,17,1,255,196,0,26,0,1,0,3,1,1,1,0,0,0,0,
++    0,0,0,0,0,0,0,4,5,6,2,7,3,255,196,0,56,16,1,0,2,1,2,2,7,4,7,8,3,0,0,0,
++    0,0,0,1,2,3,4,17,5,49,6,18,33,65,81,97,113,19,145,177,209,20,34,35,50,129,193,240,53,82,84,98,
++    115,147,161,225,51,66,68,255,196,0,26,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,5,4,6,
++    1,2,3,255,196,0,42,17,1,0,1,3,3,3,1,9,1,1,0,0,0,0,0,0,0,1,2,3,4,18,33,49,
++    5,17,19,177,34,50,65,81,97,113,145,161,225,129,66,255,218,0,12,3,1,0,2,17,3,17,0,63,0,169,1,133,
++    48,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,117,90,218,246,138,214,38,214,153,218,34,35,121,153,89,112,206,
++    11,159,89,53,201,150,39,22,13,227,121,152,218,109,31,203,243,248,180,218,61,6,155,69,93,176,98,136,182,219,77,231,
++    182,211,248,254,28,185,48,100,245,11,118,125,152,222,91,44,97,87,119,121,218,25,221,39,71,245,121,226,183,205,53,193,
++    73,238,183,109,185,120,124,229,105,131,163,186,44,123,78,89,201,154,118,218,98,109,180,111,227,27,118,255,0,149,192,145,
++    119,168,95,185,241,237,246,83,183,135,102,143,135,127,186,45,120,118,134,181,138,198,147,6,209,27,118,227,137,159,122,80,
++    50,85,93,85,123,211,221,162,41,138,120,129,30,218,45,37,237,54,182,151,5,173,51,188,204,227,137,153,148,129,228,85,
++    52,241,47,102,152,158,85,89,122,63,195,242,109,212,174,76,91,126,229,249,251,247,85,234,122,57,169,199,27,233,242,83,
++    52,68,114,159,171,51,63,15,242,212,141,118,243,239,219,255,0,174,255,0,125,217,171,195,179,95,195,183,217,231,217,49,
++    223,21,230,153,105,106,94,57,214,209,180,195,134,247,83,164,211,234,233,212,212,98,173,226,57,111,206,61,39,156,51,156,
++    75,128,230,211,239,147,73,214,205,139,179,234,243,188,123,185,199,235,205,91,31,168,219,187,236,213,180,254,147,111,224,215,
++    111,122,119,133,40,10,44,64,0,0,0,0,0,0,0,0,0,0,0,3,73,193,248,29,98,145,159,95,77,237,59,77,
++    113,79,253,124,231,207,203,245,14,1,194,171,20,166,183,81,27,218,123,113,210,99,238,255,0,55,175,135,191,211,64,139,
++    159,159,61,230,221,185,251,202,174,30,28,118,242,92,255,0,32,1,25,80,0,0,0,0,0,0,0,20,220,95,130,227,
++    212,214,249,180,181,138,106,55,235,76,111,217,127,148,254,167,197,150,181,109,75,77,109,19,91,68,237,49,49,180,196,189,
++    9,79,199,56,85,117,120,237,168,195,27,106,41,27,204,68,127,201,17,221,235,225,238,244,173,131,159,52,76,91,185,59,
++    124,39,229,252,78,203,195,138,163,93,28,178,96,46,163,128,0,0,0,0,0,0,0,0,11,78,5,195,167,89,170,140,
++    153,43,62,195,20,239,51,183,101,167,247,126,127,237,91,90,218,246,138,214,38,214,153,218,34,35,121,153,110,56,118,146,
++    186,45,22,60,17,183,90,35,123,204,119,219,191,245,224,193,212,50,124,54,251,83,204,182,97,88,242,215,222,120,132,160,
++    28,218,232,0,0,0,0,0,0,0,0,0,0,51,29,35,225,211,139,47,211,48,214,102,153,39,237,34,35,178,179,227,
++    248,252,125,84,77,254,163,13,53,58,123,225,203,27,210,241,180,249,121,250,176,186,140,55,211,106,47,135,44,109,122,78,
++    211,231,231,232,232,122,110,79,146,141,21,115,30,136,185,214,52,87,174,56,159,87,200,5,38,0,0,0,0,0,0,0,
++    0,92,116,111,75,25,245,243,150,245,222,152,99,120,229,247,167,151,231,63,131,88,167,232,214,31,103,195,103,36,197,119,
++    203,121,152,152,231,180,118,109,63,140,79,189,112,230,122,133,223,37,249,250,108,191,135,111,69,152,250,238,0,196,212,0,
++    0,0,0,0,0,0,0,0,0,3,55,210,157,44,86,248,181,116,174,221,111,169,121,236,231,221,248,243,247,67,72,129,
++    198,240,251,126,19,158,34,43,189,35,175,19,61,219,118,206,222,123,110,213,135,119,199,122,153,255,0,63,44,249,86,245,
++    218,152,98,128,117,46,120,0,0,0,0,0,0,0,27,174,25,90,215,134,105,98,177,17,30,202,179,217,29,243,27,202,
++    80,56,234,234,213,84,213,243,116,244,198,152,136,0,124,190,128,0,0,0,0,0,0,0,0,0,0,115,106,214,245,154,
++    218,34,213,152,218,98,99,120,152,116,3,206,196,158,35,251,75,85,253,107,252,101,25,217,83,58,169,137,114,245,71,105,
++    152,0,122,240,0,0,0,0,0,1,232,130,62,130,214,191,15,211,90,211,54,180,226,172,204,204,239,51,59,66,67,141,
++    170,52,204,195,168,166,123,199,112,7,143,64,0,0,0,0,0,0,0,0,0,0,0,24,78,35,251,75,85,253,107,252,
++    101,25,213,173,107,218,109,105,155,90,103,121,153,157,230,101,203,177,162,52,211,16,230,42,158,243,50,0,250,124,128,0,
++    0,0,0,0,53,253,27,203,237,56,77,107,213,219,217,94,213,223,126,125,255,0,154,213,150,232,198,162,49,235,114,96,
++    153,136,140,213,222,59,59,102,99,253,76,181,46,99,62,223,142,253,95,93,255,0,43,248,117,235,179,31,77,128,24,218,
++    128,0,0,0,0,0,0,0,0,0,0,66,227,25,125,143,9,212,219,171,190,244,234,237,191,143,103,230,154,207,116,171,
++    81,29,92,26,88,152,222,103,218,91,179,182,59,163,243,247,52,98,91,242,94,166,151,225,147,94,139,85,75,56,3,171,
++    115,160,0,0,0,0,0,0,0,239,29,237,139,37,114,82,118,189,38,45,89,240,152,110,180,122,138,234,244,152,245,20,
++    236,139,198,251,120,79,124,123,216,37,215,71,120,135,209,245,31,69,203,63,101,150,126,175,103,43,206,209,238,159,151,154,
++    119,81,199,242,219,213,79,49,232,219,131,127,199,94,153,226,90,160,28,234,224,0,0,0,0,0,0,0,0,0,0,56,
++    201,122,226,199,108,151,157,169,72,155,90,124,34,24,93,102,162,218,189,94,77,69,251,38,243,190,222,17,221,30,229,223,
++    73,120,135,254,28,83,225,57,123,61,38,35,243,247,121,179,171,253,51,31,69,30,74,185,159,79,234,54,125,253,117,104,
++    142,35,212,1,81,60,0,0,0,0,0,0,0,0,1,171,224,92,82,186,156,85,211,103,188,253,34,145,217,54,159,191,
++    31,56,255,0,126,43,151,158,214,214,165,162,213,153,173,162,119,137,137,218,98,90,174,15,198,105,171,164,97,212,218,180,
++    212,70,209,19,61,145,147,211,207,203,245,16,179,240,102,137,155,150,227,111,140,124,150,48,242,226,168,209,95,43,128,18,
++    84,64,0,0,0,0,0,0,0,87,113,142,37,77,6,158,107,91,111,168,188,79,82,35,187,249,167,203,226,113,78,43,
++    135,65,142,107,89,173,245,19,217,20,223,151,156,248,71,197,144,205,151,38,124,182,203,154,243,123,218,119,153,149,60,28,
++    25,187,58,235,247,125,127,140,25,121,113,110,52,81,207,163,155,90,215,180,218,211,54,180,206,243,51,59,204,203,144,116,
++    8,160,0,0,0,0,0,0,0,0,0,0,0,11,222,25,199,242,98,154,226,214,239,146,155,196,70,78,250,199,159,143,
++    199,159,54,139,6,124,58,156,113,147,6,74,222,147,223,19,203,215,194,88,7,215,6,124,218,108,145,147,6,75,82,241,
++    223,19,207,215,198,19,114,122,109,23,61,170,54,159,211,125,140,234,232,218,189,227,246,223,140,222,147,164,182,172,86,186,
++    204,61,111,27,211,178,121,120,120,254,48,181,193,198,56,126,125,162,53,21,164,237,188,198,79,171,183,150,243,217,186,61,
++    220,59,214,249,167,241,186,149,188,171,85,241,41,227,154,218,183,172,90,179,22,172,198,241,49,59,196,195,166,102,128,0,
++    4,44,188,91,135,225,219,175,170,199,59,254,228,245,190,27,170,245,61,38,174,219,105,52,243,51,183,222,201,60,167,210,
++    62,109,22,241,47,92,247,105,126,21,228,218,163,154,151,217,50,83,21,38,249,111,90,82,57,218,211,180,66,131,137,116,
++    135,158,62,31,229,246,179,31,226,34,99,227,231,234,164,212,234,245,26,187,245,245,25,109,121,142,91,242,143,72,229,15,
++    130,190,63,76,162,143,106,230,243,250,254,166,223,207,170,189,168,218,63,110,173,107,94,211,107,76,218,211,59,204,204,239,
++    51,46,65,81,60,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,4,159,167,235,127,140,212,127,118,223,52,
++    97,228,211,77,92,195,216,170,99,137,73,250,126,183,248,205,71,247,109,243,124,45,107,94,211,107,76,218,211,59,204,204,
++    239,51,46,71,145,69,52,241,15,102,169,158,100,1,244,249,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
++    0,0,0,0,0,0,0,0,0,127,255,217,
++};
++HLE_FORCE("_ZN2nn7account16LoadProfileImageEPmPvmRKNS0_3UidE", "user profile image: a built-in 256x256 JPEG, or DM_PROFILE_IMAGE", Result, h_acc_LoadImage, uint64_t *n, void *buf, uint64_t sz, const Uid *uid) {
++    (void)uid;
++    static uint8_t *img; static size_t len; static int once;
++    if (!once) {
++        once = 1; const char *f = getenv("DM_PROFILE_IMAGE");
++        FILE *fp = f ? fopen(f, "rb") : NULL;
++        if (fp) { fseek(fp, 0, SEEK_END); long l = ftell(fp); fseek(fp, 0, SEEK_SET);
++                  if (l > 0 && l <= 0x20000 && (img = malloc((size_t)l)) && fread(img, 1, (size_t)l, fp) == (size_t)l) len = (size_t)l; else { free(img); img = NULL; }
++                  fclose(fp); }
++        if (!img) { img = (uint8_t *)k_profile_jpg; len = sizeof k_profile_jpg; }
++    }
++    if (n) *n = len;
++    if (buf && sz) memcpy(buf, img, sz < len ? sz : len);
++    return RES_OK;
+ }
+ // The save-data thumbnail is what the system's data management screen shows next to a save (The Great Ace Attorney Chronicles, SDK 10); the host has no such screen and keeps none
+ HLE_FORCE("_ZN2nn7account27StoreSaveDataThumbnailImageERKNS0_3UidEPKvm", "save-data thumbnail for the system's data management screen; the host keeps none", Result, h_acc_StoreThumb, const Uid *uid, const void *img, uint64_t n) {
+diff --git a/dm/host/hle_net.c b/dm/host/hle_net.c
+index 17f5eef..a828dde 100644
+--- a/dm/host/hle_net.c
++++ b/dm/host/hle_net.c
+@@ -3,6 +3,132 @@
+ #include "hle.h"
+ #include <pthread.h>
+ #include <stdatomic.h>
++#include <errno.h>
++#include <string.h>
++#include <netdb.h>
++#include <poll.h>
++#include <fcntl.h>
++#include <stdarg.h>
++#include <stdlib.h>
++#include <sys/socket.h>
++#include <unistd.h>
++
++// ---------- DM_NET=1: the bsd socket service on the host's own sockets (ExeFS mods that talk to a server: Super Mario Odyssey: Online) ----------
++// Off by default: every game keeps its offline branch. On, the socket calls below go to the host's BSD sockets. Horizon's bsd service is FreeBSD's: sockaddr / sockaddr_in
++// (with sin_len), pollfd, AF_INET / SOCK_STREAM / IPPROTO_TCP, SOL_SOCKET 0xffff and its options, MSG_* flags, F_GETFL / F_SETFL / O_NONBLOCK and the errno values the
++// games test are the same numbers on macOS, so most arguments and results pass through as they are; O_NONBLOCK (0x800 on Horizon) and the errno numbering are translated. Descriptors are the
++// host's. nifm stays "network unavailable": the game's own online code (NEX) keeps its offline branch, and a mod that only waits for its network request goes on.
++// A call that can block releases the guest core while it waits (dm_thread_native_wait), as the host's other blocking waits do.
++static int g_net = -1, g_net_default;
++void dm_net_default(int on) { g_net_default = on; }   // loader.c: on when an ExeFS mod added a module (a mod that brings code is the one that talks to a server); DM_NET=0 turns it off
++int dm_net_on(void) {
++    if (g_net < 0) { const char *e = getenv("DM_NET"); g_net = e && *e ? atoi(e) > 0 : g_net_default; if (g_net) LOG("DM_NET: socket calls go to the host's sockets (nifm stays offline)%s", e && *e ? "" : "; on because an ExeFS mod added a module (DM_NET=0 turns it off)"); }
++    return g_net;
++}
++static __thread int t_neterr;
++// The errno a game reads (nn::socket::GetLastErrno) in the numbering emulators give it, Linux's (Ryujinx's LinuxError, yuzu's Errno): Super Mario Odyssey: Online's emulator build
++// checks 11 for "no data yet" after a non-blocking Recv (MSG_DONTWAIT, its sock_flags 0x80), and macOS's 35 made it take every partial header as a broken connection and reconnect.
++// The flags and structures stay as they are (FreeBSD's, the same numbers as macOS's)
++static int linux_errno(int e) {
++    switch (e) {
++    case EAGAIN: return 11; case EINPROGRESS: return 115; case EALREADY: return 114; case ENOTSOCK: return 88; case EDESTADDRREQ: return 89; case EMSGSIZE: return 90;
++    case EPROTOTYPE: return 91; case ENOPROTOOPT: return 92; case EPROTONOSUPPORT: return 93; case EOPNOTSUPP: return 95; case EAFNOSUPPORT: return 97;
++    case EADDRINUSE: return 98; case EADDRNOTAVAIL: return 99; case ENETDOWN: return 100; case ENETUNREACH: return 101; case ENETRESET: return 102;
++    case ECONNABORTED: return 103; case ECONNRESET: return 104; case ENOBUFS: return 105; case EISCONN: return 106; case ENOTCONN: return 107; case ESHUTDOWN: return 108;
++    case ETIMEDOUT: return 110; case ECONNREFUSED: return 111; case EHOSTDOWN: return 112; case EHOSTUNREACH: return 113;
++    default: return e;   // EPERM 1 … EPIPE 32: the same numbers
++    }
++}
++static int nerr(long r) { if (r < 0) t_neterr = linux_errno(errno); return (int)r; }
++static long nerrl(long r) { if (r < 0) t_neterr = linux_errno(errno); return r; }
++int dm_net_errno(void) { return t_neterr; }
++int dm_net_socket(int d, int t, int p) {
++    int s = socket(d, t, p);
++    if (s >= 0) { int one = 1; setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one); }   // a send to a closed peer returns EPIPE instead of killing the process (Horizon has no SIGPIPE)
++    LOG("DM_NET socket(%d, %d, %d) = %d", d, t, p, s);
++    return nerr(s);
++}
++// The server a mod connects to is often the one the launcher starts with the game (DM_COMPANION: Tears of the Kingdom Online's Java server takes about
++// 10 s to listen; the mod asks for the address and connects a few seconds after boot, and a refused connection left it on a grey screen). A connection to
++// this Mac (127.x) while a companion runs first waits, up to 60 s, until something listens on that port: lsof is asked, no connection is made to test it
++static void wait_local_server(const void *a, unsigned n) {
++    const uint8_t *b = a;
++    if (n < 8 || b[1] != 2 /*AF_INET*/ || b[4] != 127 || !getenv("DM_COMPANION")) return;
++    unsigned port = b[2] << 8 | b[3]; char cmd[128]; snprintf(cmd, sizeof cmd, "/usr/sbin/lsof -nP -iTCP:%u -sTCP:LISTEN -t 2>/dev/null", port);
++    for (int i = 0; i < 120; i++) {
++        FILE *f = popen(cmd, "r"); char line[32] = ""; if (f) { if (!fgets(line, sizeof line, f)) line[0] = 0; pclose(f); }
++        if (line[0]) { if (i) LOG("DM_NET the local server on port %u is listening (waited %.1f s)", port, i * 0.5); return; }
++        if (!i) LOG("DM_NET nothing listens on 127.0.0.1:%u yet: waiting for the server the launcher started (DM_COMPANION), up to 60 s", port);
++        usleep(500000);
++    }
++    LOG("[RED] DM_NET the local server on port %u never started listening (60 s): connecting anyway", port);
++}
++int dm_net_connect(int s, const void *a, unsigned n) {
++    dm_thread_native_wait(1); wait_local_server(a, n); int r = connect(s, a, n); int e = errno; dm_thread_native_wait(0); errno = e;
++    if (n >= 8) { const uint8_t *b = a; LOG("DM_NET connect(%d, %u.%u.%u.%u:%u) = %d%s", s, b[4], b[5], b[6], b[7], b[2] << 8 | b[3], r, r < 0 ? strerror(errno) : ""); }
++    return nerr(r);
++}
++int dm_net_bind(int s, const void *a, unsigned n) { return nerr(bind(s, a, n)); }
++int dm_net_listen(int s, int n) { return nerr(listen(s, n)); }
++int dm_net_accept(int s, void *a, unsigned *n) { dm_thread_native_wait(1); int r = accept(s, a, (socklen_t *)n); int e = errno; dm_thread_native_wait(0); errno = e; return nerr(r); }
++int dm_net_close(int s) { return nerr(close(s)); }
++int dm_net_shutdown(int s, int h) { return nerr(shutdown(s, h)); }
++static int net_trace(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NET_LOG"); v = e && *e ? atoi(e) : 0; } return v; }   // DM_NET_LOG=1: each send / recv (first 200 of each kind)
++static void net_note(const char *op, int s, unsigned long n, int f, long r, int e) {
++    if (!net_trace()) return;
++    static _Atomic long last_r[2]; static _Atomic int rep[2]; int k = op[0] == 's';
++    if (r == atomic_load(&last_r[k])) { int c = atomic_fetch_add(&rep[k], 1) + 1; if (c == 1 || c % 500) return; LOG("DM_NET %s: %d more of %ld bytes", op, c, r); return; }
++    atomic_store(&last_r[k], r); atomic_store(&rep[k], 0);
++    static _Atomic int cnt[2]; if (atomic_fetch_add(&cnt[k], 1) >= 400) return;
++    if (r < 0 && (e == EAGAIN || e == EWOULDBLOCK)) { static _Atomic int again; if (atomic_fetch_add(&again, 1) >= 5) return; }
++    LOG("DM_NET %s(%d, %lu, flags %#x) = %ld%s%s", op, s, n, f, r, r < 0 ? " " : "", r < 0 ? strerror(e) : "");
++}
++// MSG_* flags: OOB 1, PEEK 2, DONTROUTE 4, WAITALL 0x40, DONTWAIT 0x80 are the same on Horizon and macOS; others (Horizon's MSG_NOSIGNAL 0x20000) are dropped (SO_NOSIGPIPE is set)
++#define NET_FLAGS(f) ((f) & 0xC7)
++long dm_net_recv(int s, void *b, unsigned long n, int f) { dm_thread_native_wait(1); long r = recv(s, b, n, NET_FLAGS(f)); int e = errno; dm_thread_native_wait(0); net_note("recv", s, n, f, r, e); errno = e; return nerrl(r); }
++long dm_net_recvfrom(int s, void *b, unsigned long n, int f, void *a, unsigned *al) { dm_thread_native_wait(1); long r = recvfrom(s, b, n, f, a, (socklen_t *)al); int e = errno; dm_thread_native_wait(0); errno = e; return nerrl(r); }
++long dm_net_send(int s, const void *b, unsigned long n, int f) { dm_thread_native_wait(1); long r = send(s, b, n, NET_FLAGS(f)); int e = errno; dm_thread_native_wait(0); net_note("send", s, n, f, r, e); errno = e; return nerrl(r); }
++long dm_net_sendto(int s, const void *b, unsigned long n, int f, const void *a, unsigned al) { dm_thread_native_wait(1); long r = sendto(s, b, n, f, a, al); int e = errno; dm_thread_native_wait(0); errno = e; return nerrl(r); }
++int dm_net_getsockname(int s, void *a, unsigned *n) { return nerr(getsockname(s, a, (socklen_t *)n)); }
++int dm_net_getpeername(int s, void *a, unsigned *n) { return nerr(getpeername(s, a, (socklen_t *)n)); }
++int dm_net_setsockopt(int s, int l, int o, const void *v, unsigned n) { return nerr(setsockopt(s, l, o, v, n)); }
++int dm_net_getsockopt(int s, int l, int o, void *v, unsigned *n) {
++    int r = getsockopt(s, l, o, v, (socklen_t *)n);
++    if (!r && l == 0xffff && o == 0x1007 && v && n && *n >= 4 && *(int *)v) *(int *)v = linux_errno(*(int *)v);   // SO_ERROR (a non-blocking connect's outcome): the errno numbering the game reads
++    return nerr(r);
++}
++// Fcntl: Horizon's O_NONBLOCK is 0x800 (nn::socket::FcntlFlag::O_NonBlock; Ryujinx tests the same bit), macOS's is 4 (0x800 there is O_EXCL, which F_SETFL ignores).
++// Passed through, Tears of the Kingdom Online's "make the socket non-blocking" left it blocking: its Recv waited for data inside the game's frame and the screen
++// stayed grey, and it never got to send. F_GETFL (3) and F_SETFL (4) are the same numbers; other commands pass through
++int dm_net_fcntl(int s, int c, int v) {
++    int r;
++    if (c == 4) {   // F_SETFL
++        int cur = fcntl(s, F_GETFL, 0); if (cur < 0) cur = 0;
++        r = fcntl(s, F_SETFL, (v & 0x800) ? (cur | O_NONBLOCK) : (cur & ~O_NONBLOCK));
++    } else if (c == 3) {   // F_GETFL
++        r = fcntl(s, F_GETFL, 0);
++        if (r >= 0) r = (r & O_NONBLOCK ? 0x800 : 0) | (r & O_ACCMODE);
++    } else r = fcntl(s, c, v);
++    if (net_trace()) LOG("DM_NET fcntl(%d, %d, %#x) = %#x", s, c, v, r);
++    return nerr(r);
++}
++void dm_guest_sleep_ns(int64_t ns);
++// A poll with no timeout that finds nothing waits 1 ms before it answers 0: Super Mario Odyssey: Online's emulator build polls in a loop with timeout 0 (its pollTime), which kept
++// a host core at 100% (50 s of CPU in 53 s) next to the game's own threads
++int dm_net_poll(void *f, uint64_t n, int ms) {
++    dm_thread_native_wait(1); int r = poll(f, (nfds_t)n, ms); int e = errno; dm_thread_native_wait(0); errno = e;
++    if (r == 0 && ms == 0) dm_guest_sleep_ns(1000000);
++    return nerr(r);
++}
++// The resolver: macOS's struct hostent has the guest's layout (char *, char **, int, int, char **), and the guest reads host memory directly, so the host's entry is returned
++// as it is (per thread, as the guest's own is static). Runs on the big host stack (HLE_FORCE_BIG at the hooks): the system resolver needs more than a game thread's stack
++void *dm_net_gethostbyname(const char *name) {
++    dm_thread_native_wait(1); struct hostent *h = gethostbyname(name); int e = h_errno; dm_thread_native_wait(0);
++    LOG("DM_NET gethostbyname(%s) = %s", name ? name : "(null)", h ? "found" : "not found");
++    if (!h) t_neterr = e;
++    return h;
++}
++
+ 
+ HLE_FORCE("_ZN2nn6socket10InitializeERKNS0_6ConfigE", "connects to the bsd socket service; offline, creates no session (cut)", Result, h_socket_Initialize, const void *cfg) { (void)cfg; return RES_OK; }
+ // SDK 21 (Star Fox) inlines nn::socket::Initialize(const Config &) into the game, and the service connection is this call
+@@ -27,6 +153,8 @@ HLE_FORCE("_ZN2nn4nifm22IsNetworkRequestOnHoldEv", "offline: on hold for the fir
+ }
+ HLE_FORCE("_ZN2nn4nifm18IsNetworkAvailableEv", "offline: the network is always unavailable", int, h_nifm_Available, void) { return 0; }
+ // Returns bool (`and w0, w0, #1`, Metroid Dread's sdk+0x336210): whether the system's network screen resolved the error
++// SDK 3's name of the call below (Super Mario Odyssey 1.0.0): returns nn::Result, the request's error as handled; offline: a failure, no system network screen
++HLE_FORCE("_ZN2nn4nifm26HandleNetworkRequestResultEv", "offline: a failure, shows no system network screen", Result, h_nifm_HandleRes, void) { return RES_FAIL; }
+ HLE_FORCE("_ZN2nn4nifm31HandleNetworkRequestErrorResultEv", "offline: not resolved, shows no system network screen", unsigned, h_nifm_HandleErr, void) { return 0; }
+ HLE_FORCE("_ZN2nn4nifm26GetCurrentPrimaryIpAddressEPNS_6socket6InAddrE", "offline: no IP", Result, h_nifm_GetIp, uint32_t *a) { if (a) *a = 0; return RES_FAIL; }
+ HLE_FORCE("_ZN2nn4nifm22GetCurrentProxySettingEPNS0_12ProxySettingE", "offline: no proxy setting", Result, h_nifm_GetProxy, void *p) { (void)p; return RES_FAIL; }
+@@ -112,6 +240,7 @@ static int efd_ready(sk_pollfd *p, uint64_t n, uint64_t open) {
+ // but EINTR as fatal (main+0xbe2efc4). On a console a socket with nothing to say reports no event at the timeout, so that is the answer for every descriptor: nothing ready, the timeout
+ // waited out, 0. Failing with ENETDOWN here made the loop abort
+ int dm_sk_poll(void *fds, uint64_t n, int ms) {   // also hle_offline.c's plain pollfd form
++    if (dm_net_on()) return dm_net_poll(fds, n, ms);
+     sk_pollfd *p = fds;
+     uint64_t open = 0;   // EFD_MAX is 64: one bit per descriptor
+     pthread_mutex_lock(&g_efd_m);
+@@ -160,16 +289,16 @@ int dm_sk_select(int nfds, uint64_t *r, uint64_t *w, uint64_t *e, const int64_t
+     }
+     return n;
+ }
+-SKF("_ZN2nn6socket6SocketENS0_6FamilyENS0_4TypeENS0_8ProtocolE", h_sk_Socket, int a, int b, int c) { (void)a; (void)b; (void)c; return sk_fail(); }
+-SKF("_ZN2nn6socket4BindEiPKNS0_8SockAddrEj", h_sk_Bind, int s, const void *a, unsigned n) { (void)s; (void)a; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket7ConnectEiPKNS0_8SockAddrEj", h_sk_Connect, int s, const void *a, unsigned n) { (void)s; (void)a; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket6ListenEii", h_sk_Listen, int s, int n) { (void)s; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket6AcceptEiPNS0_8SockAddrEPj", h_sk_Accept, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket5CloseEi", h_sk_Close, int s) { return efd_close(s); }
+-SKF("_ZN2nn6socket11GetPeerNameEiPNS0_8SockAddrEPj", h_sk_GetPeerName, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket11GetSockNameEiPNS0_8SockAddrEPj", h_sk_GetSockName, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket10GetSockOptEiNS0_5LevelENS0_6OptionEPvPj", h_sk_GetSockOpt, int s, int l, int o, void *v, unsigned *n) { (void)s; (void)l; (void)o; (void)v; (void)n; return sk_fail(); }
+-SKF("_ZN2nn6socket10SetSockOptEiNS0_5LevelENS0_6OptionEPKvj", h_sk_SetSockOpt, int s, int l, int o, const void *v, unsigned n) { (void)s; (void)l; (void)o; (void)v; (void)n; return sk_fail(); }
++SKF("_ZN2nn6socket6SocketENS0_6FamilyENS0_4TypeENS0_8ProtocolE", h_sk_Socket, int a, int b, int c) { if (dm_net_on()) return dm_net_socket(a, b, c); return sk_fail(); }
++SKF("_ZN2nn6socket4BindEiPKNS0_8SockAddrEj", h_sk_Bind, int s, const void *a, unsigned n) { if (dm_net_on()) return dm_net_bind(s, a, n); return sk_fail(); }
++SKF("_ZN2nn6socket7ConnectEiPKNS0_8SockAddrEj", h_sk_Connect, int s, const void *a, unsigned n) { if (dm_net_on()) return dm_net_connect(s, a, n); return sk_fail(); }
++SKF("_ZN2nn6socket6ListenEii", h_sk_Listen, int s, int n) { if (dm_net_on()) return dm_net_listen(s, n); return sk_fail(); }
++SKF("_ZN2nn6socket6AcceptEiPNS0_8SockAddrEPj", h_sk_Accept, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_accept(s, a, n); return sk_fail(); }
++SKF("_ZN2nn6socket5CloseEi", h_sk_Close, int s) { if (dm_net_on()) return dm_net_close(s); return efd_close(s); }
++SKF("_ZN2nn6socket11GetPeerNameEiPNS0_8SockAddrEPj", h_sk_GetPeerName, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getpeername(s, a, n); return sk_fail(); }
++SKF("_ZN2nn6socket11GetSockNameEiPNS0_8SockAddrEPj", h_sk_GetSockName, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getsockname(s, a, n); return sk_fail(); }
++SKF("_ZN2nn6socket10GetSockOptEiNS0_5LevelENS0_6OptionEPvPj", h_sk_GetSockOpt, int s, int l, int o, void *v, unsigned *n) { if (dm_net_on()) return dm_net_getsockopt(s, l, o, v, n); return sk_fail(); }
++SKF("_ZN2nn6socket10SetSockOptEiNS0_5LevelENS0_6OptionEPKvj", h_sk_SetSockOpt, int s, int l, int o, const void *v, unsigned n) { if (dm_net_on()) return dm_net_setsockopt(s, l, o, v, n); return sk_fail(); }
+ SKF("_ZN2nn6socket5FcntlEiNS0_12FcntlCommandEz", h_sk_Fcntl, int s, int c) { (void)s; (void)c; return sk_fail(); }
+ // SDK 21 overloads Star Fox imports: plain sockaddr, the ShutdownMethod enum, Read / Write and a name lookup without options; SetAllocator keeps nothing, as no session is created
+ SKF("_ZN2nn6socket11GetPeerNameEiP8sockaddrPj", h_sk_GetPeerName21, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return sk_fail(); }
+@@ -188,15 +317,15 @@ HLE_FORCE("_ZN2nn6socket11EventFdReadEiPm", "reads the host counter", int, h_sk_
+ HLE_FORCE("_ZN2nn6socket12EventFdWriteEim", "adds to the host counter and wakes its pollers", int, h_sk_EventFdWrite, int s, unsigned long v) { return efd_write(s, v); }
+ SKF("_ZN2nn6socket17ResolverGetOptionEPNS0_14ResolverOptionENS0_17ResolverOptionKeyE", h_sk_ResGet, void *o, int k) { (void)o; (void)k; return sk_fail(); }
+ SKF("_ZN2nn6socket17ResolverSetOptionERKNS0_14ResolverOptionE", h_sk_ResSet, const void *o) { (void)o; return sk_fail(); }
+-HLE_FORCE("_ZN2nn6socket4RecvEiPvmNS0_7MsgFlagE", "bsd socket service (cut)", long, h_sk_Recv, int s, void *b, unsigned long n, int f) { (void)s; (void)b; (void)n; (void)f; return sk_fail(); }
+-HLE_FORCE("_ZN2nn6socket8RecvFromEiPvmNS0_7MsgFlagEPNS0_8SockAddrEPj", "bsd socket service (cut)", long, h_sk_RecvFrom, int s, void *b, unsigned long n, int f, void *a, unsigned *al) { (void)s; (void)b; (void)n; (void)f; (void)a; (void)al; return sk_fail(); }
+-HLE_FORCE("_ZN2nn6socket4SendEiPKvmNS0_7MsgFlagE", "bsd socket service (cut)", long, h_sk_Send, int s, const void *b, unsigned long n, int f) { (void)s; (void)b; (void)n; (void)f; return sk_fail(); }
++HLE_FORCE("_ZN2nn6socket4RecvEiPvmNS0_7MsgFlagE", "bsd socket service (cut)", long, h_sk_Recv, int s, void *b, unsigned long n, int f) { if (dm_net_on()) return dm_net_recv(s, b, n, f); return sk_fail(); }
++HLE_FORCE("_ZN2nn6socket8RecvFromEiPvmNS0_7MsgFlagEPNS0_8SockAddrEPj", "bsd socket service (cut)", long, h_sk_RecvFrom, int s, void *b, unsigned long n, int f, void *a, unsigned *al) { if (dm_net_on()) return dm_net_recvfrom(s, b, n, f, a, al); return sk_fail(); }
++HLE_FORCE("_ZN2nn6socket4SendEiPKvmNS0_7MsgFlagE", "bsd socket service (cut)", long, h_sk_Send, int s, const void *b, unsigned long n, int f) { if (dm_net_on()) return dm_net_send(s, b, n, f); return sk_fail(); }
+ HLE_FORCE("_ZN2nn6socket11GetAddrInfoEPKcS2_PKNS0_8AddrInfoEPPS3_", "name resolution (cut): EAI_FAIL", int, h_sk_GetAddrInfo, const char *h, const char *s, const void *hint, void **res) {
+     (void)h; (void)s; (void)hint; if (res) *res = NULL; return 4;   // EAI_FAIL
+ }
+ HLE_FORCE("_ZN2nn6socket12FreeAddrInfoEPNS0_8AddrInfoE", "pairs with GetAddrInfo (cut)", void, h_sk_FreeAddrInfo, void *ai) { (void)ai; }
+ HLE_FORCE("_ZN2nn6socket16GetHostEntByNameEPKcPKNS0_14ResolverOptionEm", "name resolution (cut): NULL", void *, h_sk_GetHostEnt, const char *n, const void *o, unsigned long c) { (void)n; (void)o; (void)c; t_skerr = SK_ENETDOWN; return NULL; }
+-HLE_FORCE("_ZN2nn6socket12GetLastErrorEv", "socket error code kept by the host", int, h_sk_GetLastError, void) { return t_skerr; }
++HLE_FORCE("_ZN2nn6socket12GetLastErrorEv", "socket error code kept by the host", int, h_sk_GetLastError, void) { return dm_net_on() ? t_neterr : t_skerr; }
+ // C interface
+ SKF("nnsocketSocket", h_nsk_Socket, int a, int b, int c) { (void)a; (void)b; (void)c; return sk_fail(); }
+ SKF("nnsocketBind", h_nsk_Bind, int s, const void *a, unsigned n) { (void)s; (void)a; (void)n; return sk_fail(); }
+diff --git a/dm/host/hle_oe.c b/dm/host/hle_oe.c
+index a079a02..59492c5 100644
+--- a/dm/host/hle_oe.c
++++ b/dm/host/hle_oe.c
+@@ -420,3 +420,8 @@ HLE_FORCE("_ZN2nn2oe17GetPseudoDeviceIdEPNS_4util4UuidE", "pseudo device ID; a f
+     static const uint8_t k[16] = {0x78, 0x62, 0x6c, 0x00, 0x53, 0x57, 0x4e, 0x41, 0x54, 0x49, 0x56, 0x45, 0x31, 0x30, 0x30, 0x31};
+     memcpy(uuid, k, 16);
+ }
++
++// Game play recording (the capture button's 30-second video, SDK 3–4's oe API): the game hands the system a buffer for it as transfer memory (svc CreateTransferMemory),
++// which the host does not have, and the SDK went on with the handle it never got (a null write). The host records nothing: no-op.
++// Super Mario Odyssey 1.0.0 (SDK 3.5.1) calls it from nninitStartup with a 96 MB block (main+0x536f7c); 1.4.1 no longer does at start
++HLE_FORCE("_ZN2nn2oe23EnableGamePlayRecordingEPvm", "game play recording buffer as transfer memory: the host records nothing (no-op)", void, h_oe_EnableGpr, void *buf, uint64_t size) { (void)buf; (void)size; }
+diff --git a/dm/host/hle_offline.c b/dm/host/hle_offline.c
+index 9aaedd5..53a7b2d 100644
+--- a/dm/host/hle_offline.c
++++ b/dm/host/hle_offline.c
+@@ -69,30 +69,39 @@ HLE_FORCE("_ZN2nn9bluetooth19ConnectToGattServerERKNS0_7AddressE", "BLE connect
+ enum { SK_ENETDOWN = 50, SK_EAI_FAIL = 4 };
+ HLE_FORCE("_ZN2nn6socket10InitializeEPvmmi", "connects to the bsd socket service; offline, creates no session (cut)", Result, h_sk_Init4, void *mem, uint64_t sz, uint64_t alloc, int conc) { (void)mem; (void)sz; (void)alloc; (void)conc; return RES_OK; }
+ HLE_FORCE("_ZN2nn6socket8FinalizeEv", "pairs with Initialize (cut)", Result, h_sk_Fini, void) { return RES_OK; }
+-HLE_FORCE("_ZN2nn6socket12GetLastErrnoEv", "offline: ENETDOWN", int, h_sk_Errno, void) { return SK_ENETDOWN; }
+-HLE_FORCE("_ZN2nn6socket6SocketEiii", "offline (cut): -1", int, h_sk_Socket3i, int a, int b, int c) { (void)a; (void)b; (void)c; return -1; }
+-HLE_FORCE("_ZN2nn6socket8ShutdownEii", "offline (cut)", int, h_sk_Shutdown, int s, int h) { (void)s; (void)h; return -1; }
+-HLE_FORCE("_ZN2nn6socket4BindEiPK8sockaddrj", "offline (cut)", int, h_sk_Bind, int s, const void *a, unsigned n) { (void)s; (void)a; (void)n; return -1; }
++int dm_net_on(void); int dm_net_errno(void);   // hle_net.c: DM_NET=1 puts the socket calls on the host's sockets
++int dm_net_socket(int, int, int); int dm_net_connect(int, const void *, unsigned); int dm_net_bind(int, const void *, unsigned); int dm_net_accept(int, void *, unsigned *);
++int dm_net_close(int); int dm_net_shutdown(int, int); long dm_net_recv(int, void *, unsigned long, int); long dm_net_send(int, const void *, unsigned long, int);
++long dm_net_recvfrom(int, void *, unsigned long, int, void *, unsigned *); long dm_net_sendto(int, const void *, unsigned long, int, const void *, unsigned);
++int dm_net_getsockname(int, void *, unsigned *); int dm_net_setsockopt(int, int, int, const void *, unsigned); int dm_net_getsockopt(int, int, int, void *, unsigned *);
++int dm_net_fcntl(int, int, int); void *dm_net_gethostbyname(const char *);
++HLE_FORCE("_ZN2nn6socket12GetLastErrnoEv", "offline: ENETDOWN (DM_NET=1: the host socket's errno)", int, h_sk_Errno, void) { return dm_net_on() ? dm_net_errno() : SK_ENETDOWN; }
++HLE_FORCE("_ZN2nn6socket6SocketEiii", "offline (cut): -1", int, h_sk_Socket3i, int a, int b, int c) { if (dm_net_on()) return dm_net_socket(a, b, c); return -1; }
++HLE_FORCE("_ZN2nn6socket8ShutdownEii", "offline (cut)", int, h_sk_Shutdown, int s, int h) { if (dm_net_on()) return dm_net_shutdown(s, h); return -1; }
++HLE_FORCE("_ZN2nn6socket4BindEiPK8sockaddrj", "offline (cut)", int, h_sk_Bind, int s, const void *a, unsigned n) { if (dm_net_on()) return dm_net_bind(s, a, n); return -1; }
+ int dm_sk_poll(void *fds, uint64_t n, int ms);   // hle_net.c: waits on the host's event descriptors; with none the timeout passes, 0
+ int dm_sk_select(int nfds, uint64_t *r, uint64_t *w, uint64_t *e, const int64_t *tv);
+ HLE_FORCE("_ZN2nn6socket4PollEP6pollfdmi", "offline: waits on the host's event descriptors; nothing else is ever ready", int, h_sk_Poll, void *p, uint64_t n, int t) { return dm_sk_poll(p, n, t); }
+ // SDK 4's Select with plain fd_set / timeval (Dark Souls Remastered)
+ HLE_FORCE("_ZN2nn6socket6SelectEiP6fd_setS2_S2_P7timeval", "offline: Poll over its sets (the host's event descriptors; nothing else is ever ready)", int, h_sk_Select2, int n, void *r, void *w, void *e, void *t) { return dm_sk_select(n, r, w, e, t); }
+-HLE_FORCE("_ZN2nn6socket6SendToEiPKvmiPK8sockaddrj", "offline (cut)", long, h_sk_SendTo, int s, const void *b, unsigned long n, int f, const void *a, unsigned al) { (void)s; (void)b; (void)n; (void)f; (void)a; (void)al; return -1; }
++HLE_FORCE("_ZN2nn6socket6SendToEiPKvmiPK8sockaddrj", "offline (cut)", long, h_sk_SendTo, int s, const void *b, unsigned long n, int f, const void *a, unsigned al) { if (dm_net_on()) return dm_net_sendto(s, b, n, f, a, al); return -1; }
+ HLE_FORCE("_ZN2nn6socket6SendToEiPKvmNS0_7MsgFlagEPKNS0_8SockAddrEj", "offline (cut)", long, h_sk_SendTo2, int s, const void *b, unsigned long n, int f, const void *a, unsigned al) { (void)s; (void)b; (void)n; (void)f; (void)a; (void)al; return -1; }
+-HLE_FORCE("_ZN2nn6socket8RecvFromEiPvmiP8sockaddrPj", "offline (cut)", long, h_sk_RecvFrom2, int s, void *b, unsigned long n, int f, void *a, unsigned *al) { (void)s; (void)b; (void)n; (void)f; (void)a; (void)al; return -1; }
++HLE_FORCE("_ZN2nn6socket8RecvFromEiPvmiP8sockaddrPj", "offline (cut)", long, h_sk_RecvFrom2, int s, void *b, unsigned long n, int f, void *a, unsigned *al) { if (dm_net_on()) return dm_net_recvfrom(s, b, n, f, a, al); return -1; }
+ HLE_FORCE("_ZN2nn6socket11GetAddrInfoEPKcS2_PK8addrinfoPPS3_", "name resolution (cut): EAI_FAIL", int, h_sk_Gai2, const char *h, const char *s, const void *hint, void **res) { (void)h; (void)s; (void)hint; if (res) *res = NULL; return SK_EAI_FAIL; }
+ HLE_FORCE("_ZN2nn6socket12FreeAddrInfoEP8addrinfo", "pairs with GetAddrInfo (cut)", void, h_sk_FreeAi2, void *ai) { (void)ai; }
+ HLE_FORCE("_ZN2nn6socket11GAIStrErrorENS0_7AiErrnoE", "resolver error text", const char *, h_sk_GaiStr, int e) { (void)e; return "network unavailable"; }
+ // SDK 11's overloads with plain sockaddr / int arguments (Big Brain Academy: Brain vs. Brain, through Pia)
+-HLE_FORCE("_ZN2nn6socket7ConnectEiPK8sockaddrj", "offline (cut)", int, h_sk_Connect2, int s, const void *a, unsigned n) { (void)s; (void)a; (void)n; return -1; }
+-HLE_FORCE("_ZN2nn6socket6AcceptEiP8sockaddrPj", "offline (cut)", int, h_sk_Accept2, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return -1; }
+-HLE_FORCE("_ZN2nn6socket11GetSockNameEiP8sockaddrPj", "offline (cut)", int, h_sk_GetSockName2, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return -1; }
+-HLE_FORCE("_ZN2nn6socket10GetSockOptEiiiPvPj", "offline (cut)", int, h_sk_GetSockOpt2, int s, int l, int o, void *v, unsigned *n) { (void)s; (void)l; (void)o; (void)v; (void)n; return -1; }
+-HLE_FORCE("_ZN2nn6socket10SetSockOptEiiiPKvj", "offline (cut)", int, h_sk_SetSockOpt2, int s, int l, int o, const void *v, unsigned n) { (void)s; (void)l; (void)o; (void)v; (void)n; return -1; }
+-HLE_FORCE("_ZN2nn6socket5FcntlEiiz", "offline (cut)", int, h_sk_Fcntl2, int s, int c) { (void)s; (void)c; return -1; }
+-HLE_FORCE("_ZN2nn6socket4RecvEiPvmi", "offline (cut)", long, h_sk_Recv2, int s, void *b, unsigned long n, int f) { (void)s; (void)b; (void)n; (void)f; return -1; }
+-HLE_FORCE("_ZN2nn6socket4SendEiPKvmi", "offline (cut)", long, h_sk_Send2, int s, const void *b, unsigned long n, int f) { (void)s; (void)b; (void)n; (void)f; return -1; }
++HLE_FORCE("_ZN2nn6socket7ConnectEiPK8sockaddrj", "offline (cut)", int, h_sk_Connect2, int s, const void *a, unsigned n) { if (dm_net_on()) return dm_net_connect(s, a, n); return -1; }
++HLE_FORCE("_ZN2nn6socket6AcceptEiP8sockaddrPj", "offline (cut)", int, h_sk_Accept2, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_accept(s, a, n); return -1; }
++int dm_net_getpeername(int, void *, unsigned *);
++HLE_FORCE("_ZN2nn6socket11GetPeerNameEiP8sockaddrPj", "offline (cut) (DM_NET=1: the host socket)", int, h_sk_GetPeerName2, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getpeername(s, a, n); return -1; }
++HLE_FORCE("_ZN2nn6socket11GetSockNameEiP8sockaddrPj", "offline (cut)", int, h_sk_GetSockName2, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getsockname(s, a, n); return -1; }
++HLE_FORCE("_ZN2nn6socket10GetSockOptEiiiPvPj", "offline (cut)", int, h_sk_GetSockOpt2, int s, int l, int o, void *v, unsigned *n) { if (dm_net_on()) return dm_net_getsockopt(s, l, o, v, n); return -1; }
++HLE_FORCE("_ZN2nn6socket10SetSockOptEiiiPKvj", "offline (cut)", int, h_sk_SetSockOpt2, int s, int l, int o, const void *v, unsigned n) { if (dm_net_on()) return dm_net_setsockopt(s, l, o, v, n); return -1; }
++HLE_FORCE_BIG("_ZN2nn6socket13GetHostByNameEPKc", "name resolution: NULL offline (DM_NET=1: the host's resolver, on the big host stack)", void *, h_sk_GetHost1, const char *n) { if (dm_net_on()) return dm_net_gethostbyname(n); return NULL; }
++HLE_FORCE("_ZN2nn6socket5FcntlEiiz", "offline (cut)", int, h_sk_Fcntl2, int s, int c, int v) { if (dm_net_on()) return dm_net_fcntl(s, c, v); return -1; }   // variadic on the Switch: the third argument is in w2
++HLE_FORCE("_ZN2nn6socket4RecvEiPvmi", "offline (cut)", long, h_sk_Recv2, int s, void *b, unsigned long n, int f) { if (dm_net_on()) return dm_net_recv(s, b, n, f); return -1; }
++HLE_FORCE("_ZN2nn6socket4SendEiPKvmi", "offline (cut)", long, h_sk_Send2, int s, const void *b, unsigned long n, int f) { if (dm_net_on()) return dm_net_send(s, b, n, f); return -1; }
+ 
+ // ---------- irsensor: the Joy-Con IR camera (Big Brain Academy: Brain vs. Brain's input layer makes one per controller). The host has none: every camera is unconnected,
+ // processors cannot run and report no states. The default-config getters and MakeRect only fill the game's structs and keep running in the SDK ----------
+diff --git a/dm/host/hle_swkbd.c b/dm/host/hle_swkbd.c
+index 24ea60b..ddda0c0 100644
+--- a/dm/host/hle_swkbd.c
++++ b/dm/host/hle_swkbd.c
+@@ -67,7 +67,10 @@ Result swkbd_show(void *out, const void *arg_, swkbd_input_fn input) {
+     swkbd_u16_to_u8((const uint16_t *)(arg + ARG_SUB), SUB_N, sub, sizeof sub);
+     swkbd_u16_to_u8((const uint16_t *)(arg + ARG_GUIDE), GUIDE_N, guide, sizeof guide);
+     int32_t maxlen, minlen, ilen, ioff; memcpy(&maxlen, arg + ARG_MAXLEN, 4); memcpy(&minlen, arg + ARG_MINLEN, 4); memcpy(&ilen, arg + ARG_INIT_LEN, 4); memcpy(&ioff, arg + ARG_INIT_OFF, 4);
+-    const uint8_t *work; memcpy(&work, arg + ARG_WORKBUF, 8);
++    // The work buffer follows KeyboardConfig, which grew after SDK 3: 0x400 bytes in SDK 3.5.1 (Super Mario Odyssey 1.0.0's ShowKeyboard reads it at arg+0x400 / +0x408, sdk+0x1b4984),
++    // the 0x4d0 above from the newer SDK the host was written against. The rest of the fields this reads are at the same offsets in both
++    int dm_sdk_major(void);
++    const uint8_t *work; memcpy(&work, arg + (dm_sdk_major() > 0 && dm_sdk_major() <= 3 ? 0x400 : ARG_WORKBUF), 8);
+     if (ilen > 0 && work) swkbd_u16_to_u8((const uint16_t *)(work + ioff), (size_t)ilen, init, sizeof init);
+ 
+     const char *script = getenv("DM_KBD");
+@@ -96,7 +99,8 @@ Result swkbd_show(void *out, const void *arg_, swkbd_input_fn input) {
+     return RES_OK;
+ }
+ 
+-HLE_FORCE("_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE", "software keyboard applet → host native input box (DM_KBD gives the text directly)",
++// On the big host stack: swkbd_show keeps about 8 KB of text buffers, more than a small game thread has (Super Mario Odyssey: Online asks for its server from a thread whose stack overflowed there)
++HLE_FORCE_BIG("_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE", "software keyboard applet → host native input box (DM_KBD gives the text directly), on the big host stack",
+           Result, h_swkbd_Show, void *out, const void *arg) {
+     DM_APPLET("software keyboard");
+     return swkbd_show(out, arg, front_text_input);
+diff --git a/dm/mac/launcher.c b/dm/mac/launcher.c
+index 1268b18..833a0a4 100644
+--- a/dm/mac/launcher.c
++++ b/dm/mac/launcher.c
+@@ -218,11 +218,26 @@ int main(int argc, char **argv) {
+     struct sigaction sa = {.sa_handler = forward};   // no SA_RESTART: waitpid below sees EINTR and waits again
+     sigemptyset(&sa.sa_mask);
+     sigaction(SIGTERM, &sa, NULL); sigaction(SIGINT, &sa, NULL); sigaction(SIGHUP, &sa, NULL);
++    // DM_COMPANION=<script>: a program that runs beside the game and stops with it (Super Mario Odyssey: Online's server, so that one click starts both). Started in a process
++    // group of its own through /bin/sh; when the host exits, the whole group gets SIGTERM. Its output goes to companion.log in the game's Application Support folder
++    pid_t comp = 0; const char *cmd = getenv("DM_COMPANION");
++    if (cmd && *cmd) {
++        posix_spawnattr_t ca; posix_spawn_file_actions_t cf; char clog[PATH_MAX]; snprintf(clog, sizeof clog, "%s/companion.log", sup);
++        posix_spawnattr_init(&ca); posix_spawnattr_setflags(&ca, POSIX_SPAWN_SETPGROUP); posix_spawnattr_setpgroup(&ca, 0);
++        posix_spawn_file_actions_init(&cf); posix_spawn_file_actions_addopen(&cf, 1, clog, O_WRONLY | O_CREAT | O_TRUNC, 0644); posix_spawn_file_actions_adddup2(&cf, 1, 2);
++        posix_spawn_file_actions_addopen(&cf, 0, "/dev/null", O_RDONLY, 0);
++        char *cargv[] = {"/bin/sh", (char *)cmd, NULL};
++        int ce = posix_spawn(&comp, "/bin/sh", &cf, &ca, cargv, environ);
++        if (ce) { comp = 0; fprintf(stderr, "[RED] launcher: cannot start the companion %s: %s\n", cmd, strerror(ce)); }
++        else fprintf(stderr, "launcher: companion %s started (pid %d, log %s)\n", cmd, (int)comp, clog);
++        posix_spawnattr_destroy(&ca); posix_spawn_file_actions_destroy(&cf);
++    }
+     char *host_argv[] = {host, dm, NULL};
+     int err = posix_spawn(&g_child, host, NULL, NULL, host_argv, environ);
+-    if (err) { fprintf(stderr, "[RED] launcher: cannot start %s: %s\n", host, strerror(err)); return 1; }
++    if (err) { fprintf(stderr, "[RED] launcher: cannot start %s: %s\n", host, strerror(err)); if (comp) kill(-comp, SIGTERM); return 1; }
+     int status;
+-    while (waitpid(g_child, &status, 0) < 0) if (errno != EINTR) return 1;
++    while (waitpid(g_child, &status, 0) < 0) if (errno != EINTR) { if (comp) kill(-comp, SIGTERM); return 1; }
++    if (comp) { kill(-comp, SIGTERM); for (int t = 0; t < 30 && waitpid(comp, NULL, WNOHANG) == 0; t++) usleep(100000); kill(-comp, SIGKILL); waitpid(comp, NULL, WNOHANG); fprintf(stderr, "launcher: companion stopped\n"); }
+     // Cloud saves (DM_SAVE_SYNC, dm/host/save_sync.h): what the host committed and had not sent yet goes now, after a crash too (the committed save is whole whatever the host was doing)
+     // DM_SAVE as the host had it: an env file or the launch environment may have set another folder than this app's own
+     if (!save_sync_after_exit(getenv("DM_SAVE"), id)) fprintf(stderr, "launcher: the save did not reach the cloud; it goes at the next start\n");

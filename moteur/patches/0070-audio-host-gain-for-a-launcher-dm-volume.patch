@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <anas@local>
+Date: Sun, 8 Nov 2026 21:02:49 +0000
+Subject: [PATCH] audio: host gain for a launcher (DM_VOLUME,
+ ~/Library/Application Support/nxnative/volume.txt), the game's volume without
+ the Mac's
+
+Upstream-Status: fork-only
+Reason: the Salon launcher's in-game HUD sets the game's volume without changing the Mac's output volume
+Issue: Salon
+---
+ dm/host/hle_audio.c | 36 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/dm/host/hle_audio.c b/dm/host/hle_audio.c
+index 40a3b76..84df103 100644
+--- a/dm/host/hle_audio.c
++++ b/dm/host/hle_audio.c
+@@ -8,6 +8,11 @@
+ #include <dispatch/dispatch.h>
+ #include <stdatomic.h>
+ #include <unistd.h>
++#include <pthread.h>
++#include <sys/stat.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ enum { FMT_PCM16 = 2, STATE_STARTED = 0, STATE_STOPPED = 1, RATE = 48000 };
+ enum { BK_NONE, BK_AU, BK_NULL };   // what is consuming an output's queue right now (aout.backend)
+@@ -150,6 +155,31 @@ static void pull_device(aout *a, uint8_t *dst, uint64_t bytes) {
+     }
+ }
+ 
++// Host gain, a launcher's volume for the game without touching the Mac's own volume: DM_VOLUME=<0..100> at start, then the file
++// ~/Library/Application Support/nxnative/volume.txt (one number, 0..100), re-read four times a second by a background thread whenever it changes.
++// Applied to the PCM16 the device plays, after the game's own output volume. Unset or 100: untouched.
++static _Atomic uint32_t g_host_gain = 0x3f800000u;
++static void host_gain_set(float v) { if (v < 0) v = 0; if (v > 1) v = 1; uint32_t b; memcpy(&b, &v, 4); atomic_store_explicit(&g_host_gain, b, memory_order_relaxed); }
++static void *host_gain_thread(void *arg) {
++    (void)arg; const char *home = getenv("HOME"); if (!home) return NULL;
++    char path[1024]; snprintf(path, sizeof path, "%s/Library/Application Support/nxnative/volume.txt", home);
++    struct timespec last = {0, 0};
++    for (;;) {
++        struct stat st;
++        if (stat(path, &st) == 0 && (st.st_mtimespec.tv_sec != last.tv_sec || st.st_mtimespec.tv_nsec != last.tv_nsec)) {
++            last = st.st_mtimespec;
++            FILE *f = fopen(path, "r");
++            if (f) { double v; if (fscanf(f, "%lf", &v) == 1) host_gain_set((float)(v / 100.0)); fclose(f); }
++        }
++        usleep(250000);
++    }
++    return NULL;
++}
++static void host_gain_init(void) {
++    static int once; if (once) return; once = 1;
++    const char *e = getenv("DM_VOLUME"); if (e && *e) host_gain_set((float)(atof(e) / 100.0));
++    pthread_t t; if (pthread_create(&t, NULL, host_gain_thread, NULL) == 0) pthread_detach(t);
++}
+ static _Atomic uint64_t g_render_calls;   // Cumulative sound card callbacks (lifecycle verification: must keep growing after resume)
+ uint64_t dm_audio_render_calls(void) { return atomic_load_explicit(&g_render_calls, memory_order_relaxed); }
+ static OSStatus au_render(void *ctx, AudioUnitRenderActionFlags *f, const AudioTimeStamp *ts, UInt32 bus, UInt32 frames, AudioBufferList *bl) {
+@@ -172,6 +202,11 @@ static OSStatus au_render(void *ctx, AudioUnitRenderActionFlags *f, const AudioT
+         memset(bl->mBuffers[0].mData, 0, bl->mBuffers[0].mDataByteSize);
+     } else {
+         pull_device(a, bl->mBuffers[0].mData, bl->mBuffers[0].mDataByteSize);
++        uint32_t gb = atomic_load_explicit(&g_host_gain, memory_order_relaxed);
++        if (gb != 0x3f800000u) {   // the launcher's volume (host gain), on the PCM16 going to the device
++            float g; memcpy(&g, &gb, 4); int16_t *s = bl->mBuffers[0].mData; UInt32 n = bl->mBuffers[0].mDataByteSize / 2;
++            for (UInt32 i = 0; i < n; i++) s[i] = (int16_t)(s[i] * g);
++        }
+         if (a->mute) memset(bl->mBuffers[0].mData, 0, bl->mBuffers[0].mDataByteSize);
+     }
+     return noErr;
+@@ -216,6 +251,7 @@ static void au_dispose(AudioUnit au) {
+     AudioUnitUninitialize(au); AudioComponentInstanceDispose(au);
+ }
+ static OSStatus au_create(aout *a) {
++    host_gain_init();
+     AudioComponentDescription d = {.componentType = kAudioUnitType_Output,
+ #if TARGET_OS_IPHONE
+                                    .componentSubType = kAudioUnitSubType_RemoteIO,

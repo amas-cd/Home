@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas Ben Khemis <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 01:16:27 +0000
+Subject: [PATCH] Rendering: forced anisotropy and trilinear filtering
+ (DM_NVN_ANISO, DM_NVN_TRILINEAR), the frame step's probe ramp
+ (DM_FSTEP_PROBE_RAMP)
+
+Tears of the Kingdom asks for no anisotropy and nearest mip selection: its ground blurs a few metres ahead. The probe ramp is upstream's, ported.
+
+Upstream-Status: fork-only
+Reason: player-facing quality switches for Tears of the Kingdom on the Mac
+Issue: LNPANDY/NX2Apple#214
+---
+ dm/gfx/nvn/hle_nvn.c   | 3 ++-
+ dm/gfx/nvn/nvn_fstep.h | 4 ++++
+ dm/gfx/nvn/nvn_mtl.m   | 9 +++++++++
+ docs/env_switches.tsv  | 3 +++
+ 4 files changed, 18 insertions(+), 1 deletion(-)
+
+diff --git a/dm/gfx/nvn/hle_nvn.c b/dm/gfx/nvn/hle_nvn.c
+index 0c3fa70..0c32d2b 100644
+--- a/dm/gfx/nvn/hle_nvn.c
++++ b/dm/gfx/nvn/hle_nvn.c
+@@ -592,7 +592,8 @@ NVN(nvnTextureInitialize, NVNboolean, NVNtexture *t, const NVNtextureBuilder *b)
+         if (ti < 0) { const char *e = getenv("DM_NVN_TEXINFO"); ti = e && sscanf(e, "%ux%u", &tw, &th) == 2; }
+         if (ti && o->d.width == tw && o->d.height == th) { static uint64_t n; if (n++ < 200) LOG("[nvn] TEXINFO init ser=%llu mem=%p pool=%p(mem %p size %#llx flags %#x) off=%#llx target=%d format=%#x flags=%#x samples=%d %ux%ux%u levels=%u stride=%u size=%#llx",
+             (unsigned long long)o->serial, (void *)o->mem, (void *)o->pool, o->pool ? (void *)o->pool->mem : NULL, o->pool ? (unsigned long long)o->pool->size : 0ull, o->pool ? o->pool->flags : 0,
+-            (unsigned long long)o->off, o->d.target, o->d.format, o->d.flags, o->d.samples, o->d.width, o->d.height, o->d.depth, o->d.levels, o->d.stride, (unsigned long long)o->L.size); }
++            (unsigned long long)o->off, o->d.target, o->d.format, o->d.flags, o->d.samples, o->d.width, o->d.height, o->d.depth, o->d.levels, o->d.stride, (unsigned long long)o->L.size);
++            if (n <= 16) dm_backtrace((uint64_t)__builtin_frame_address(0)); }   // the game's call chain to it: where the size comes from (Tears of the Kingdom's 800x800 shadow maps)
+     }
+     // See SetPackagedTextureData. Linear textures are not re-uploaded as packaged: they are created on the pool buffer (tex_linear), whatever the pool's CPU access, and read what was copied in
+     if (s->pkg_data && o->mem) {
+diff --git a/dm/gfx/nvn/nvn_fstep.h b/dm/gfx/nvn/nvn_fstep.h
+index 0f8cf97..ca15acd 100644
+--- a/dm/gfx/nvn/nvn_fstep.h
++++ b/dm/gfx/nvn/nvn_fstep.h
+@@ -30,6 +30,10 @@
+ #define FSTEP_HOLD0 60.0      // vsyncs since the last step up before a trial: 1 s, doubled after each failed trial up to 8 s
+ #define FSTEP_HOLD_MAX 480.0
+ #define FSTEP_GRACE 30        // a probe's first frames, whose lateness neither fails it nor counts toward a step up (the controller lowered the clock within 10 frames of a step to 30)
++// The grace is renewed (ramp) while the probe's frames keep getting cheaper: a controller that raises the clock slowly is still raising it. macOS raises the GPU clock of a game
++// that misses its deadline by about 100 MHz a second, so a 30-frame probe failed before the clock could reach the hold (ported from upstream nxnative, nvn_fstep.ramp)
++#define FSTEP_RAMP 0.05       // the fall in cost from one half of a grace window to the next that shows the clock still rising
++#define FSTEP_PROBE_MAX 180   // grace frames a probe may take in all (3 s at 60 fps)
+ #define FSTEP_SAME 1.1        // the cost at the longer hold against the cost that held kmin: at most this much is the same scene (BotW at hold 2: 1.0–1.07 times its hold-1 GPU time)
+ // The grace is renewed (nvn_fstep.ramp) while the probe's frames keep getting cheaper: a controller that raises the clock slowly is still raising it. macOS raises the GPU clock
+ // of a game that misses its deadline at 85–100% GPU occupancy by about 100 MHz a second (Breath of the Wild on an M5 Pro: 338 → 432 MHz over a 33-frame probe, GPU 24.8 → 18.5 ms,
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index d0573c6..85370d5 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -6621,6 +6621,15 @@ static MTLSamplerAddressMode wrapm(int w) {
+     d.lodMinClamp = p.lod_min < 0 ? 0 : p.lod_min; d.lodMaxClamp = p.lod_max;
+     d.lodBias = p.lod_bias < -16 ? -16 : p.lod_bias > 15.99f ? 15.99f : p.lod_bias;   // SetLodBias: Maxwell's sampler bias, Metal 26's range [-16, 15.99]
+     d.maxAnisotropy = p.aniso < 1 ? 1 : p.aniso > 16 ? 16 : (NSUInteger)p.aniso;
++    // Player quality switches (off by default): DM_NVN_ANISO=<2..16> raises the anisotropy of the game's linear, mipmapped samplers to at least that much, and DM_NVN_TRILINEAR=1
++    // blends between mip levels where the game picks the nearest (LINEAR_MIPMAP_NEAREST). Tears of the Kingdom asks for neither: the ground blurs a few metres ahead with a visible line
++    // where the level changes. Compare and min / max samplers keep the game's settings
++    { static int fa = -1, tl = -1;
++      if (fa < 0) { const char *e = getenv("DM_NVN_ANISO"); int v = e ? atoi(e) : 0; fa = v < 2 ? 0 : v > 16 ? 16 : v; e = getenv("DM_NVN_TRILINEAR"); tl = e && atoi(e) > 0;
++                    if (fa || tl) MLOG("sampler quality: anisotropy at least %d (DM_NVN_ANISO), trilinear %s (DM_NVN_TRILINEAR) on linear mipmapped samplers", fa ? fa : 1, tl ? "on" : "off"); }
++      if (p.magf && (p.minf == 3 || p.minf == 5) && !p.cmp_mode && p.reduction != 1 && p.reduction != 2) {
++          if (fa && d.maxAnisotropy < (NSUInteger)fa) d.maxAnisotropy = (NSUInteger)fa;
++          if (tl && p.minf == 3) d.mipFilter = MTLSamplerMipFilterLinear; } }
+     if (p.cmp_mode) d.compareFunction = (MTLCompareFunction)(p.cmp_func - 1);
+     // Reduction (NVN 1 min / 2 max): the minimum or maximum of the texels a filtered sample covers, per channel (Metal 26). Pokémon Legends: Z-A builds its depth pyramid with a min sampler
+     // (151607c7a92386cc reads the level above at an explicit LOD) and tests occlusion boxes against it; averaged, the pyramid is nearer than the scene at depth edges. Metal ignores the reduction
+diff --git a/docs/env_switches.tsv b/docs/env_switches.tsv
+index 5c2b71b..ff5f51f 100644
+--- a/docs/env_switches.tsv
++++ b/docs/env_switches.tsv
+@@ -35,6 +35,7 @@ DM_ENV_FILE	path	`=<file>` makes `build_ipa.sh` bake its `KEY=VALUE` lines into
+ DM_ENV_FILE_KEYS	switch	Set by the iOS app and the Mac launcher at launch to the space-separated names an env file set; the settings screen keeps those values and shows them greyed out
+ DM_ENV_LAUNCH_KEYS	switch	Set at launch by the Mac launcher (the launcher settings already in the environment) and the iOS app (every DM_* variable already in it) to the space-separated names; the settings screen keeps those values and shows them greyed out
+ DM_EXEC_OUT	path	File `oe::ExecuteProgram` records the next program and its parameters in, then the app ends (the iOS app of a game of several programs sets it to `Documents/program.bin`)
++DM_FAKE_RTLD	switch	`0` turns off the stand-in rtld QueryMemory reports below the lowest module when an ExeFS mod is loaded (on by default then): exlaunch mods that walk the address space (UltraCam) take the first module for rtld and the second for main
+ DM_FD_LOG	diagnostic	`=<seconds>` logs, every that many seconds, the number and kinds of file descriptors the process has open
+ DM_FIXED_TIME	switch	`=<seconds>`: the user clock always returns that time and the host time zone is pinned to UTC, for deterministic comparison
+ DM_FOCUS_KEEP	switch	`1` keeps the game in focus while its Mac window is up, whichever app is active (minimizing still counts); `scripts/regress.py` sets it, so another app taking the key window during a run does not pause a game that stops out of focus
+@@ -115,6 +116,7 @@ DM_NRO	switch	`0` turns off loading of the NRO modules the game's NRR files regi
+ DM_NRO_CAPTURE	diagnostic	folder: a `nn::ro::LoadModule` with no rewritten copy writes the image to `<folder>/<SHA-256>.nro` and ends the run (the NSP script's capture of an NRO the game decodes at run time)
+ DM_NRO_DIR	path	folder of NROs the shader split reads like `main`, and in which it finds a CRA archive's file table (the NSP script sets it for a captured NRO)
+ DM_NVN_ALLOCPROF	diagnostic	`=1` charges Metal allocation growth to each replayed op type and function, and logs command allocator sizes and each new texture (serial, size, format, storage); `=2` also gives each main submission a fresh command allocator and reports command memory by operation, by encoder, by submission size and the indirect-count multi-draws encoded
++DM_NVN_ANISO	player	`=<2..16>`: the game's linear mipmapped samplers filter with at least that anisotropy (compare and min / max samplers excepted); off by default. Tears of the Kingdom asks for none, and its ground blurs a few metres ahead
+ DM_NVN_API	switch	`=<major>.<minor>` overrides the NVN API version `nvnDeviceGetInteger` reports (by default decided by the SDK version or the profile's `device_api`: 55.15 for SDK 11 and later, 53.313 before)
+ DM_NVN_BARRIER	switch	How draw passes are ordered: `full` (default) waits for all earlier GPU work, `game` only for the previous pass's fragment stage unless the game set a barrier, `ab` alternates with the `DM_AB` phases
+ DM_NVN_BC_ALIAS	diagnostic	Set 0 to send copies to an uncompressed alias instead of its block-compressed storage, for an A/B check; default 1
+@@ -206,6 +208,7 @@ DM_NVN_TEXINFO	diagnostic	`=<W>x<H>` logs storage and description of every textu
+ DM_NVN_TEXRAW	diagnostic	`=<serial>,…` or `info` (the textures `DM_NVN_TEXINFO` picked out): saves those textures' raw bytes at the `DM_NVN_TEXDUMP` frame, with a text header line
+ DM_NVN_TEXSNAP	diagnostic	`=<in-frame pass index>,…`: with `DM_NVN_TEXDUMP`, copies those passes' colour attachments as they end and saves them with the end-of-frame dump
+ DM_NVN_TREG_ID	diagnostic	`=<n>` logs every registration of texture ID n: what it holds from then on, and the frame being recorded
++DM_NVN_TRILINEAR	player	`=1`: samplers that pick the nearest mip level (LINEAR_MIPMAP_NEAREST) blend between levels instead, so no line shows where the level changes; off by default
+ DM_NVN_TSV	diagnostic	`=<path>` writes the per-frame NVN call table and timing rows (frame, metric, value) to a TSV, read by `scripts/bench.py`
+ DM_NVN_TSV_CALLS	diagnostic	`0` makes `DM_NVN_TSV` write only the timing rows, without the call counts (about two thirds of the file)
+ DM_NVN_UB	diagnostic	`="name=item,…;…"`: alternating measurement in one run; odd phases of `DM_NVN_UB_N` frames (default 180) take one category in turn (`@set:<global>=<value>` or dropped shader keys) and log present times

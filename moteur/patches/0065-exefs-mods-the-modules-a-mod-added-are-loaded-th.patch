@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 12:19:14 +0000
+Subject: [PATCH] ExeFS mods: the modules a mod added are loaded though main's
+ build row omits them
+
+Upstream now loads the modules of the profile's build row for main's build ID (Mario Kart World's versions differ in modules). The row of a derived profile is made from the ExeFS before the mods, so Tears of the Kingdom Online's subsdk4 was rewritten and packed but never loaded ("modules of main's build 9b4e43650501a4d4: main subsdk0 sdk (the profile lists 4)"): no online. A profile module missing from the row whose rewrite is in the folder is loaded too, in the profile's order.
+
+Upstream-Status: fork-only
+Reason: TOTK Online and SMO Online inactive after the move to nxnative eed7c42
+Issue: LNPANDY/NX2Apple#214
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dm/host/main.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/dm/host/main.c b/dm/host/main.c
+index 6617759..0bf95bb 100644
+--- a/dm/host/main.c
++++ b/dm/host/main.c
+@@ -5,6 +5,7 @@
+ #include <CoreFoundation/CoreFoundation.h>
+ #include <stdatomic.h>
+ #include <sys/resource.h>
++#include <sys/stat.h>
+ #include <sys/sysctl.h>
+ #include <sys/time.h>
+ #include <unistd.h>
+@@ -85,6 +86,10 @@ static int profile_modules(const char *dir, const char **names) {
+             const char *s = strstr(rows[r].mods, all[k]); size_t l = strlen(all[k]);
+             while (s && !((s == rows[r].mods || s[-1] == ' ') && (!s[l] || s[l] == ' '))) s = strstr(s + 1, all[k]);
+             if (s) names[n++] = all[k];
++            else {   // NX2Apple: not in the build's row but rewritten here: a module an ExeFS mod added (Tears of the Kingdom Online's subsdk4, Super Mario Odyssey: Online's subsdk1)
++                char mp[1024]; struct stat mst; snprintf(mp, sizeof mp, "%s/%s.patched.bin", dir, all[k]);
++                if (!stat(mp, &mst)) { names[n++] = all[k]; LOG("module %s: not in main's build row, loaded since an ExeFS mod added it (%s)", all[k], mp); }
++            }
+         }
+         if (n < DM_GAME_NMOD) LOG("modules of main's build %.16s: %s (the profile lists %d)", bid, rows[r].mods, DM_GAME_NMOD);
+         return n;

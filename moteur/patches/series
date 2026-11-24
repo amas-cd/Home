@@ -1,0 +1,13 @@
+# Applied in this order onto the commit in ../.upstream-ref with git am -3. See README.md.
+0056-rendering-forced-anisotropy-and-trilinear-filter.patch
+0057-exefs-mods-exlaunch-modules-on-the-mac-host-totk.patch
+0058-online-play-network-account-nickname-dm-nick-sof.patch
+0059-game-profiles-tears-of-the-kingdom-1-2-1-frame-s.patch
+0063-exefs-mods-the-mods-of-engine-exefs-mods-title-i.patch
+0064-online-play-one-takeover-of-nn-socket-getpeernam.patch
+0065-exefs-mods-the-modules-a-mod-added-are-loaded-th.patch
+0066-software-keyboard-dm-kbd-first-answers-a-session.patch
+0067-mac-front-end-dm-screen-main-opens-the-game-on-t.patch
+0069-mac-front-end-dm-fullscreen-2-borderless-window.patch
+0070-audio-host-gain-for-a-launcher-dm-volume.patch
+0071-build-from-build-rebuild-from-a-build-folder-wit.patch

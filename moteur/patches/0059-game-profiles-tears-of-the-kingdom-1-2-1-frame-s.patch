@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: t <t@t>
+Date: Mon, 9 Nov 2026 07:37:36 +0000
+Subject: [PATCH] Game profiles: Tears of the Kingdom 1.2.1 frame step and
+ UltraCam cuts, Super Mario Odyssey 1.0.0 DisplayList heap
+
+Super Mario Odyssey part only since the move to nxnative 7ffa63cc: Tears of the Kingdom is played through MacNativeGames, and upstream now places TOTK's frame step by its functions.
+
+Upstream-Status: fork-only
+Reason: the versions the online mods need, which upstream does not register
+Issue: LNPANDY/NX2Apple#214
+---
+ dm/games/0100000000010000/patches.py | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+ create mode 100644 dm/games/0100000000010000/patches.py
+
+diff --git a/dm/games/0100000000010000/patches.py b/dm/games/0100000000010000/patches.py
+new file mode 100644
+index 0000000..72dcfa1
+--- /dev/null
++++ b/dm/games/0100000000010000/patches.py
+@@ -0,0 +1,17 @@
++# Super Mario Odyssey (0100000000010000): the rewriter's patches of this game's own builds (dm/tools/patch_nso.py "Registered patches")
++
++CUTS = {
++    # 1.0.0 (main 3ca12dfa…, the build Super Mario Odyssey Online needs): the graphics system's setup (function around main+0x8786c8) creates the GPU heaps ModelUBO (29 MB),
++    # DisplayList (62 MB, main+0x878730: orr w2, wzr, #0x3e00000, then main+0xa4fdf4) and ShaderOptionUBO (3 MB). The host's command records are larger than the driver's, and with
++    # the online mod's other players the DisplayList heap filled while a kingdom loaded: every display list set up after that got the null pool, took a host-lent 4 KB segment that
++    # nothing reclaims, and after about 11 minutes the host aborted at 1 GB (FATAL NVN command memory; 260,000 segments, as 1.4.1 before its record sizes were cut, README).
++    # 124 MB took the room StageScene::init then needed in the same parent heap (sead::FrameHeap::tryCreate for an audio reverb unit halted, HaltWithDetail): 78 MB, +16
++    '3ca12dfaaf9c82da064d1698df79cda1': [
++        (0x878730, 'e2130b32', '029ca052', 'DisplayList GPU heap 62 MB → 78 MB (orr w2, wzr, #0x3e00000 → movz w2, #0x4e0, lsl #16): room for the host\'s larger command records'),
++    ],
++}
++
++BINDING = [
++    {'what': 'DisplayList GPU heap 62 MB → 78 MB', 'now': 'build', 'goal': 'game', 'purpose': 'memory',
++     'why': 'the heap size is an immediate in the graphics setup of each build; 1.4.1 fits since its record sizes were cut, 1.0.0 with the online mod did not (Mac, 2026-11-06)'},
++]

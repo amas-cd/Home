@@ -1,0 +1,63 @@
+# Construit Home.app sur un Mac de GitHub et publie une release.
+# - Un tag v* (ex. v0.1.0) : release « Home 0.1.0 » avec Home.zip, que Home télécharge pour se mettre à jour.
+# - « Run workflow » à la main, ou un push sur main : construction seule, l'app est gardée 7 jours dans les artefacts du run.
+name: Construire Home
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  construire:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          xcrun swiftc --version
+
+      - name: Compiler Home.app
+        env:
+          HOME_BUILD_ONLY: ${{ github.workspace }}/dist
+          HOME_VERSION: ${{ steps.version.outputs.version }}
+        run: bash app/salon-construire.command < /dev/null
+
+      - name: Journal de compilation
+        if: always()
+        run: '[ -f app/compilation.log ] && grep -E "error:|warning: unre" app/compilation.log | head -100 || true'
+
+      - name: Archive
+        run: |
+          cd dist
+          ditto -c -k --keepParent Home.app Home.zip
+          shasum -a 256 Home.zip | tee Home.zip.sha256
+
+      - name: Garder l'app (artefact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Home-${{ steps.version.outputs.version }}
+          path: dist/Home.zip
+          retention-days: 7
+
+      - name: Publier la release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/Home.zip dist/Home.zip.sha256 \
+            --title "Home ${{ steps.version.outputs.version }}" --generate-notes

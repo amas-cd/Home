@@ -1,0 +1,933 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 01:16:41 +0000
+Subject: [PATCH] ExeFS mods: exlaunch modules on the Mac host (TOTK Online,
+ UltraCam)
+
+Several added modules placed after main; QueryMemory reports Horizon's regions for host memory and a stand-in rtld; GetSystemTick in x0; MapProcessMemory writable aliases of code; the derived profile kept across builds with mods; programs dumped on the Mac (shader_dumps) join the shader split.
+
+Upstream-Status: fork-only
+Reason: exlaunch based mods (Tears of the Kingdom Online, UltraCam) on the Mac
+Issue: LNPANDY/NX2Apple#214
+---
+ dm/gfx/tools/shader_split.py  |  11 ++
+ dm/host/dm.h                  |   2 +
+ dm/host/hle_fs.c              |   6 +
+ dm/host/hle_svc.c             | 173 ++++++++++++++++++++++++-
+ dm/host/loader.c              | 235 +++++++++++++++++++++++++++++++++-
+ dm/tools/exefs_mod.py         | 216 +++++++++++++++++++++++++++++++
+ dm/tools/patch_nso.py         |  27 ++--
+ scripts/build_ipa_from_nsp.py |  47 ++++++-
+ 8 files changed, 703 insertions(+), 14 deletions(-)
+ create mode 100644 dm/tools/exefs_mod.py
+ mode change 100755 => 100644 scripts/build_ipa_from_nsp.py
+
+diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
+index 78e2fcd..842385e 100644
+--- a/dm/gfx/tools/shader_split.py
++++ b/dm/gfx/tools/shader_split.py
+@@ -3142,6 +3142,17 @@ def main():
+         names = sorted(f for f in os.listdir(ued) if f.endswith('.ushaderbytecode') and not f.startswith('._')) if os.path.isdir(ued) else []   # AppleDouble metadata, not decoded shader archives
+         if not names and uepak.unreal_paks(romfs, inline=False, mains=[mainnso]): red(f'the RomFS has Unreal paks, but there are no decoded shader code archives in {ued} (the NSP script writes them)')
+         for nm in names: found += ue_shaders(open(os.path.join(ued, nm), 'rb').read(), f'/ue_shaders/{nm}')
++        # Programs dumped on the Mac (DM_NVN_SHDUMP: <key>.ctl + <key>.code) that no game file holds: <version dir>/shader_dumps, or DM_SHADER_DUMPS. Tears of the Kingdom Online's
++        # ImGui (the names over the players, their icons on the map, the chat) draws with a vertex and a pixel program that live in the mod's subsdk4, whose relocated records
++        # raw_shaders cannot follow. Each is checked as the other readers' programs are; none is paired (no prebuilt pipeline: built on first use)
++        sdd = os.environ.get('DM_SHADER_DUMPS') or os.path.join(os.path.dirname(os.path.abspath(romfs)), 'shader_dumps')
++        for nm in (sorted(f[:-4] for f in os.listdir(sdd) if f.endswith('.ctl')) if os.path.isdir(sdd) else []):
++            cp = os.path.join(sdd, nm + '.code')
++            if not os.path.isfile(cp): continue
++            ctl, code = open(os.path.join(sdd, nm + '.ctl'), 'rb').read(), open(cp, 'rb').read()
++            st = glslc_stage(ctl, code) if CTL_MAGIC not in code else None
++            if st and not check(f'/shader_dumps/{nm}', st, ctl, code): found.append((f'/shader_dumps/{nm}', st, ctl, code))
++            else: print(f'[RED] /shader_dumps/{nm}: not a program the readers take; left out', flush=True)
+         results.append(('main', {skey(c, k): (w, s, c, k) for w, s, c, k in found}, var_pairs(found), {}))
+     for romfs in dlc_v:
+         name = os.path.basename(os.path.normpath(romfs))
+diff --git a/dm/host/dm.h b/dm/host/dm.h
+index 847a990..4da3abe 100644
+--- a/dm/host/dm.h
++++ b/dm/host/dm.h
+@@ -81,6 +81,8 @@ typedef struct {
+     uint32_t nro_size;         // an NRO's file size (header +0x18), the bytes the hash covers
+     uint8_t *pristine; size_t pristine_len;   // an NRO's initialized data as rewritten; reload restores this and zeroes its bss
+     unsigned loads;            // how many times the game loaded it
++    uint64_t place_main_off;   // ExeFS mods (dm/tools/exefs_mod.py, PLACE_MAIN_OFF): map this module at this offset from main's base, the distance the mod's IPS branches were moved to; 0 = anywhere
++    uint8_t *place_res;        // that address range, reserved right after main is mapped (Mac)
+ } module_t;
+ 
+ extern module_t *g_mod;         // allocated once from the NSO list and NRO manifest; module addresses stay stable
+diff --git a/dm/host/hle_fs.c b/dm/host/hle_fs.c
+index 7f40189..678c966 100644
+--- a/dm/host/hle_fs.c
++++ b/dm/host/hle_fs.c
+@@ -646,6 +646,12 @@ HLE_FORCE("_ZN2nn2fs21GetUtf16PathLengthMaxEPbPmPKc", "fsp-srv; host mounts have
+ HLE_FORCE("_ZN2nn2fs26GetUtf16EntryNameLengthMaxEPbPmPKc", "fsp-srv; host mounts have no UTF-16 entry name limit", Result, h_fs_GetUtf16EntryNameLengthMax, uint8_t *limited, uint64_t *out, const char *path) {
+     (void)path; *limited = 0; *out = 0x300; return RES_OK;
+ }
++// SD card (an exlaunch mod's own files: Tears of the Kingdom Online): the host folder <temporary storage>_sdcard, created on mount
++HLE_FORCE("_ZN2nn2fs11MountSdCardEPKc", "fsp-srv; SD card → host directory", Result, h_fs_MountSd, const char *name) {
++    char t[1024], b[1100]; snprintf(b, sizeof b, "%s_sdcard", envdir("DM_TEMP", "run/platform/temp", t, sizeof t));
++    mkdir(b, 0755);
++    return mount(name, b, 0);
++}
+ HLE_FORCE("_ZN2nn2fs21MountTemporaryStorageEPKc", "fsp-srv; temporary storage → host directory", Result, h_fs_MountTemp, const char *name) {
+     char b[1024]; return mount(name, envdir("DM_TEMP", "run/platform/temp", b, sizeof b), 0);
+ }
+diff --git a/dm/host/hle_svc.c b/dm/host/hle_svc.c
+index e87442e..c7b9f30 100644
+--- a/dm/host/hle_svc.c
++++ b/dm/host/hle_svc.c
+@@ -801,6 +801,121 @@ static void *regions_thread(void *arg) {
+ 
+ int svc_thread(int num, uint64_t *regs);   // hle_thread.c: thread and synchronization kind
+ 
++
++#include <TargetConditionals.h>
++// ---------- MapProcessMemory / UnmapProcessMemory (0x74 / 0x75) on the process's own code ----------
++// exlaunch based mods (Tears of the Kingdom Online's subsdk4) map an RW view of a module's code (svcMapProcessMemory at an address
++// virtmem picked at 4 KB granularity) and write their hooks through it. Apple's 16 KB pages cannot alias two ranges whose offsets
++// differ modulo 16 KB, so the view is a copy (as MapMemory does): the guest's writes into it are found by comparing with a snapshot
++// and carried into the code through a writable alias of the module (the pages the game executes; then the instruction cache is
++// invalidated). Synced after every module's DT_INIT, on unmap, and every 250 ms by a thread.
++#if !TARGET_OS_IPHONE
++#include <mach/mach_vm.h>
++#include <libkern/OSCacheControl.h>
++typedef struct { uint64_t rw, ro, size; uint8_t *snap; } pmirror_t;
++static pmirror_t g_pm[256]; static int g_npm;
++static pthread_mutex_t g_pm_mu = PTHREAD_MUTEX_INITIALIZER;
++static struct { uint8_t *base, *alias; size_t size; } g_pal[16]; static int g_npal;
++static uint8_t *pm_alias(uint8_t *a) {   // caller holds g_pm_mu
++    module_t *m = module_of(a); if (!m) return NULL;
++    for (int i = 0; i < g_npal; i++) if (g_pal[i].base == m->base) return a >= g_pal[i].base && a < g_pal[i].base + g_pal[i].size ? g_pal[i].alias + (a - g_pal[i].base) : NULL;
++    if (g_npal == 16) return NULL;
++    long pg = sysconf(_SC_PAGESIZE); if (pg <= 0) pg = 0x4000;
++    uint64_t size = ((uint64_t)m->size + (uint64_t)pg - 1) & ~((uint64_t)pg - 1);
++    mach_vm_address_t dst = 0; vm_prot_t cur = 0, mx = 0;
++    if (mach_vm_remap(mach_task_self(), &dst, size, 0, VM_FLAGS_ANYWHERE, mach_task_self(), (mach_vm_address_t)(uintptr_t)m->base, FALSE, &cur, &mx, VM_INHERIT_SHARE)) return NULL;
++    if (mach_vm_protect(mach_task_self(), dst, size, 0, VM_PROT_READ | VM_PROT_WRITE)) { mach_vm_deallocate(mach_task_self(), dst, size); return NULL; }
++    g_pal[g_npal].base = m->base; g_pal[g_npal].alias = (uint8_t *)(uintptr_t)dst; g_pal[g_npal].size = size; g_npal++;
++    LOG("process memory: writable alias of %s for a mod's code writes", m->name);
++    return a < m->base + size ? (uint8_t *)(uintptr_t)dst + (a - m->base) : NULL;
++}
++static void pm_sync_one(pmirror_t *p, unsigned long *n, unsigned long *lost) {   // caller holds g_pm_mu
++    // Word by word (an aligned 32-bit store): an instruction is never seen half written. The first writes are logged as module+offset,
++    // to check them against the rewriter's changed words (main.changed.tsv) when a hook misbehaves
++    static int logged;
++    uint8_t *rw = (uint8_t *)(uintptr_t)p->rw, *ro = (uint8_t *)(uintptr_t)p->ro;
++    for (uint64_t blk = 0; blk < p->size; blk += 0x1000) {
++        uint64_t end = blk + 0x1000 < p->size ? blk + 0x1000 : p->size;
++        if (!memcmp(rw + blk, p->snap + blk, end - blk)) continue;
++        for (uint64_t o = blk & ~3ull; o + 4 <= end; o += 4) {
++            uint32_t now, was; memcpy(&now, rw + o, 4); memcpy(&was, p->snap + o, 4);
++            if (now == was) continue;
++            uint8_t *w = pm_alias(ro + o);
++            if (w && !((uintptr_t)w & 3)) {
++                __atomic_store_n((uint32_t *)w, now, __ATOMIC_RELEASE); sys_icache_invalidate(ro + o, 4); (*n) += 4;
++                if (logged < 64) { module_t *m = module_of(ro + o); logged++; LOG("process memory: mod write %s+%#llx: %08x -> %08x", m ? m->name : "?", (unsigned long long)(m ? (uint64_t)(ro + o - m->base) : (uint64_t)(uintptr_t)(ro + o)), was, now); }
++            } else (*lost) += 4;
++            memcpy(p->snap + o, &now, 4);
++        }
++    }
++}
++uint8_t *dm_code_alias(uint8_t *a) { pthread_mutex_lock(&g_pm_mu); uint8_t *w = pm_alias(a); pthread_mutex_unlock(&g_pm_mu); return w; }   // loader.c setup_autoload_list
++void dm_pmirror_sync(void) {
++    unsigned long n = 0, lost = 0; static unsigned long total;
++    pthread_mutex_lock(&g_pm_mu);
++    for (int i = 0; i < g_npm; i++) pm_sync_one(&g_pm[i], &n, &lost);
++    pthread_mutex_unlock(&g_pm_mu);
++    if (n || lost) { total += n; LOG("process memory: %lu byte(s) of a mod's code writes carried into the code (%lu in all)%s", n, total, lost ? ", some outside any module were dropped" : ""); }
++}
++// The hooks come in the mod's DT_INIT (synced right after it); later writes (its Python plugins' code patcher) are rare: every 250 ms is enough and keeps the
++// comparison of the views (about 90 MB, all of main, sdk, subsdk0 and the mod) off the game's cores
++static void *pm_thread(void *arg) { (void)arg; for (;;) { usleep(250000); dm_pmirror_sync(); } return NULL; }
++#else
++void dm_pmirror_sync(void) {}
++uint8_t *dm_code_alias(uint8_t *a) { (void)a; return NULL; }
++#endif
++
++// A stand-in rtld for exlaunch mods that find the loaded modules by walking the address space: UltraCam's InitMemLayout queries from address 0 and takes each
++// Code RX, Code R, CodeData RW run for a module, the first for rtld and the second for main, as on Horizon where rtld is loaded below main. The host loads no rtld:
++// UltraCam took main for rtld and itself (the module after main) for main, added a game offset to its own base and aborted on a null vtable entry
++// (exl::hook::nx64::Hook "hook != 0", subsdk3+0x794e8). With an ExeFS mod loaded (PLACE_MAIN_OFF), QueryMemory reports below the lowest module three 4 KB regions,
++// Code RX, Code R, CodeData RW, on a zeroed page of their own. Mods that read the module list instead (Tears of the Kingdom Online, g_pAutoLoadList) see no change. DM_FAKE_RTLD=0 turns it off
++static uint64_t fake_rtld_base(void) {
++    static int done; static uint64_t fr;
++    if (done) return fr;
++    done = 1;
++    const char *e = getenv("DM_FAKE_RTLD"); if (e && !strcmp(e, "0")) return 0;
++    uint64_t lo = 0; int mods = 0;
++    for (int i = 0; i < g_nmod; i++) {
++        if (!g_mod[i].base || g_mod[i].nro) continue;
++        if (g_mod[i].place_main_off) mods++;
++        uint64_t b = (uint64_t)(uintptr_t)g_mod[i].base + (g_mod[i].patch_off < 0 ? (uint64_t)g_mod[i].patch_off : 0);
++        if (!lo || b < lo) lo = b;
++    }
++    if (!mods || lo < 0x1000000) return 0;
++    // UltraCam also scans each module's code for byte patterns, so the page is real (zeroes). A hint below the lowest module found no room (the 16 MB below main are taken,
++    // and a hint that is taken makes the kernel look upward): on macOS the highest free page below it is found from the task's region list and allocated there (VM_FLAGS_FIXED fails, never replaces)
++#if !TARGET_OS_IPHONE
++    {
++        mach_vm_address_t a = 0x100000000ull; uint64_t best = 0;
++        while (a < lo) {
++            mach_vm_address_t r = a; mach_vm_size_t rs = 0; vm_region_basic_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj = MACH_PORT_NULL;
++            kern_return_t kr = mach_vm_region(mach_task_self(), &r, &rs, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &cnt, &obj);
++            uint64_t top = kr == KERN_SUCCESS && r < lo ? (uint64_t)r : lo;   // the free run [a, top) before the next region
++            if (top >= a + 0x4000) best = (top - 0x4000) & ~0x3FFFull;
++            if (kr != KERN_SUCCESS || r + rs >= lo || r + rs <= a) break;
++            a = r + rs;
++        }
++        vm_address_t va = (vm_address_t)best;
++        if (best && vm_allocate(mach_task_self(), &va, 0x4000, VM_FLAGS_FIXED) == KERN_SUCCESS) fr = (uint64_t)va;
++    }
++#endif
++    for (uint64_t d = 0x4000; d <= 0x1000000 && !fr; d += 0x4000) {
++        void *pg = mmap((void *)(uintptr_t)(lo - d), 0x4000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
++        if (pg == MAP_FAILED) continue;
++        if ((uint64_t)(uintptr_t)pg + 0x4000 <= lo) fr = (uint64_t)(uintptr_t)pg; else munmap(pg, 0x4000);
++    }
++    if (fr) LOG("process memory: a stand-in rtld at %#llx below the lowest module, on a zeroed page of its own, for exlaunch mods that walk the address space (DM_FAKE_RTLD=0 turns it off)", (unsigned long long)fr);
++    else {
++        // No free page below it: the host's executable, dyld and the libraries fill the address space up to main (Tears of the Kingdom with UltraCam on a MacBook Air M5, no 16 KB hole
++        // from 0x100000000 to main). The stand-in is then only reported, on the 16 KB just below the lowest module: UltraCam reads module 0's addresses, never its bytes
++        // (its pattern scans read the sdk, the last module), and what is there is the host's own memory
++        fr = (lo - 0x4000) & ~0x3FFFull;
++        LOG("process memory: a stand-in rtld reported at %#llx, below the lowest module, with no page of its own (none free below it), for exlaunch mods that walk the address space (DM_FAKE_RTLD=0 turns it off)", (unsigned long long)fr);
++    }
++    return fr;
++}
++
+ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+     { void hlecount_svc(int); hlecount_svc(num); }   // DM_HLECOUNT: svc counts by number
+     mem_init();
+@@ -847,6 +962,39 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+         pthread_mutex_unlock(&g_map_lock);
+         regs[0] = busy ? 0xD401 : 0; return 0;
+     }
++#if !TARGET_OS_IPHONE
++    case 0x74: {  // MapProcessMemory(dst, process, src, size): an RW copy of the process's own code at dst (see the helpers above)
++        uint64_t dst = regs[0], src = regs[2], size = regs[3];
++        if (!size || ((dst | src | size) & 0xfff) || !dm_guest_as_contains((uintptr_t)dst) || !module_of((void *)(uintptr_t)src)) {
++            LOG("[RED] MapProcessMemory refused: %#llx <- %#llx +%#llx (only a module's own pages into the guest address space)", (unsigned long long)dst, (unsigned long long)src, (unsigned long long)size);
++            regs[0] = 0xD401; return 0; }
++        pthread_mutex_lock(&g_map_lock);
++        if (map_find(dst, size) || g_nmap == MAX_MAP) { pthread_mutex_unlock(&g_map_lock); regs[0] = 0xD401; return 0; }
++        uint64_t mask = (size_t)getpagesize() - 1, lo = dst & ~mask, hi = (dst + size + mask) & ~mask;
++        if (mprotect((void *)lo, hi - lo, PROT_READ | PROT_WRITE)) die("MapProcessMemory mprotect errno=%d", errno);
++        dm_guest_write_prepare((void *)lo, hi - lo);
++        memcpy((void *)dst, (void *)src, size);
++        map_add(dst, size, 0, 0x0B);
++        pthread_mutex_unlock(&g_map_lock);
++        pthread_mutex_lock(&g_pm_mu);
++        if (g_npm < 256) { uint8_t *snap = malloc(size); memcpy(snap, (void *)src, size); g_pm[g_npm++] = (pmirror_t){dst, src, size, snap}; }
++        static int started; if (!started) { started = 1; pthread_t t; pthread_create(&t, NULL, pm_thread, NULL); pthread_detach(t); }
++        pthread_mutex_unlock(&g_pm_mu);
++        LOG("MapProcessMemory %#llx <- %s+%#llx +%#llx", (unsigned long long)dst, module_of((void *)(uintptr_t)src)->name, (unsigned long long)(src - (uint64_t)module_of((void *)(uintptr_t)src)->base), (unsigned long long)size);
++        regs[0] = 0; return 0;
++    }
++    case 0x75: {  // UnmapProcessMemory(dst, process, src, size)
++        uint64_t dst = regs[0], size = regs[3];
++        dm_pmirror_sync();
++        pthread_mutex_lock(&g_pm_mu);
++        for (int i = 0; i < g_npm; i++) if (g_pm[i].rw == dst && g_pm[i].size == size) { free(g_pm[i].snap); g_pm[i] = g_pm[--g_npm]; break; }
++        pthread_mutex_unlock(&g_pm_mu);
++        pthread_mutex_lock(&g_map_lock);
++        int k = map_find(dst, size); if (k && g_map[k - 1].base == dst) map_del(k - 1);
++        pthread_mutex_unlock(&g_map_lock);
++        regs[0] = 0; return 0;
++    }
++#endif
+     case 0x04: {  // MapMemory(dst, src, size): when creating a thread the SDK moves the stack on the heap into the stack region
+         uint64_t dst = regs[0], src = regs[1], size = regs[2];
+         uint32_t result = map_arguments(dst, src, size);
+@@ -943,7 +1091,25 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+             uint64_t top = (uint64_t)pthread_get_stackaddr_np(pthread_self()), ssz = pthread_get_stacksize_np(pthread_self());
+             if (addr < top && addr >= top - ssz) { base = top - ssz; size = ssz; state = 0xB/*Stack*/; perm = 3; }
+             // Other host memory: report "free, no permissions" (the 4 KiB page around it) as Horizon does for unmapped addresses. It used to report Code+RX, and GetExceptionInfo walking back from main merged on through host memory down to 0
+-            else { base=addr & ~0xFFFull; size=0x1000; state=0/*Free*/; perm=0; } }
++            // Free host memory is reported as one region up to the next module or the guest address space above it (to the end of the address space when there is none:
++            // base + size wraps to 0), as Horizon reports a gap. exlaunch mods walk the whole address space region by region (addr = base + size until it wraps): UltraCam's
++            // startup walked host memory 4 KB at a time, about 36 million queries a second for minutes, and the game stayed on a grey screen
++            else {
++                uint64_t hi = 0, fr = fake_rtld_base();
++                for (int i = 0; i < g_nmod; i++) {
++                    if (!g_mod[i].base) continue;
++                    uint64_t b = (uint64_t)(uintptr_t)g_mod[i].base + (g_mod[i].patch_off < 0 ? (uint64_t)g_mod[i].patch_off : 0);
++                    if (b > addr && (!hi || b < hi)) hi = b;
++                }
++                if ((uint64_t)(uintptr_t)g_as > addr && (!hi || (uint64_t)(uintptr_t)g_as < hi)) hi = (uint64_t)(uintptr_t)g_as;
++                if (fr && addr >= fr && addr < fr + 0x3000) {   // the stand-in rtld (fake_rtld_base): text, rodata, data
++                    uint64_t k = (addr - fr) >> 12;
++                    base = fr + (k << 12); size = 0x1000; state = k == 2 ? 4/*CodeData*/ : 3/*Code*/; perm = k == 0 ? 5 : k == 1 ? 1 : 3;
++                } else {
++                    if (fr && fr > addr && (!hi || fr < hi)) hi = fr;
++                    base = addr & ~0xFFFull; size = hi - base; state = 0/*Free*/; perm = 0;
++                }
++            } }
+         map_source_query(addr, &base, &size, &attr, &perm);
+         pthread_mutex_unlock(&g_map_lock);
+         if (mi) {
+@@ -1024,7 +1190,10 @@ uint64_t svc_dispatch(int num, uint64_t *regs, uint64_t orig_addr) {
+         if (regs[0] & 0x80000000ull) return 0;   // notification only, can continue
+         _exit(42);
+     }
+-    case 0x1E: guest_clock_read_wait(); regs[0] = 0; regs[1] = guest_ticks(); return 0;   // GetSystemTick
++    // GetSystemTick: Horizon returns the tick in x0 (no result code; libnx and the SDK's svc stub are "svc 0x1e; ret" returning u64). It used to answer x0 = 0, x1 = tick:
++    // the SDK reads cntpct_el0 and never noticed, but exlaunch mods seed their RNG from svcGetSystemTick. UltraCam's virtmem random address finder (subsdk3+0x83250)
++    // drew the same candidate from seed 0 forever (0x7088e81000, inside the alias region) and TOTK stayed on a grey screen. x1 keeps the tick too
++    case 0x1E: { guest_clock_read_wait(); uint64_t t = guest_ticks(); regs[0] = t; regs[1] = t; return 0; }
+     case 0x27: {  // OutputDebugString(str, len)
+         if (g_flag.dbg) fprintf(stderr, "[guest] %.*s\n", (int)regs[1], (char *)regs[0]);
+         regs[0] = 0; return 0;
+diff --git a/dm/host/loader.c b/dm/host/loader.c
+index da3a970..07e79f6 100644
+--- a/dm/host/loader.c
++++ b/dm/host/loader.c
+@@ -2,6 +2,7 @@
+ // The code area (original text and patch area) is set to read-only+execute as soon as it is copied in, and from then on the loader only writes data: on iOS these two blocks must be embedded as is as signed code segments.
+ #include "dm.h"
+ #include <TargetConditionals.h>
++#include <libkern/OSCacheControl.h>
+ #include <fcntl.h>
+ #include <errno.h>
+ #include <sys/mman.h>
+@@ -265,6 +266,7 @@ static void read_layout(module_t *m, const char *dir) {
+         else if (!strcmp(key, "RO_OFF")) m->ro_off = v;
+         else if (!strcmp(key, "DATA_OFF")) m->data_off = v;
+         else if (!strcmp(key, "FPS_STATE_OFF")) m->fps_state_off = v;
++        else if (!strcmp(key, "PLACE_MAIN_OFF")) m->place_main_off = v;   // an ExeFS mod's added module (build_ipa_from_nsp.py apply_exefs_mods)
+         else if (!strcmp(key, "UE_MALLOC_VT")) m->ue_malloc_vt = v;
+         else if (!strcmp(key, "UE_MALLOC_SLOT")) m->ue_malloc_slot = (unsigned)v;
+         else if (!strcmp(key, "FPS_TARGET_PTR")) m->fps_target_ptr = v;
+@@ -800,7 +802,7 @@ static void map_image(module_t *m, const char *dir) {
+         if (sz < fl + bl) die("%s is shorter than FILE_IMAGE_LEN %#llx + BACK_LEN %#llx", path, (unsigned long long)fl, (unsigned long long)bl);
+         m->size = m->image_size; m->patch_len = (sz - bl - fl + 0x3FFF) & ~0x3FFFull;
+         if (m->patch_len > pre) die("%s patch area of %#llx bytes does not fit in the %#llx before the base", path, (unsigned long long)m->patch_len, (unsigned long long)pre);
+-        uint8_t *slot = jit_slot(m, m->size, pre);
++        uint8_t *slot = m->place_res ? m->place_res + pre : jit_slot(m, m->size, pre);   // a placed module (ExeFS mod) goes over its reservation, else the jit layout's slot
+         uint8_t *a = mmap(slot ? slot - pre : NULL, pre + m->size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | (slot ? MAP_FIXED : 0), -1, 0);
+         if (a == MAP_FAILED) die("%s mmap %#llx", m->name, (unsigned long long)(pre + m->size));
+         m->base = a + pre;
+@@ -814,7 +816,7 @@ static void map_image(module_t *m, const char *dir) {
+         return;
+     }
+     m->size = (sz + 0x3FFF) & ~0x3FFFull;
+-    uint8_t *slot = jit_slot(m, m->size, 0);
++    uint8_t *slot = m->place_res ? m->place_res : jit_slot(m, m->size, 0);   // a placed module (ExeFS mod) goes over its reservation
+     m->base = mmap(slot, m->size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | (slot ? MAP_FIXED : 0), -1, 0);
+     if (m->base == MAP_FAILED) die("%s mmap", m->name);
+     memcpy(m->base, raw, sz); free(raw); install_key_page(m);
+@@ -825,6 +827,43 @@ static void map_image(module_t *m, const char *dir) {
+ }
+ #endif
+ 
++// ExeFS mods (dm/tools/exefs_mod.py): a module a mod adds (Super Mario Odyssey: Online's subsdk1) is reached from main by B / BL the mod's IPS patches wrote at a fixed distance,
++// and branches back the same way, as Horizon lays the modules out one after the other. The build moved those branches to PLACE_MAIN_OFF (Horizon's distance rounded to 16 KB);
++// right after main is mapped, its range is reserved here, so no other module or allocation takes it, and map_image maps the module over the reservation
++static void reserve_places(const char *dir) {
++    module_t *mm = &g_mod[0];
++    uint8_t *placed_end = NULL;   // the end of the last module placed "right after main": two exlaunch mods (Tears of the Kingdom Online's subsdk4 and UltraCam's subsdk3) go one after the other
++    for (int i = 1; i < g_mod_capacity; i++) {
++        module_t *m = &g_mod[i];
++        if (!m->place_main_off || !m->name[0]) continue;
++        if (strcmp(mm->name, "main")) die("%s: placed at an offset from main (PLACE_MAIN_OFF), but the first module is %s", m->name, mm->name);
++#if TARGET_OS_IPHONE
++        (void)dir; die("%s: ExeFS mods with added modules (PLACE_MAIN_OFF) are not supported on iOS yet", m->name);
++#else
++        uint64_t pre = m->patch_off < 0 ? (uint64_t)-m->patch_off : 0, len = m->image_size;
++        if (m->patch_off >= 0) {
++            char path[1024]; struct stat st; snprintf(path, sizeof path, "%s/%s.patched.bin", dir, m->name);
++            if (stat(path, &st)) die("stat %s", path);
++            len = ((uint64_t)st.st_size + 0x3FFF) & ~0x3FFFull;
++        }
++        uint8_t *main_end = mm->base + mm->size;
++        // PLACE_MAIN_OFF 1: no fixed distance to keep, only nearness: right after main's image and patch area (an exlaunch module's hooks
++        // branch between main and the module with B, ±128 MB: a module mapped anywhere was sometimes too far and its hook setup aborted)
++        if (m->place_main_off == 1) { uint8_t *after = placed_end > main_end ? placed_end : main_end; m->place_main_off = (((uint64_t)(after - mm->base) + 0x3FFF) & ~0x3FFFull) + ((pre + 0x3FFF) & ~0x3FFFull); }
++        uint8_t *want = mm->base + m->place_main_off - pre;
++        if (m->place_main_off % 0x4000) die("%s: PLACE_MAIN_OFF %#llx is not on a 16 KB page", m->name, (unsigned long long)m->place_main_off);
++        if (want < main_end) die("%s: placed at main+%#llx, but main with its patch area reaches main+%#llx: the rewritten main is larger than Horizon's layout leaves room for",
++                                 m->name, (unsigned long long)m->place_main_off, (unsigned long long)(main_end - mm->base));
++        void *r = mmap(want, pre + len, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);   // a hint, not MAP_FIXED: never over a mapping that is already there
++        if (r != want) die("%s: cannot reserve main+%#llx (%#llx bytes): the range is taken (got %p)", m->name, (unsigned long long)m->place_main_off, (unsigned long long)(pre + len), r);
++        m->place_res = want;
++        { uint64_t span = len > m->image_size ? len : m->image_size; uint8_t *e = want + pre + ((span + 0x3FFF) & ~0x3FFFull) + 0x100000; if (e > placed_end) placed_end = e; }   // its image with bss, and 1 MB of room
++        { void dm_net_default(int); dm_net_default(1); }   // hle_net.c: a mod that brings code (Super Mario Odyssey: Online) is the kind that talks to a server
++        LOG("%s: placed at main+%#llx (ExeFS mod, PLACE_MAIN_OFF)", m->name, (unsigned long long)m->place_main_off);
++#endif
++    }
++}
++
+ static char g_module_dir[1024];   // the folder the modules were loaded from (dm_module_dir)
+ const char *dm_module_dir(void) { return g_module_dir; }
+ 
+@@ -845,7 +884,7 @@ void load_modules(const char *dir, const char **names, int n) {
+     for (int i = 0; i < n; i++) {
+         module_t *m = &g_mod[i];
+         t = now_ns(); map_image(m, dir); tm += now_ns() - t;   // On return the code area is already read-only+execute; from here on the loader only writes data
+-        if (!i) tsd_check();
++        if (!i) { tsd_check(); reserve_places(dir); }
+         t = now_ns(); parse_dynamic(m); tp += now_ns() - t;
+         t = now_ns(); register_gates(m, dir); tg += now_ns() - t;
+         LOG("%s: base %p size %#zx", names[i], m->base, m->size);
+@@ -861,13 +900,203 @@ void load_modules(const char *dir, const char **names, int n) {
+                              tm / 1e6, tp / 1e6, tg / 1e6, tr / 1e6, (now_ns() - t0) / 1e6);
+ }
+ 
++// rtld's auto load list (nn::ro::detail::g_pAutoLoadList): a circular list of ModuleObject (rtld 6.x layout, 0xD0 bytes) behind a
++// sentinel { front, back }. exlaunch based mods (Tears of the Kingdom Online's subsdk4) define the pointer themselves and walk it in
++// their DT_INIT to find the loaded modules (module_base at +0x20); on Horizon rtld fills it. Built only when a module that is not
++// main / sdk defines the symbol and it is still null, so a game whose SDK owns the symbol sees nothing new.
++uint8_t *dm_code_alias(uint8_t *a);
++// A jump to the host at code address def (written through the module's writable alias): movz / movk x16 with the address, then br x16.
++// No PC-relative instruction, so a mod that hooks the same function (exlaunch copies its first instructions into a trampoline) copies
++// them as they are; an ldr x16, #8 literal made exlaunch's relocator overflow its buffer (bounds check, brk at subsdk4+0xa9a50)
++static void host_jump_words(uint32_t *t, void *host) {
++    uint64_t h = (uint64_t)(uintptr_t)host;
++    t[0] = 0xD2800010u | (uint32_t)(h & 0xffff) << 5; t[1] = 0xF2A00010u | (uint32_t)(h >> 16 & 0xffff) << 5;
++    t[2] = 0xF2C00010u | (uint32_t)(h >> 32 & 0xffff) << 5; t[3] = 0xF2E00010u | (uint32_t)(h >> 48 & 0xffff) << 5; t[4] = 0xD61F0200u;
++}
++static int jump_to_host(uint8_t *def, void *host) {
++    uint8_t *w = dm_code_alias(def); if (!w) return 0;
++    uint32_t t[5]; host_jump_words(t, host); memcpy(w, t, 20); sys_icache_invalidate(def, 20); return 1;
++}
++typedef struct { const char *name; uint8_t *def; void *host; uint32_t first; } forced_def;
++static forced_def *g_forced; static int g_nforced, g_capforced;
++
++// After an exlaunch module's DT_INIT: the taken-over SDK functions it hooked by their place in the SDK, not by name (Tears of the Kingdom
++// Online hooks nvnBootstrapLoader at sdk+0x4900b0 for its renderer). main was bound to the host's version, so the hook never ran and the
++// mod aborted on a null device. For each such function: the instruction after the hook (where the mod's trampoline comes back, having run
++// the first instruction it copied) gets the undo of that first instruction and a jump to the host, and the other modules' imports of the
++// function are bound to its definition: the game's calls go through the mod's hook and end in the host
++static void hook_forced(module_t *mod) {
++    int hooked = 0, odd = 0, rebound = 0;
++    for (int f = 0; f < g_nforced; f++) {
++        forced_def *fd = &g_forced[f];
++        uint32_t now = *(uint32_t *)fd->def;
++        if (now == fd->first || (now >> 26) != 0x05) continue;   // untouched, or not a B
++        int64_t imm = now & 0x3ffffff; if (imm & 0x2000000) imm -= 0x4000000;
++        uint8_t *tgt = fd->def + imm * 4;
++        if (tgt < mod->base || tgt >= mod->base + mod->size) continue;   // a branch somewhere else: not this mod's hook
++        uint32_t w0 = fd->first, undo = 0; int need = 1;
++        if ((w0 & 0xFFC003E0u) == 0xA98003E0u) {   // stp xA, xB, [sp, #-N]!: add sp, sp, #N
++            int64_t i7 = (w0 >> 15) & 0x7f; if (i7 & 0x40) i7 -= 0x80; int64_t n = -i7 * 8;
++            if (n > 0 && n < 4096) undo = 0x910003FFu | (uint32_t)n << 10; else need = -1;
++        } else if ((w0 & 0xFF8003FFu) == 0xD10003FFu) {   // sub sp, sp, #imm{, lsl 12}: add sp, sp, the same
++            undo = 0x910003FFu | (w0 & 0x003FFC00u);
++        } else if (w0 == 0xD503201Fu || (w0 >> 26) == 0x05 || (w0 & 0xFC000000u) == 0x94000000u) {
++            need = (w0 >> 26) == 0x05 || (w0 & 0xFC000000u) == 0x94000000u ? -1 : 0;   // nop: nothing to undo; a branch as first instruction: give up
++        } else {
++            uint32_t rd = w0 & 0x1f;   // anything else: fine if it writes no callee-saved register and not sp
++            need = (rd >= 19 && rd <= 30) || rd == 31 ? -1 : 0;
++        }
++        if (need < 0) { odd++; LOG("[RED] %s: the mod hooked it (sdk+%#llx), first instruction %08x not undoable here: the hook's original ends in the SDK's own code", fd->name, (unsigned long long)(fd->def - (module_of(fd->def) ? module_of(fd->def)->base : fd->def)), w0); continue; }
++        uint32_t t[6]; int n = 0; if (need) t[n++] = undo; host_jump_words(t + n, fd->host); n += 5;
++        uint8_t *at = fd->def + 4, *w = dm_code_alias(at); if (!w) continue;
++        memcpy(w, t, n * 4); sys_icache_invalidate(at, n * 4); hooked++;
++        for (int k = 0; k < g_nmod; k++) {
++            module_t *d = &g_mod[k]; if (d == mod || d->nro || (fd->def >= d->base && fd->def < d->base + d->size)) continue;
++            relocs_t rl = relocs_of(d);
++            for (int tt = 0; tt < 2; tt++)
++                for (uint64_t ri = 0; ri < rl.n[tt]; ri++) {
++                    const Elf64_Rela *r = &rl.tab[tt][ri]; uint32_t type = (uint32_t)ELF64_R_TYPE(r->r_info), si = (uint32_t)ELF64_R_SYM(r->r_info);
++                    if (!si || (type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_GLOB_DAT && type != R_AARCH64_ABS64)) continue;
++                    if (d->symtab[si].st_shndx || strcmp(d->strtab + d->symtab[si].st_name, fd->name)) continue;
++                    *(uint64_t *)(d->base + r->r_offset) = (uint64_t)(uintptr_t)fd->def + (type == R_AARCH64_JUMP_SLOT ? 0 : (uint64_t)r->r_addend); rebound++;
++                }
++        }
++        LOG("%s: %s hooked by the mod at its definition: the game's calls now pass through the hook, its original ends in the host", mod->name, fd->name);
++    }
++    if (hooked || odd) LOG("%s: %d taken-over SDK function(s) it hooked by address, %d import(s) of the other modules bound through the hooks", mod->name, hooked, rebound);
++}
++
++static int g_rebind[16], g_nrebind;   // modules rebind_forced runs on after their DT_INIT
++static void setup_autoload_list(void) {
++    static const char *sym = "_ZN2nn2ro6detail15g_pAutoLoadListE";
++    void **want[16]; int nwant = 0;
++    for (int i = 0; i < g_nmod && nwant < 16; i++) {
++        module_t *m = &g_mod[i];
++        if (m->nro || !strcmp(m->name, "main") || !strcmp(m->name, "sdk")) continue;
++        void **p = module_sym(m, sym);
++        if (p && !*p) want[nwant++] = p;
++    }
++    if (!nwant) return;
++    uint8_t *sent = calloc(1, 16);
++    uint8_t *prev = sent;
++    int n = 0;
++    for (int i = 0; i < g_nmod; i++) {
++        module_t *m = &g_mod[i];
++        if (m->nro) continue;
++        // rtld keeps each module's ModuleObject in the module itself, where MOD0 points (+0x18 module object offset, in its bss):
++        // exlaunch finds itself in the list by comparing a node with its own __nx_module_runtime
++        uint32_t mod0 = *(uint32_t *)(m->base + 4);
++        int32_t mo_off = *(int32_t *)(m->base + mod0 + 0x18);
++        uint8_t *o = mo_off ? m->base + mod0 + mo_off : calloc(1, 0xD0);
++        memset(o, 0, 0xD0);
++        uint64_t hash = 0, pltrel = 7;
++        for (const Elf64_Dyn *d = m->dyn; d->d_tag; d++) switch (d->d_tag) {
++            case 23: *(uint64_t *)(o + 0x10) = (uint64_t)(m->base + d->d_un.d_ptr); break;   // DT_JMPREL
++            case 7:  *(uint64_t *)(o + 0x18) = (uint64_t)(m->base + d->d_un.d_ptr); break;   // DT_RELA
++            case 2:  *(uint64_t *)(o + 0x38) = d->d_un.d_val; break;                          // DT_PLTRELSZ
++            case 20: pltrel = d->d_un.d_val; break;                                           // DT_PLTREL
++            case 4:  hash = (uint64_t)(m->base + d->d_un.d_ptr); break;                       // DT_HASH
++            case 10: *(uint64_t *)(o + 0x70) = d->d_un.d_val; break;                          // DT_STRSZ
++            case 3:  *(uint64_t *)(o + 0x78) = (uint64_t)(m->base + d->d_un.d_ptr); break;   // DT_PLTGOT
++            case 8:  *(uint64_t *)(o + 0x80) = d->d_un.d_val; break;                          // DT_RELASZ
++            case 0x6ffffff9: *(uint64_t *)(o + 0x98) = d->d_un.d_val; break;                  // DT_RELACOUNT
++        }
++        *(uint64_t *)(o + 0x20) = (uint64_t)m->base;
++        *(uint64_t *)(o + 0x28) = (uint64_t)m->dyn;
++        *(uint8_t *)(o + 0x30) = pltrel == 7;
++        if (m->init) *(uint64_t *)(o + 0x40) = (uint64_t)(m->base + m->init);
++        if (m->fini) *(uint64_t *)(o + 0x48) = (uint64_t)(m->base + m->fini);
++        if (hash) {
++            uint32_t nb = ((uint32_t *)hash)[0], nc = ((uint32_t *)hash)[1];
++            *(uint64_t *)(o + 0x50) = hash + 8; *(uint64_t *)(o + 0x58) = hash + 8 + 4ull * nb;
++            *(uint64_t *)(o + 0xA0) = nc; *(uint64_t *)(o + 0xA8) = nb;
++        }
++        *(uint64_t *)(o + 0x60) = (uint64_t)m->strtab;
++        *(uint64_t *)(o + 0x68) = (uint64_t)m->symtab;
++        *(uint64_t *)(prev + 0) = (uint64_t)o;      // prev->next
++        *(uint64_t *)(o + 8) = (uint64_t)prev;      // o->prev
++        prev = o; n++;
++    }
++    *(uint64_t *)(prev + 0) = (uint64_t)sent;       // last->next = sentinel
++    *(uint64_t *)(sent + 8) = (uint64_t)prev;       // sentinel.back = last
++    for (int k = 0; k < nwant; k++) *want[k] = sent;
++    for (int i = 0; i < g_nmod && g_nrebind < 16; i++) { void **q = module_sym(&g_mod[i], sym); for (int k = 0; k < nwant; k++) if (q == want[k]) g_rebind[g_nrebind++] = i; }
++    LOG("rtld auto load list: %d module objects for %d module(s) that read nn::ro::detail::g_pAutoLoadList", n, nwant);
++    // Such a module binds its imports again itself through this list (exlaunch's rtld::lookup_global_auto), past the host's take-overs
++    // (HLE_FORCE): nn::hid::InitializeTouchScreen then ran the SDK's own code, which connects to a hid service the host does not serve.
++    // So the definitions those imports find are sent to the host: each taken-over function an exlaunch module imports gets, at its
++    // definition in the other modules, a jump to the host's version (movz / movk x16; br x16). nn::os stays native (the SDK's own
++    // locks and threads work on the host, and the SDK calls them everywhere).
++    uint8_t *dm_code_alias(uint8_t *a);
++    int redirected = 0, small = 0;
++    for (int i = 0; i < g_nmod; i++) {
++        module_t *m = &g_mod[i];
++        if (m->nro || !strcmp(m->name, "main") || !strcmp(m->name, "sdk")) continue;
++        void **p = module_sym(m, sym); if (!p) continue;
++        for (unsigned j = 1; j < m->nsym; j++) {
++            const Elf64_Sym *u = &m->symtab[j]; if (u->st_shndx) continue;
++            const char *nm = m->strtab + u->st_name;
++            if (!strncmp(nm, "_ZN2nn2os", 9)) continue;
++            void *host = force_lookup(nm); if (!host) continue;
++            for (int k = 0; k < g_nmod; k++) {
++                module_t *d = &g_mod[k]; if (d == m || d->nro || !d->symh) continue;
++                for (unsigned h = sym_hash(nm) & d->symh_mask; d->symh[h]; h = (h + 1) & d->symh_mask) {
++                    const Elf64_Sym *ds = &d->symtab[d->symh[h]];
++                    if (strcmp(d->strtab + ds->st_name, nm)) continue;
++                    if (ds->st_size < 20) { small++; break; }
++                    uint8_t *def = d->base + ds->st_value;
++                    if (jump_to_host(def, host)) redirected++;
++                    break;
++                }
++            }
++        }
++    }
++    if (redirected || small) LOG("rtld auto load list: %d taken-over function(s) the mod imports redirected to the host at their definitions%s", redirected, small ? " (some too short to redirect)" : "");
++    // The SDK's taken-over functions, with their first instruction as it is now: after the mod's DT_INIT, hook_forced finds the ones it hooked
++    module_t *sdk = NULL;
++    for (int i = 0; i < g_nmod; i++) if (!strcmp(g_mod[i].name, "sdk")) sdk = &g_mod[i];
++    if (sdk && sdk->symh) {
++        for (unsigned j = 1; j < sdk->nsym; j++) {
++            const Elf64_Sym *ds = &sdk->symtab[j];
++            if (!ds->st_shndx || !ds->st_value || (ds->st_info & 0xf) != 2 /*STT_FUNC*/ || ds->st_size < 28) continue;
++            const char *nm = sdk->strtab + ds->st_name;
++            if (!strncmp(nm, "_ZN2nn2os", 9)) continue;
++            void *host = force_lookup(nm); if (!host) continue;
++            if (g_nforced == g_capforced) { g_capforced = g_capforced ? g_capforced * 2 : 256; g_forced = realloc(g_forced, g_capforced * sizeof *g_forced); }
++            uint8_t *def = sdk->base + ds->st_value;
++            g_forced[g_nforced++] = (forced_def){nm, def, host, *(uint32_t *)def};
++        }
++    }
++}
++
++// After an exlaunch module's DT_INIT bound its imports again (see setup_autoload_list), its taken-over imports point back to the host:
++// what the definition redirect cannot cover (a definition shorter than the 16-byte jump: nn::account::Initialize).
++static void rebind_forced(module_t *m) {
++    relocs_t rl = relocs_of(m); int n = 0;
++    for (int t = 0; t < 2; t++)
++        for (uint64_t i = 0; i < rl.n[t]; i++) {
++            const Elf64_Rela *r = &rl.tab[t][i]; uint32_t type = (uint32_t)ELF64_R_TYPE(r->r_info), si = (uint32_t)ELF64_R_SYM(r->r_info);
++            if (!si || (type != R_AARCH64_JUMP_SLOT && type != R_AARCH64_GLOB_DAT && type != R_AARCH64_ABS64)) continue;
++            const char *nm = m->strtab + m->symtab[si].st_name;
++            if (!strncmp(nm, "_ZN2nn2os", 9)) continue;
++            void *host = force_lookup(nm); if (!host) continue;
++            uint64_t v = (uint64_t)(uintptr_t)host + (type == R_AARCH64_JUMP_SLOT ? 0 : (uint64_t)r->r_addend);
++            uint64_t *where = (uint64_t *)(m->base + r->r_offset);
++            if (*where != v) { *where = v; n++; }
++        }
++    if (n) LOG("%s: %d taken-over import(s) it had bound to the SDK again point back to the host", m->name, n);
++}
++
+ // Plays the role of rtld's InitModules (rtld+0x830): call each module's DT_INIT in forward order of the load list.
+ // The timing is decided by nn::init::Start: after nninitStartup and _init_libc2, before nnMain (the 4th argument callback of Start).
+ void run_module_inits(void) {
++    setup_autoload_list();
+     for (int i = 0; i < g_nmod; i++) {
+         module_t *m = &g_mod[i];
+         if (!m->init || m->nro) continue;   // an NRO's init runs when the game loads it (hle_ro.c)
+         LOG("%s: DT_INIT +%#llx (init_array %llu entries)", m->name, m->init, m->init_arraysz / 8);
+         ((void (*)(void))(m->base + m->init))();
++        { void dm_pmirror_sync(void); dm_pmirror_sync(); }   // a mod's hooks written through an RW view during its DT_INIT (hle_svc.c)
++        for (int k = 0; k < g_nrebind; k++) if (g_rebind[k] == i) { rebind_forced(m); hook_forced(m); }
+     }
+ }
+diff --git a/dm/tools/exefs_mod.py b/dm/tools/exefs_mod.py
+new file mode 100644
+index 0000000..1920328
+--- /dev/null
++++ b/dm/tools/exefs_mod.py
+@@ -0,0 +1,216 @@
++#!/usr/bin/env python3
++"""Applies ExeFS mods (Atmosphère layout or emulator layout) to an extracted ExeFS, before the rewrite: IPS / IPS32 patches named after a module's build ID, and added or
++replaced code modules (subsdk1 for Starlight / exlaunch based mods such as Super Mario Odyssey: Online).
++
++Usage: exefs_mod.py <ExeFS dir> <out dir> <mod dir> [<mod dir> ...]
++Writes <out dir> as a copy of the ExeFS with the mods applied (patched modules as uncompressed NSOs with their hash flags cleared, as for a modified main on the Switch), and
++<out dir>/exefs_mod.json: {"added": [modules the profile does not list yet], "place": {module: offset from main's base}}.
++
++Placement. Horizon loads the modules one after the other from main (main, subsdk0, subsdk1, ..., sdk), each at its image size (text, ro, data and bss) rounded to 4 KB, and a mod's
++IPS patches branch from main straight into the module it adds (a BL at a fixed distance), and the added module branches back into main the same way. The host maps every module on
++its own, at 16 KB pages, so it cannot keep Horizon's distance when that is not a multiple of 16 KB. So an added module gets a place: its offset from main's base, Horizon's distance
++rounded up to 16 KB; every B / BL in the IPS patches whose target falls inside the added module, and every B / BL of the added module whose target falls outside of it, is moved by
++the difference. The host (loader.c) maps the module at that offset from main (the PLACE_MAIN_OFF row the build adds to its fixups.tsv). The targets are checked: a branch out of
++main must land inside an added module, a branch out of an added module must land in main's text, else the mod was made for another build and this stops."""
++import json, os, shutil, struct, sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parent))
++import nso
++
++PAGE, HOST_PAGE, NSO_HEADER = 0x1000, 0x4000, 0x100
++MODULE_NAMES = ['main'] + [f'subsdk{i}' for i in range(10)] + ['sdk']
++
++
++def align(v, a): return (v + a - 1) // a * a
++
++
++def mod_exefs_dirs(mod, title_id):
++    """The folders of one mod that hold ExeFS files: <mod>/exefs, Atmosphère's contents/<id>/exefs, Atmosphère's exefs_patches/<name>/ and the mod folder's own subfolders that have them"""
++    out = []
++    for c in [mod / 'exefs', mod / 'atmosphere/contents' / title_id / 'exefs', mod / 'contents' / title_id / 'exefs']:
++        if c.is_dir(): out.append(c)
++    for root in (mod / 'atmosphere/exefs_patches', mod / 'exefs_patches'):
++        if root.is_dir(): out += [p for p in sorted(root.iterdir()) if p.is_dir()]
++    if not out:   # a mod folder that wraps the mod once more (SMO_Online_v1/SMOO/exefs)
++        for sub in sorted(p for p in mod.iterdir() if p.is_dir()):
++            out += mod_exefs_dirs(sub, title_id)
++    return out
++
++
++def read_ips(path):
++    """[(image offset, bytes)] of an IPS or IPS32 file (offsets in the file count from the NSO header, which the image does not have)"""
++    d = path.read_bytes()
++    if d[:5] == b'PATCH': w, end = 3, b'EOF'; at = 5
++    elif d[:5] == b'IPS32': w, end = 4, b'EEOF'; at = 5
++    else: raise SystemExit(f'[RED] {path}: not an IPS / IPS32 patch')
++    recs = []
++    while d[at:at + len(end)] != end:
++        if at + w + 2 > len(d): raise SystemExit(f'[RED] {path}: cut short')
++        off = int.from_bytes(d[at:at + w], 'big'); n = int.from_bytes(d[at + w:at + w + 2], 'big'); at += w + 2
++        if n: data = d[at:at + n]; at += n
++        else: rle = int.from_bytes(d[at:at + 2], 'big'); data = d[at + 2:at + 3] * rle; at += 3
++        if off < NSO_HEADER: raise SystemExit(f'[RED] {path}: a patch at {off:#x} writes the NSO header')
++        recs.append((off - NSO_HEADER, data))
++    return recs
++
++
++def branch_target(word, pc):
++    """Target of a B / BL at pc, None for any other instruction"""
++    if word & 0x7C000000 != 0x14000000: return None
++    imm = word & 0x3FFFFFF
++    if imm & 0x2000000: imm -= 0x4000000
++    return pc + imm * 4
++
++
++def with_target(word, pc, target):
++    d = (target - pc) // 4
++    if not -0x2000000 <= d < 0x2000000: raise SystemExit(f'[RED] a branch at {pc:#x} cannot reach {target:#x} after the move')
++    return (word & 0xFC000000) | (d & 0x3FFFFFF)
++
++
++def image_span(m):
++    """Horizon's size of a module: the end of its last segment plus bss, rounded to 4 KB"""
++    return align(max(o + s for o, s in m.segments) + m.bss, PAGE)
++
++
++def write_nso(path, src, m):
++    """An uncompressed NSO of module m: the original header (build ID, module name, dynamic info), each segment stored at its size, compression and hash flags cleared"""
++    h = bytearray(src[:NSO_HEADER])
++    struct.pack_into('<I', h, 0xc, 0)
++    at, body = NSO_HEADER, bytearray()
++    for i, (mo, sz) in enumerate(m.segments):
++        struct.pack_into('<III', h, 0x10 + i * 0x10, at, mo, sz)
++        struct.pack_into('<I', h, 0x60 + i * 4, sz)
++        body += m.image[mo:mo + sz]; at += sz
++    path.write_bytes(bytes(h) + bytes(body))
++
++
++def lock_sead_heaps(m, name):
++    """sead::ExpHeap::create(..., enableLock) calls of an added module with enableLock = false (mov w5, #0 before the BL to its PLT stub) get true. On the Switch a mod's threads
++    and the game's main thread share core 0, so they never run at once and a heap without a lock is safe there (Super Mario Odyssey: Online's ClientHeap, used by its socket threads
++    and by the main thread); the host runs every guest thread on a host thread of its own, at the same time, and such a heap corrupted its free list (a crash in
++    sead::ExpHeap::pushToFreeList_ from Client::sendGameInfPacket). Returns the number of calls changed"""
++    img = m.image
++    try:
++        mod0 = struct.unpack_from('<I', img, 4)[0]; dyn = mod0 + struct.unpack_from('<i', img, mod0 + 4)[0]
++        tags, i = {}, 0
++        while True:
++            t, v = struct.unpack_from('<qQ', img, dyn + i * 16); i += 1
++            if t == 0: break
++            tags.setdefault(t, v)
++        symtab, strtab, jmprel, pltsz = tags[6], tags[5], tags[23], tags[2]
++    except (KeyError, struct.error): return 0
++    def sym(si):
++        n = struct.unpack_from('<I', img, symtab + si * 24)[0]; return bytes(img[strtab + n:img.index(b'\0', strtab + n)]).decode('latin1')
++    slots = {off for off, info, _ in (struct.unpack_from('<QQq', img, jmprel + k * 24) for k in range(pltsz // 24)) if sym(info >> 32).startswith('_ZN4sead7ExpHeap6createE')}
++    if not slots: return 0
++    stubs = set()
++    for o in range(0, m.text_end - 4, 4):
++        w = struct.unpack_from('<I', img, o)[0]
++        if w & 0x9F00001F != 0x90000010: continue   # adrp x16
++        imm = (w >> 29 & 3) | ((w >> 5 & 0x7FFFF) << 2)
++        if imm & 0x100000: imm -= 0x200000
++        w2 = struct.unpack_from('<I', img, o + 4)[0]
++        if w2 & 0xFFC003FF == 0xF9400211 and (o & ~0xFFF) + (imm << 12) + (w2 >> 10 & 0xFFF) * 8 in slots: stubs.add(o)   # ldr x17, [x16, #slot]
++    n = 0
++    for o in range(0, m.text_end, 4):
++        t = branch_target(struct.unpack_from('<I', img, o)[0], o)
++        if t not in stubs or struct.unpack_from('<I', img, o)[0] & 0xFC000000 != 0x94000000: continue
++        for b in range(1, 10):   # the w5 set up for this call
++            w = struct.unpack_from('<I', img, o - 4 * b)[0]
++            if w & 0x1F != 5: continue
++            if w in (0x52800005, 0x2A1F03E5): struct.pack_into('<I', img, o - 4 * b, 0x52800025); n += 1   # mov w5, #0 / mov w5, wzr -> mov w5, #1
++            break
++    if n: print(f'{name}: {n} sead::ExpHeap::create calls made thread-safe (enableLock = true): the host runs its threads at the same time as the game\'s')
++    return n
++
++
++def main(argv):
++    if len(argv) < 4: raise SystemExit(__doc__)
++    exefs, out, mods = Path(argv[1]), Path(argv[2]), [Path(a) for a in argv[3:]]
++    if out.exists(): shutil.rmtree(out)
++    shutil.copytree(exefs, out, copy_function=shutil.copy2)
++    title_id = os.environ.get('DM_TITLE_ID', '')
++    if not title_id:
++        try: title_id = '%016X' % struct.unpack_from('<Q', (exefs / 'main.npdm').read_bytes(), 0x290)[0]   # ACI0 program ID; only used to find Atmosphère folders
++        except OSError: pass
++    present = {n: out / n for n in MODULE_NAMES if (out / n).is_file()}
++    loaded = {n: nso.read(p) for n, p in present.items()}
++    bid = {n: m.build_id[:0x10].hex().upper() for n, m in loaded.items()}
++    patches, added = {}, []
++    for mod in mods:
++        dirs = mod_exefs_dirs(mod, title_id)
++        if not dirs: print(f'{mod}: no ExeFS files (a RomFS only mod is mounted by the launcher, DM_ROMFS_OVERLAY)'); continue
++        for d in dirs:
++            for f in sorted(d.iterdir()):
++                if f.suffix.lower() == '.ips':
++                    key = f.stem.upper()[:32].rstrip('0')
++                    hit = [n for n, b in bid.items() if key and b.startswith(key)]
++                    if not hit: print(f'{f}: names no module of this build ({", ".join(f"{n} {b}" for n, b in bid.items())}), left out'); continue
++                    patches.setdefault(hit[0], []).append(f); print(f'{f.name}: patches {hit[0]}')
++                elif f.name in MODULE_NAMES and f.name not in ('main', 'sdk', 'rtld'):
++                    if f.name not in present: added.append(f.name)
++                    shutil.copyfile(f, out / f.name); present[f.name] = out / f.name; loaded[f.name] = nso.read(out / f.name)
++                    print(f'{f.name}: {"added" if f.name in added else "replaced"} from {f}')
++                elif f.name.endswith('.pchtxt'): print(f'{f}: .pchtxt patches are not read yet, left out')
++    if not patches and not added: print('no ExeFS change'); json.dump({'added': [], 'place': {}}, open(out / 'exefs_mod.json', 'w')); return
++    # Horizon's layout from main, and the host's (each added module at a 16 KB multiple)
++    order = sorted(loaded, key=lambda n: MODULE_NAMES.index(n))
++    hz, at = {}, 0
++    for n in order:
++        hz[n] = at; at += image_span(loaded[n])
++    place = {n: align(hz[n], HOST_PAGE) for n in added}
++    span = {n: (hz[n], hz[n] + image_span(loaded[n])) for n in added}
++    def moved(t):   # (new target, module) of a Horizon target from main's base that falls in an added module
++        for n, (a, b) in span.items():
++            if a <= t < b: return t - hz[n] + place[n], n
++        return None, None
++    linked = {n: 0 for n in added}   # fixed-distance links between an added module and main (IPS branches into it, its branches / ADRP pages out of it)
++    for n, files in patches.items():
++        m = loaded[n]; img = m.image; base = hz[n]; nb = 0
++        for f in files:
++            for off, data in read_ips(f):
++                if off + len(data) > len(img): raise SystemExit(f'[RED] {f}: writes {off:#x}..{off + len(data):#x}, past {n}\'s image ({len(img):#x})')
++                data = bytearray(data)
++                for k in range(0, len(data) - 3, 4):
++                    if (off + k) % 4: break
++                    w = struct.unpack_from('<I', data, k)[0]; t = branch_target(w, off + k)
++                    if t is None or 0 <= t < len(img): continue
++                    nt, into = moved(base + t)
++                    if into is None: raise SystemExit(f'[RED] {f}: a branch at {n}+{off + k:#x} goes to {n}+{t:#x}, into no module the mod adds: the patch is for another build or layout')
++                    struct.pack_into('<I', data, k, with_target(w, off + k, nt - base)); nb += 1; linked[into] += 1
++                img[off:off + len(data)] = data
++        write_nso(present[n], (exefs / n).read_bytes(), m)
++        print(f'{n}: {sum(len(read_ips(f)) for f in files)} patch records applied, {nb} branches into added modules moved to the host layout')
++    main_text = loaded['main'].text_end
++    for n in added:
++        m = loaded[n]; img = m.image; lo, hi = 0, image_span(m); nb = 0
++        for off in range(0, m.text_end, 4):
++            w = struct.unpack_from('<I', img, off)[0]; t = branch_target(w, off)
++            if t is None or lo <= t < hi: continue
++            to_main = hz[n] + t
++            if not 0 <= to_main < main_text: raise SystemExit(f'[RED] {n}: a branch at +{off:#x} goes to main+{to_main:#x}, outside main\'s text ({main_text:#x}): the mod is for another build')
++            struct.pack_into('<I', img, off, with_target(w, off, to_main - place[n])); nb += 1
++        linked[n] += nb
++        # ADRP to a page outside the module (a fixed distance to main's data or code): only Horizon's layout keeps it right
++        adrp_out = 0
++        for off in range(0, m.text_end, 4):
++            w = struct.unpack_from('<I', img, off)[0]
++            if (w & 0x9F000000) != 0x90000000: continue
++            imm = ((w >> 29) & 3) | (((w >> 5) & 0x7FFFF) << 2)
++            if imm & (1 << 20): imm -= 1 << 21
++            t = (off & ~0xFFF) + (imm << 12)
++            if not lo <= t < ((hi + 0xFFF) & ~0xFFF): adrp_out += 1
++        linked[n] += adrp_out
++        lock_sead_heaps(m, n)
++        write_nso(present[n], present[n].read_bytes(), m)
++        print(f'{n}: Horizon places it at main+{hz[n]:#x}, the host at main+{place[n]:#x}; {nb} branches into main moved, {adrp_out} ADRP pages outside it')
++    for n in added:
++        if not linked[n]:   # nothing ties it to main by distance (an exlaunch module finds main at run time): only nearness, for its B hooks (±128 MB)
++            place[n] = 1; print(f'{n}: no fixed-distance link to main: the host maps it right after main (place 1)')
++    json.dump({'added': added, 'place': {n: hex(v) for n, v in place.items()}}, open(out / 'exefs_mod.json', 'w'))
++
++
++if __name__ == '__main__':
++    main(sys.argv)
+diff --git a/dm/tools/patch_nso.py b/dm/tools/patch_nso.py
+index c0594bb..d479215 100644
+--- a/dm/tools/patch_nso.py
++++ b/dm/tools/patch_nso.py
+@@ -73,6 +73,9 @@ else:
+     KEY_PAGE_OFF = (len(IMG) + 0x3FFF) & ~0x3FFF
+     IMG.extend(bytes(0x4000))
+     PATCH_OFF = (len(IMG) + 0xFFFF) & ~0xFFFF
++    # A main whose key page ends on a 64 KB boundary left no room for the frame step page (the page after the key page, FRAME_STEP): Tears of the Kingdom 1.2.1's main.
++    # 64 KB more before the patch area there (zero, like the gap other mains have)
++    if NAME == 'main' and PATCH_OFF < KEY_PAGE_OFF + 0x4000 + 0x40: PATCH_OFF += 0x10000
+     IMAGE_SIZE = BACK_OFF = 0   # only the layout with the patch area before the base has them
+ 
+ # ---- Registered patches of particular builds, keyed by NSO build ID: dm/tools/sdk_patches.py (Nintendo SDK module builds, which several games can ship) and dm/games/<id>/patches.py
+@@ -643,15 +646,23 @@ def rd(o, enc):
+     if app == 0x10: v += o
+     if app == 0x30: v += ehs
+     return v, sz
+-_, penc, cenc, tenc = IMG[ehs:ehs + 4]
+-o = ehs + 4
+-_, s = rd(o, penc); o += s
+-nfde, s = rd(o, cenc); o += s
+ starts = set()
+-for _ in range(nfde):
+-    a, s = rd(o, tenc); o += s
+-    _, s = rd(o, tenc); o += s
+-    starts.add(a)
++if struct.unpack_from('<i', IMG, m0 + 16)[0] != struct.unpack_from('<i', IMG, m0 + 20)[0] and IMG[ehs] == 1:
++    _, penc, cenc, tenc = IMG[ehs:ehs + 4]
++    o = ehs + 4
++    _, s = rd(o, penc); o += s
++    nfde, s = rd(o, cenc); o += s
++    for _ in range(nfde):
++        a, s = rd(o, tenc); o += s
++        _, s = rd(o, tenc); o += s
++        starts.add(a)
++else:
++    # No unwind table (MOD0's eh_frame_hdr range empty: a homebrew / Starlight module an ExeFS mod adds, Super Mario Odyssey: Online's subsdk1): the functions' starts are its
++    # defined dynamic function symbols, and the text's start
++    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
++    import nso_syms
++    starts = {0} | {off for off, _ in nso_syms.defined(IMG).values() if off < TEXT_END}
++    print(f'{sys.argv[3] if len(sys.argv) > 3 else "module"}: no eh_frame_hdr, {len(starts)} function starts from its dynamic symbols')
+ starts = sorted(x for x in starts if x < TEXT_END)
+ 
+ # ---- Linear scan to find all rewrite points (not relying on register read/write reports) ----
+diff --git a/scripts/build_ipa_from_nsp.py b/scripts/build_ipa_from_nsp.py
+old mode 100755
+new mode 100644
+index 83f0de2..bf1a8f9
+--- a/scripts/build_ipa_from_nsp.py
++++ b/scripts/build_ipa_from_nsp.py
+@@ -1060,6 +1060,12 @@ def derive_profile(g, pdir, ver, d, mods, app=None, shader_only=False):
+         try: kept = collections.Counter(r for r in rows((pdir / 'game.tsv').read_text(encoding='utf-8')) if r[0] in keys)
+         except (OSError, UnicodeError): kept = None
+         if kept == expected: return disp
++        # The module list may have grown since: the ExeFS mods stage adds the mods' modules to it (apply_exefs_mods, which also takes out those of a mod no longer given).
++        # Compared as written, every build with an ExeFS mod derived the profile again, then ran the address region check and the whole shader split again
++        # (Tears of the Kingdom 1.2.1 with TOTK Online and UltraCam, Super Mario Odyssey 1.0.0 with its Online mod: minutes a build)
++        def mods_of(c): return [set(r[1].split()) for r in c.elements() if r[0] == 'modules' and len(r) > 1]
++        def but_mods(c): return collections.Counter({r: n for r, n in c.items() if r[0] != 'modules'})
++        if kept is not None and len(mods_of(kept)) == 1 == len(mods_of(expected)) and mods_of(kept)[0] >= mods_of(expected)[0] and but_mods(kept) == but_mods(expected): return disp
+     rmtree(kf); pdir.mkdir(parents=True, exist_ok=True)
+     atomic_text(pdir / 'game.tsv', text)
+     for p in pdir.iterdir():
+@@ -1416,6 +1422,31 @@ def nro_modules(g, exe_dir, nros):
+     return set_keys(g, {'modules': (' '.join(mods), f'the NROs the game loads at run time import from {why}, which main does not')}, 'After the NRO collection')
+ 
+ 
++def stale_mod_modules(g, exe_dir, given=()):   # subsdk modules in a derived or provisional profile's list that neither the game's ExeFS nor the ExeFS mods given now have
++    return [n for n in g.words('modules') if re.fullmatch(r'subsdk\d+', n) and n not in given and not (exe_dir / n).exists()]
++
++
++def apply_exefs_mods(py, repo, exe_dir, out, mods, g, logs, env, unregistered, app):
++    """dm/tools/exefs_mod.py: the ExeFS with the mods applied into out; the modules they add go into the profile's module list (only a derived or provisional profile, which
++    lives outside the repository, is written). Returns (the modded ExeFS, the profile, {added module: its offset from main's base in the host})"""
++    for m in mods:
++        if not m.is_dir(): raise BuildError(f'ExeFS mod folder {m} does not exist')
++    if not unregistered:
++        raise BuildError('ExeFS mods change the code the registered builds were brought up on: pack a version the profile does not register (for Super Mario Odyssey: Online, the base game 1.0.0 alone, without the update)')
++    PROG.add(1); PROG.stage('ExeFS mods')
++    run([py, repo / 'dm/tools/exefs_mod.py', exe_dir, out, *mods], logs / 'exefs_mod.log', env=dict(env, DM_TITLE_ID=f'{app:016X}'))
++    info = json.loads((out / 'exefs_mod.json').read_text(encoding='utf-8'))
++    for line in (logs / 'exefs_mod.log').read_text(encoding='utf-8', errors='replace').splitlines(): say(f'ExeFS mod: {line}')
++    added = [n for n in info['added'] if n not in g.words('modules')]
++    stale = stale_mod_modules(g, exe_dir, info['added'])   # a module of a mod an earlier build was given (the derived profile is kept from build to build)
++    if added or stale:
++        mods_now = sorted((set(g.words('modules')) | set(added)) - set(stale), key=pg.load_order)
++        g = set_keys(g, {'modules': (' '.join(mods_now), f'ExeFS mods add {", ".join(added)} (dm/tools/exefs_mod.py)')}, 'ExeFS mods')
++        say(f'modules {" ".join(mods_now)}: the ExeFS mods add {", ".join(added)}')
++    PROG.end(', '.join(str(m.name) for m in mods))
++    return out, g, info['place']
++
++
+ def rewrite(py, repo, exe_dir, out, env, logs, g, provisional=False):
+     """patch_nso.py on every code module (each writes its own <module>.* files, all the same build_src.sha256 line), each with its log, as many at once as the Mac has cores.
+     The modules are the profile's and the NROs the game registers (collect_nros; nro.tsv beside them lists those); a provisional profile first gets the subsdks those NROs import from (nro_modules).
+@@ -2169,6 +2200,7 @@ def split_shaders(py, repo, roms, mains, pkg, env, logs, g, provisional=False, o
+             capture = Path(env.get(setting) or r.parent / folder)
+             inputs += [('stat', capture) if provisional else ('files', sorted(capture.glob(pattern)))]   # its files, not where it is: the same build reached through a moved folder or a link keeps its split
+     if env.get('DM_NRO_DIR'): inputs += [('files', sorted(Path(env['DM_NRO_DIR']).glob('*.nro')))]   # NROs captured from a boot (capture_nro)
++    inputs += [('files', sorted(f for r in roms for f in (r.parent / 'shader_dumps').glob('*.c*')))]   # programs dumped on the Mac that no game file holds (shader_split.py shader_dumps)
+     inputs += [item for r in dlc_roms for item in (('dlc', Path(r).name), ('stat', r))]   # DLC has no registered module build to pin its contents: include its index and re-extraction times, even when file sizes stay the same
+     if oodle:   # a host or rewriter fix can change what the game's decoder produces
+         PROG.set(step='building the Mac host for the game\'s Oodle decoder'); env = dict(env, **oodle())
+@@ -2817,6 +2849,7 @@ def parse_args(argv):
+     ap.add_argument('-l', '--language', help='game language, a code or a name: ja, fr, de, es, it, nl, pt, ru, ko, zh-Hans, zh-Hant, en-GB, fr-CA, es-419, pt-BR, Japanese, ... (default: the LANGUAGE setting, else English); '
+                     'it must be one the game supports, which the console lists')
+     ap.add_argument('--keep-extracted', action=argparse.BooleanOptionalAction, help='keep the extracted game files after the IPA is built, for the next build (default: the KEEP_EXTRACTED setting, on)')
++    ap.add_argument('--exefs-mod', action='append', metavar='DIR', help='an ExeFS mod folder (IPS patches named after a module\'s build ID, added subsdk modules; Atmosphère or emulator layout) applied before the rewrite; repeatable; also DM_EXEFS_MODS (paths separated by the path separator). Needs a derived or provisional profile (a version the profile does not register, e.g. the base game alone): dm/tools/exefs_mod.py')
+     ap.add_argument('--work-dir', help='the game\'s build folder, used as it is (default: the WORK_DIR setting, else <title ID>_build in the NSP folder); the extracted files, shader cache and temporary files live there, and the IPA or Mac app defaults to the folder holding it')
+     ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')
+     ap.add_argument('--gpu', help='NVN games: GPU architectures the app gets its pipeline archive for, made on this Mac with metal-tt, comma-separated: g18p (A19 / A19 Pro), or the name a device\'s log gives when the app has no archive for its GPU; '
+@@ -3126,8 +3159,20 @@ def main(args=None):
+         + (f'; the game\'s languages: {" ".join(have)}' if have else '; the control data lists no languages (not checked)') + (' (DM_LANG=<code> in the run command changes it)' if mac else ' (DM_LANG=<code> in the app\'s Documents/env.txt changes it)'))
+ 
+     patched = work / f'patched_{pkg_ver}'
+-    g = rewrite(py, repo, game / 'ExeFS', patched, env, logs, g, provisional)
++    exe_dir, places = game / 'ExeFS', {}
++    exefs_mods = [Path(p).expanduser() for p in (args.exefs_mod or []) + [p for p in os.environ.get('DM_EXEFS_MODS', '').split(os.pathsep) if p]]
++    if exefs_mods:   # ExeFS mods (Super Mario Odyssey: Online's Starlight module and IPS hooks): a modded copy of the ExeFS is what gets rewritten
++        exe_dir, g, places = apply_exefs_mods(py, repo, exe_dir, work / f'exefs_mod_{pkg_ver}', exefs_mods, g, logs, env, provisional or derived, app)
++    elif (provisional or derived) and (stale := stale_mod_modules(g, exe_dir)):   # built without the ExeFS mods an earlier build added to the kept profile
++        g = set_keys(g, {'modules': (' '.join(m for m in g.words('modules') if m not in stale), f'no ExeFS mod adds {", ".join(stale)} now')}, 'ExeFS mods')
++        say(f'modules {" ".join(g.words("modules"))}: no ExeFS mod adds {", ".join(stale)} now')
++    g = rewrite(py, repo, exe_dir, patched, env, logs, g, provisional)
+     if nd := captured_nros(patched): env = dict(env, DM_NRO_DIR=str(nd))
++    for fx in patched.glob('*.fixups.tsv'):   # the host maps an added module at this offset from main (loader.c PLACE_MAIN_OFF), the distance its IPS branches were moved to
++        n = fx.name[:-len('.fixups.tsv')]; text = fx.read_text(encoding='utf-8')
++        kept = ''.join(l for l in text.splitlines(True) if not l.startswith('# PLACE_MAIN_OFF'))   # a place from an earlier build goes, unless this one gives it again
++        if n in places: kept += f'# PLACE_MAIN_OFF\t{places[n]}\n'
++        if kept != text: atomic_text(fx, kept)
+     chain_header(py, repo, env, logs)   # before any host is built
+     if provisional or derived:   # the keys that need the rewritten modules, then (provisional) the heap check (both only change keys the host is built with, not the rewrite or the shader steps)
+         provisional_prep(py, repo, env, logs, g)

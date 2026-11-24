@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <anas@local>
+Date: Mon, 9 Nov 2026 12:34:35 +0000
+Subject: [PATCH] build: --from-build, rebuild from a build folder without the
+ NSPs (its extract/ is packed again)
+
+A launcher rebuilds a game (engine update, ExeFS mods) from the build folder alone: the extracted versions it keeps
+(extract/v<version>/ExeFS and RomFS.img) are the game, so neither the NSPs nor a copy of them have to be kept. Every
+build writes source.json (title ID, game name, versions) beside extract/ for it; an older folder takes --title-id.
+
+Upstream-Status: fork-only
+Reason: the Salon/Home launcher rebuilds games after an engine update or a mod change without keeping the NSPs
+Issue: Salon
+---
+ scripts/build_ipa_from_nsp.py | 72 +++++++++++++++++++++++++++--------
+ 1 file changed, 57 insertions(+), 15 deletions(-)
+
+diff --git a/scripts/build_ipa_from_nsp.py b/scripts/build_ipa_from_nsp.py
+index 97e91ad..326f76b 100644
+--- a/scripts/build_ipa_from_nsp.py
++++ b/scripts/build_ipa_from_nsp.py
+@@ -923,6 +923,31 @@ def work_dir(args):   # the build folder --work-dir / WORK_DIR names, used as gi
+     return Path(os.path.expanduser(w)).resolve() if w else None
+ 
+ 
++def scan_built(work, want=None):
++    """--from-build: the game in a build folder, without its NSPs. Every extract/v<version>/ that holds ExeFS/main and RomFS.img is that version of the game, already merged with its
++    update (extract): the family lists each as an update with nothing to extract, and no base game. The title ID is --title-id, else the one source.json records (write_source)"""
++    ex = work / 'extract'
++    vers = sorted((d.name for d in ex.iterdir() if re.fullmatch(r'v\d+', d.name) and (d / 'ExeFS' / 'main').exists() and (d / 'RomFS.img').is_file()), key=vnum) if ex.is_dir() else []
++    if not vers: raise BuildError(f'--from-build: no extracted game in {ex} (extract/v<version>/ with ExeFS/main and RomFS.img); build from the NSPs')
++    try: meta = json.loads((work / 'source.json').read_text(encoding='utf-8'))
++    except (OSError, ValueError): meta = {}
++    tid = want or meta.get('app')
++    if not tid: raise BuildError(f'--from-build: {work} does not say which title it holds (source.json, which builds write from now on): give --title-id')
++    return int(tid, 16), {'base': None, 'base_version': 0, 'updates': [(int(v[1:]), ex / v) for v in vers], 'dlc': [], 'built': work, 'meta': meta}
++
++
++def extract_built(ex, name):   # --from-build: the version is already extracted in the build folder
++    dst = ex / name
++    if not ((dst / 'ExeFS' / 'main').exists() and (dst / 'RomFS.img').is_file()): raise BuildError(f'--from-build: {name} is not extracted in {dst}; build from the NSPs')
++    PROG.stage(f'extract {name}'); say(f'reusing the extracted {name}: {dst} (no NSP needed)'); PROG.end('reused')
++    return dst
++
++
++def write_source(work, app, name, versions, gid):   # what --from-build needs to know of a build folder later: the title, the game name, the versions extracted
++    try: atomic_text(work / 'source.json', json.dumps({'app': f'{app:016X}', 'name': name, 'versions': list(versions), 'profile': gid}, indent=1) + '\n')
++    except OSError as e: say(f'source.json not written ({e}): --from-build will need --title-id')
++
++
+ def build_folder(args, nsp_dir, gid):
+     """The build folder of the game profile gid: --work-dir / WORK_DIR as given, else <NSP folder>/<gid>_build. A program packed with the application's first (in_programs, Super
+     Mario 3D All-Stars' games) gets <work dir>/programs/<gid>_build under --work-dir, as it gets its own <gid>_build without: in the one folder each program's extract/<version>/RomFS.img
+@@ -1335,6 +1360,9 @@ def extract_aoc(nx, keys, repo, work, app, fam, logs):
+     app + N, whose DLC are the application's). The host reports these indices as owned and mounts them (DM_AOC_DIR).
+     Returns None without DLC. Reused when the DLC NSPs (names, sizes and times) and nx_extract's sources are as at the last extraction (Monster Hunter Rise: 250 DLC, 30 s),
+     and aoc/ holds the files that extraction wrote (names, sizes and times): a NUP or a dump folder packs its DLC into the same aoc/"""
++    if fam.get('built'):   # --from-build: the DLC an earlier build extracted, as they are
++        aoc = work / 'aoc'
++        return aoc if aoc.is_dir() and any(aoc.iterdir()) else None
+     if not fam['dlc']: return None
+     if fam.get('nup'):
+         PROG.stage('unpack DLC', step='unpacking')
+@@ -2850,6 +2878,8 @@ def parse_args(argv):
+                     'it must be one the game supports, which the console lists')
+     ap.add_argument('--keep-extracted', action=argparse.BooleanOptionalAction, help='keep the extracted game files after the IPA is built, for the next build (default: the KEEP_EXTRACTED setting, on)')
+     ap.add_argument('--exefs-mod', action='append', metavar='DIR', help='an ExeFS mod folder (IPS patches named after a module\'s build ID, added subsdk modules; Atmosphère or emulator layout) applied before the rewrite; repeatable; also DM_EXEFS_MODS (paths separated by the path separator). Needs a derived or provisional profile (a version the profile does not register, e.g. the base game alone): dm/tools/exefs_mod.py')
++    ap.add_argument('--from-build', metavar='BUILD_FOLDER', help='rebuild from a build folder alone (<id>_build, the work folder of an earlier build), without the NSPs: the extracted game files it keeps '
++                    '(extract/v<version>/ExeFS and RomFS.img) are packed again, with the engine as it is now and the ExeFS mods given; the title comes from its source.json (written by every build) or --title-id')
+     ap.add_argument('--work-dir', help='the game\'s build folder, used as it is (default: the WORK_DIR setting, else <title ID>_build in the NSP folder); the extracted files, shader cache and temporary files live there, and the IPA or Mac app defaults to the folder holding it')
+     ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')
+     ap.add_argument('--gpu', help='NVN games: GPU architectures the app gets its pipeline archive for, made on this Mac with metal-tt, comma-separated: g18p (A19 / A19 Pro), or the name a device\'s log gives when the app has no archive for its GPU; '
+@@ -2979,13 +3009,19 @@ def main(args=None):
+     if romfs_mode == 'separate' and not keep: raise BuildError('--romfs separate requires --keep-extracted: the image must remain available for the one-time transfer to the phone')
+     shader_files = SHADER_FILES if args.shader_files is None else args.shader_files
+     if shader_files and (mac or prepare_xcode): raise BuildError('SHADER_FILES / --shader-files shapes the IPA for install tools that cannot copy a large file: it cannot be combined with ' + (f'--platform {platform}' if mac else '--prepare-xcode, which Xcode installs'))
+-    nsp_dir = Path(os.path.expanduser(args.nsp_dir or NSP_DIR or ask('NSP folder: ', 'the NSP folder'))).resolve()
+-    if not nsp_dir.exists(): raise BuildError(f'not a folder: {nsp_dir}')
+-    nup = nup_file(nsp_dir)   # a NUP file given in place of the folder: its folder is the NSP folder (the build folder and the IPA go there)
+-    if nsp_dir.is_file(): nsp_dir = nsp_dir.parent
+-    global NSP_FOLDER; NSP_FOLDER = nsp_dir
+-    dump = 'nup' if nup else 'folder' if dump_folder(nsp_dir) else None   # their files are not encrypted, so they need no keys
+-    keys = None if dump else Path(os.path.expanduser(args.keys or PROD_KEYS or ask('path of prod.keys: ', 'prod.keys (-k)'))).resolve()
++    built = Path(os.path.expanduser(args.from_build)).resolve() if args.from_build else None   # NX2Apple: rebuild from a build folder, no NSP
++    if built:
++        if not (built / 'extract').is_dir(): raise BuildError(f'--from-build: not a build folder (no extract/): {built}')
++        if args.nsp_dir: raise BuildError('--from-build takes the build folder in place of the NSP folder: give one or the other')
++        args.work_dir = str(built); nsp_dir, nup, dump = built.parent, None, None
++    else:
++        nsp_dir = Path(os.path.expanduser(args.nsp_dir or NSP_DIR or ask('NSP folder: ', 'the NSP folder'))).resolve()
++        if not nsp_dir.exists(): raise BuildError(f'not a folder: {nsp_dir}')
++        nup = nup_file(nsp_dir)   # a NUP file given in place of the folder: its folder is the NSP folder (the build folder and the IPA go there)
++        if nsp_dir.is_file(): nsp_dir = nsp_dir.parent
++        global NSP_FOLDER; NSP_FOLDER = nsp_dir
++        dump = 'nup' if nup else 'folder' if dump_folder(nsp_dir) else None   # their files are not encrypted, so they need no keys
++    keys = None if dump or built else Path(os.path.expanduser(args.keys or PROD_KEYS or ask('path of prod.keys: ', 'prod.keys (-k)'))).resolve()
+     if keys and not keys.is_file(): raise BuildError(f'no such file: {keys}')
+     user_icon = Path(os.path.expanduser(args.icon or ICON)).resolve() if args.icon or ICON else None   # checked now, not after the extraction: build_ipa.sh would only log a missing one
+     if user_icon and not user_icon.is_file(): raise BuildError(f'no such icon file (--icon / ICON): {user_icon}')
+@@ -3004,7 +3040,10 @@ def main(args=None):
+     if want and not re.fullmatch(r'[0-9A-Fa-f]{16}', want): raise BuildError(f'--title-id / TITLE_ID takes a title ID, 16 hex digits: {want}')
+     if PROGRAM_INDEX and dump: raise BuildError('--program / PROGRAM_INDEX picks a program from a multi-program application\'s NSPs; '
+                                                      + ('a NUP' if nup else 'a dump folder') + ' is read as one program\'s files')
+-    if nup:
++    if built:
++        app, fam = scan_built(built, want)
++        say(f'a build folder: {built}, {app:016X}, extracted {", ".join(f"v{v}" for v, _ in fam["updates"])} (no NSP: the game files it keeps are packed again)')
++    elif nup:
+         app, fam = scan_nup(nup, int(want, 16) if want else None)
+         say(f'a NUP: {nup.name}, {app:016X}, {len(fam["updates"])} update(s), {len(fam["dlc"])} DLC')
+         if fam['base'] is None: say(pack_nup.NO_BASE)
+@@ -3020,7 +3059,7 @@ def main(args=None):
+         fam = decompress_nsz(nsp_dir, app, fam, keys, env, work_dir(args))
+     force =args.provisional or PROVISIONAL   # a provisional profile even when dm/games has one (testing the guesses)
+     g, provisional, shadowed = None if force else gamemod.by_title(app), False, False
+-    alias = None if force or g else same_build(nsp_dir, app, fam, keys, repo, env)   # a known build under another title ID: packed from a profile derived from that build's
++    alias = None if force or g or built else same_build(nsp_dir, app, fam, keys, repo, env)   # a known build under another title ID: packed from a profile derived from that build's
+     if alias:
+         g = alias[0]; say(f'no game profile for {app:016X}, but its main build {alias[2]} is game profile {g.id}\'s {alias[1]} ({g.get("name", "")}) under another title ID')
+     if g is None:   # no game profile: survey, then (unless --survey-only) a provisional profile outside the repository and a best-effort IPA
+@@ -3032,6 +3071,7 @@ def main(args=None):
+         if not (args.survey_only or SURVEY_ONLY): rmtree(derived_key(pdir / f'{app:016X}'))
+         if (pdir / f'{app:016X}' / 'game.tsv').exists() and not (args.survey_only or SURVEY_ONLY):
+             say(f'no game profile for {app:016X}: reusing the provisional profile from the last run (delete it to survey again)')
++        elif built: raise BuildError(f'--from-build: no game profile for {app:016X}, and no provisional profile in {pdir}: the survey reads the NSPs; build from them')
+         else:
+             facts = survey(nsp_dir, app, fam, keys, repo, py, env)
+             if args.survey_only or SURVEY_ONLY: return
+@@ -3087,20 +3127,21 @@ def main(args=None):
+     picks = pick_nsps(fam, have, versions)
+ 
+     ex = work / 'extract'; ex.mkdir(parents=True, exist_ok=True); (work / 'tmp').mkdir(exist_ok=True)
+-    gb = (sum(fam['nup'].tree_bytes(pack_nup.romfs_of(u or b, b)) for b, u in picks.values()) if nup else sum(tree_size((u or b) / 'romfs')[1] for b, u in picks.values()) if dump else extract_bytes(picks, False)) / 2**30 + 6   # every merged image is complete, including on APFS; shader cache + slack
++    gb = (0 if built else sum(fam['nup'].tree_bytes(pack_nup.romfs_of(u or b, b)) for b, u in picks.values()) if nup else sum(tree_size((u or b) / 'romfs')[1] for b, u in picks.values()) if dump else extract_bytes(picks, False)) / 2**30 + 6   # every merged image is complete, including on APFS; shader cache + slack
+     if free_gb(work) < gb and not all((ex / v).exists() for v in versions): raise BuildError(f'less than {gb:.0f} GB free on the volume of {work}')
+     heapck = provisional and HEAP_CHECK and not args.no_heap_check and not heap_checked(g)   # the heap check, when the game needs one (once per provisional profile: it stamps the profile)
+-    PROG.plan((not dump) + len(versions) + bool(fam['dlc']) + 4 - (prepare_xcode or (mac and not mac_pack)))   # prepare Xcode (a Mac-only build: the Mac host) replaces app build + IPA pack with one stage (a Mac app: Mac host + Mac app)
++    PROG.plan((not dump and not built) + len(versions) + bool(fam['dlc']) + 4 - (prepare_xcode or (mac and not mac_pack)))   # prepare Xcode (a Mac-only build: the Mac host) replaces app build + IPA pack with one stage (a Mac app: Mac host + Mac app)
+     nx = None
+-    if not dump:
++    if not dump and not built:
+         PROG.stage('build nx_extract')
+         nx = build_nx_extract(repo, work, logs, env)
+         PROG.end()
+     dirs = {}
+     for ver in versions:   # each merged version streams directly into its own image
+         b, u = picks[ver]
+-        dirs[ver] = extract_nup(ex, ver, u or b, b, app, fam['nup']) if nup else extract_dump(ex, ver, u or b, app) if dump else extract(nx, keys, ex, ver, b, u, None, logs, g, app)
+-        if not nup and not dump: extract_html(nx, keys, dirs[ver], b, u, logs, app)
++        dirs[ver] = extract_built(ex, ver) if built else extract_nup(ex, ver, u or b, b, app, fam['nup']) if nup else extract_dump(ex, ver, u or b, app) if dump else extract(nx, keys, ex, ver, b, u, None, logs, g, app)
++        if built: (dirs[ver] / 'html').mkdir(exist_ok=True)   # the HTML pages were extracted with the version, or the program has none
++        elif not nup and not dump: extract_html(nx, keys, dirs[ver], b, u, logs, app)
+     check_formats(dirs)
+     check_versions_aarch64(dirs, logs, g, nacp.name(dirs[versions[0]] / 'control.nacp') or f'{app:016X}')   # before build_mismatch, derive_profile and build_sources read the modules
+     bad = [] if derived else [f'{v}: {x}' for v in versions for x in build_mismatch(dirs[v], v, g)]   # every module's build ID must be the one the profile registers for its version
+@@ -3137,7 +3178,8 @@ def main(args=None):
+     dlc_roms = sorted(p for p in aoc.iterdir() if p.is_dir() or p.suffix == '.img') if aoc else []
+     base = next((dirs[v] for v in versions if picks[v][1] is None), dirs[versions[0]])   # the folder the base game was extracted to alone
+     # the app name and bundle ID both come from the base NSP: the game name in its control data, and a bundle ID from its title ID; a setting / the command line overrides them
+-    app_name = args.app_name or APP_NAME or nacp.name(base / 'control.nacp') or (g.get('name') if dump else '')   # a dump has no control data, a NUP may have no NACP
++    app_name = args.app_name or APP_NAME or nacp.name(base / 'control.nacp') or (fam['meta'].get('name') if built else '') or (g.get('name') if dump or built else '')   # a dump has no control data, a NUP may have no NACP
++    if app_name: write_source(work, app, app_name, versions, g.id)   # NX2Apple: --from-build rebuilds from this folder later, without the NSPs
+     if not app_name and not (mac and not mac_pack): raise BuildError(f'no game name in the base extraction ({base / "control.nacp"}; an older extraction did not save it: delete extract/ and run again, or give --app-name)')
+     bundle_id = args.bundle_id or BUNDLE_ID or saved_signing.get('PRODUCT_BUNDLE_IDENTIFIER') or f'org.nxnative.{app:016x}'
+     team_id = args.team_id or TEAM_ID or env.get('DM_TEAM_ID') or saved_signing.get('DEVELOPMENT_TEAM') or '0000000000'

@@ -1,0 +1,22 @@
+# constructions locales
+app/.build/
+app/compilation.log
+dist/
+.DS_Store
+__pycache__/
+*.pyc
+
+# jamais dans le dépôt : clés, recettes et chemins propres à un Mac, journaux, sauvegardes, données de jeu
+*.pem
+*.key
+steamgriddb-api-key
+cle-steamgriddb.command
+moteur/obelisk/recette-*.json
+moteur/obelisk/legendary-path.txt
+*.log
+*.nsp
+*.nsz
+*.xci
+*.xcz
+prod.keys
+title.keys

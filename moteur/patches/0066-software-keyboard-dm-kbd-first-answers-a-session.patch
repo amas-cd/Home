@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 12:29:51 +0000
+Subject: [PATCH] Software keyboard: DM_KBD_FIRST answers a session's first
+ keyboard without an input box
+
+Tears of the Kingdom Online asks for its server address at every start, prefilled from sd:/TOTKOnline.bin; in fullscreen the input box sat out of reach. DM_KBD_FIRST=initial confirms that first keyboard with the game's own text; later keyboards (a horse's name) show the box as before.
+
+Upstream-Status: fork-only
+Reason: TOTK Online's server prompt could not be confirmed in fullscreen
+Issue: LNPANDY/NX2Apple#214
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dm/host/hle_swkbd.c   | 5 +++++
+ docs/env_switches.tsv | 1 +
+ 2 files changed, 6 insertions(+)
+
+diff --git a/dm/host/hle_swkbd.c b/dm/host/hle_swkbd.c
+index ddda0c0..15aa215 100644
+--- a/dm/host/hle_swkbd.c
++++ b/dm/host/hle_swkbd.c
+@@ -74,6 +74,11 @@ Result swkbd_show(void *out, const void *arg_, swkbd_input_fn input) {
+     if (ilen > 0 && work) swkbd_u16_to_u8((const uint16_t *)(work + ioff), (size_t)ilen, init, sizeof init);
+ 
+     const char *script = getenv("DM_KBD");
++    // NX2Apple: DM_KBD_FIRST answers the session's first keyboard without a box: `initial` with the text the game put in it, any other value with that text. Tears of the Kingdom Online
++    // asks for its server address at every start, prefilled from sd:/TOTKOnline.bin, and in fullscreen the box could not be reached. Later keyboards (a horse's name) show the box as before
++    static int kbd_first_done;
++    if (!script && !kbd_first_done) { const char *fe = getenv("DM_KBD_FIRST"); if (fe && *fe) { kbd_first_done = 1; script = strcmp(fe, "initial") ? fe : *init ? init : NULL;
++        if (script) LOG("swkbd: the first keyboard answered by DM_KBD_FIRST=%s", fe); } }
+     // The guest clock keeps running while the keyboard is up, as on the Switch: the applet blocks the calling thread and the game's other threads go on in real time. d2r-mobile froze it here
+     // (monsters should not attack while the player typed), which left the threads that wait on the clock spinning: Octopath Traveler 0's sound stuttered and the input box lagged on an iPhone
+     // (5,035 wakeups a second while the box was up, about 1,800 otherwise; 7,936 on the Mac with the box held 8 s). The iOS input box froze it a second time around its own wait (front_ios.m),
+diff --git a/docs/env_switches.tsv b/docs/env_switches.tsv
+index ff5f51f..153ce64 100644
+--- a/docs/env_switches.tsv
++++ b/docs/env_switches.tsv
+@@ -88,6 +88,7 @@ DM_JIT_LOG	diagnostic	`1` logs every `nn::jit` `GenerateCode` request
+ DM_JIT_MISS_DUMP	diagnostic	Folder for the input of each `nn::jit` request a served image lacks
+ DM_JIT_SERVE	path	Folder of a `nn::jit` image (`jit.img`, `jit.tsv`, `jit.out`): the Mac serves requests from it as the iOS app does, and the plugin does not run
+ DM_KBD	switch	`=<text>`: the system keyboard returns that text as OK without showing an input box; unset with no window, it returns cancel
++DM_KBD_FIRST	player	`initial` answers the first system keyboard of a session with the text the game put in it, as OK and without an input box; any other value answers it with that text; later keyboards show the box (NX2Apple: Tears of the Kingdom Online's server address at start)
+ DM_KBD_PLAYER	switch	`own` makes the Mac keyboard player 1 on its own, with controllers from player 2 on (by default the first controller shares player 1 with the keyboard)
+ DM_KEYS	switch	Scripted input: `<seconds or f<frame>>:<key>[+key][~hold or ~f<frames>][*count/interval],…` presses buttons, sticks, touches and `Shake` at those times; `=@<file>` reads the steps from the file
+ DM_LANG	player	Game language as a language code (default `en-US`; the iOS app sets the one the IPA was packed with)

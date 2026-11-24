@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 11:42:43 +0000
+Subject: [PATCH] Online play: one takeover of nn::socket::GetPeerName(int,
+ sockaddr*, unsigned*), upstream's, through DM_NET
+
+Upstream nxnative now cuts the SDK 21 GetPeerName in hle_net.c; the online-play patch's own takeover of the same name in hle_offline.c made two entries, and the host aborted at start (FATAL duplicate entry in the forced takeover list). The hle_net.c one goes to the host socket when DM_NET is on.
+
+Upstream-Status: fork-only
+Reason: Tears of the Kingdom aborted at start after the move to nxnative eed7c42
+Issue: LNPANDY/NX2Apple#214
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ dm/host/hle_net.c     | 2 +-
+ dm/host/hle_offline.c | 1 -
+ 2 files changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/dm/host/hle_net.c b/dm/host/hle_net.c
+index a828dde..4eccf18 100644
+--- a/dm/host/hle_net.c
++++ b/dm/host/hle_net.c
+@@ -301,7 +301,7 @@ SKF("_ZN2nn6socket10GetSockOptEiNS0_5LevelENS0_6OptionEPvPj", h_sk_GetSockOpt, i
+ SKF("_ZN2nn6socket10SetSockOptEiNS0_5LevelENS0_6OptionEPKvj", h_sk_SetSockOpt, int s, int l, int o, const void *v, unsigned n) { if (dm_net_on()) return dm_net_setsockopt(s, l, o, v, n); return sk_fail(); }
+ SKF("_ZN2nn6socket5FcntlEiNS0_12FcntlCommandEz", h_sk_Fcntl, int s, int c) { (void)s; (void)c; return sk_fail(); }
+ // SDK 21 overloads Star Fox imports: plain sockaddr, the ShutdownMethod enum, Read / Write and a name lookup without options; SetAllocator keeps nothing, as no session is created
+-SKF("_ZN2nn6socket11GetPeerNameEiP8sockaddrPj", h_sk_GetPeerName21, int s, void *a, unsigned *n) { (void)s; (void)a; (void)n; return sk_fail(); }
++SKF("_ZN2nn6socket11GetPeerNameEiP8sockaddrPj", h_sk_GetPeerName21, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getpeername(s, a, n); return sk_fail(); }   // DM_NET (NX2Apple): the one takeover of this name; hle_offline.c had another
+ SKF("_ZN2nn6socket8ShutdownEiNS0_14ShutdownMethodE", h_sk_Shutdown21, int s, int how) { (void)s; (void)how; return sk_fail(); }
+ HLE_FORCE("_ZN2nn6socket4ReadEiPvm", "bsd socket service (cut)", long, h_sk_Read, int s, void *b, unsigned long n) { (void)s; (void)b; (void)n; return sk_fail(); }
+ HLE_FORCE("_ZN2nn6socket5WriteEiPKvm", "bsd socket service (cut)", long, h_sk_Write, int s, const void *b, unsigned long n) { (void)s; (void)b; (void)n; return sk_fail(); }
+diff --git a/dm/host/hle_offline.c b/dm/host/hle_offline.c
+index 53a7b2d..29d41ca 100644
+--- a/dm/host/hle_offline.c
++++ b/dm/host/hle_offline.c
+@@ -94,7 +94,6 @@ HLE_FORCE("_ZN2nn6socket11GAIStrErrorENS0_7AiErrnoE", "resolver error text", con
+ HLE_FORCE("_ZN2nn6socket7ConnectEiPK8sockaddrj", "offline (cut)", int, h_sk_Connect2, int s, const void *a, unsigned n) { if (dm_net_on()) return dm_net_connect(s, a, n); return -1; }
+ HLE_FORCE("_ZN2nn6socket6AcceptEiP8sockaddrPj", "offline (cut)", int, h_sk_Accept2, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_accept(s, a, n); return -1; }
+ int dm_net_getpeername(int, void *, unsigned *);
+-HLE_FORCE("_ZN2nn6socket11GetPeerNameEiP8sockaddrPj", "offline (cut) (DM_NET=1: the host socket)", int, h_sk_GetPeerName2, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getpeername(s, a, n); return -1; }
+ HLE_FORCE("_ZN2nn6socket11GetSockNameEiP8sockaddrPj", "offline (cut)", int, h_sk_GetSockName2, int s, void *a, unsigned *n) { if (dm_net_on()) return dm_net_getsockname(s, a, n); return -1; }
+ HLE_FORCE("_ZN2nn6socket10GetSockOptEiiiPvPj", "offline (cut)", int, h_sk_GetSockOpt2, int s, int l, int o, void *v, unsigned *n) { if (dm_net_on()) return dm_net_getsockopt(s, l, o, v, n); return -1; }
+ HLE_FORCE("_ZN2nn6socket10SetSockOptEiiiPKvj", "offline (cut)", int, h_sk_SetSockOpt2, int s, int l, int o, const void *v, unsigned n) { if (dm_net_on()) return dm_net_setsockopt(s, l, o, v, n); return -1; }

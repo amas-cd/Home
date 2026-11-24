@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 02:18:24 +0000
+Subject: [PATCH] ExeFS mods: the mods of <engine>/../exefs-mods/<title id>/
+ applied to every build of the title
+
+A launcher that runs the build with the engine's own options only (NX Library) cannot pass --exefs-mod; the folder beside the engine gives it the same mods as the scripts (TOTK Online, SMO Online). DM_EXEFS_MODS_AUTO=0 leaves the folder out.
+
+Upstream-Status: fork-only
+Reason: NX Library builds with the online mods (no --exefs-mod from a launcher)
+Issue: LNPANDY/NX2Apple#214
+---
+ scripts/build_ipa_from_nsp.py | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/scripts/build_ipa_from_nsp.py b/scripts/build_ipa_from_nsp.py
+index bf1a8f9..97e91ad 100644
+--- a/scripts/build_ipa_from_nsp.py
++++ b/scripts/build_ipa_from_nsp.py
+@@ -3161,6 +3161,13 @@ def main(args=None):
+     patched = work / f'patched_{pkg_ver}'
+     exe_dir, places = game / 'ExeFS', {}
+     exefs_mods = [Path(p).expanduser() for p in (args.exefs_mod or []) + [p for p in os.environ.get('DM_EXEFS_MODS', '').split(os.pathsep) if p]]
++    # NX2Apple: the mods a launcher cannot pass on the command line (NX Library runs the build with the engine's own options only) sit in <engine>/../exefs-mods/<title id>/<mod>/:
++    # every subfolder (or link to one) is a mod of that title, applied to each of its builds, the launcher's and the scripts' alike. DM_EXEFS_MODS_AUTO=0 leaves them out.
++    auto = repo.parent / 'exefs-mods' / f'{app:016X}'
++    if os.environ.get('DM_EXEFS_MODS_AUTO', '1') != '0' and auto.is_dir():
++        for p in sorted(x for x in auto.iterdir() if x.is_dir() and not x.name.startswith('.')):
++            if p.resolve() in {m.resolve() for m in exefs_mods}: continue
++            exefs_mods.append(p); say(f'ExeFS mod from {auto}: {p.name} (DM_EXEFS_MODS_AUTO=0 leaves the folder out)')
+     if exefs_mods:   # ExeFS mods (Super Mario Odyssey: Online's Starlight module and IPS hooks): a modded copy of the ExeFS is what gets rewritten
+         exe_dir, g, places = apply_exefs_mods(py, repo, exe_dir, work / f'exefs_mod_{pkg_ver}', exefs_mods, g, logs, env, provisional or derived, app)
+     elif (provisional or derived) and (stale := stale_mod_modules(g, exe_dir)):   # built without the ExeFS mods an earlier build added to the kept profile
