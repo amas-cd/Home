@@ -385,6 +385,13 @@ final class Library: ObservableObject {
     @Published var running: Game? = nil
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
+    @Published var ouverturePart = false   // l'ouverture est en train de s'effacer
+    /// Finir (ou passer) l'ouverture : elle s'efface d'elle-même, puis on la retire une fois invisible
+    func passerOuverture() {
+        guard ouverture, !ouverturePart else { return }
+        ouverturePart = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.ouverture = false; self.ouverturePart = false }
+    }
     @Published var ouverture = false   // l'animation d'ouverture (logo et jingle), au vrai lancement de l'app seulement
     var epicNouveau = false   // la prochaine connexion Epic ajoute un compte au lieu de remplacer le compte actif
     var apresTache: (() -> Void)? = nil   // ce que l'assistant fait une fois la tâche en cours réussie (se connecter, ajouter un jeu…)
@@ -916,28 +923,38 @@ final class Library: ObservableObject {
         ], hero: "speaker.wave.2.fill", back: { self.menu = self.plusMenu() })
     }
     func openAdvancedSettings() {
+        // rangé par catégorie (le nom de la catégorie du choix visé s'affiche à côté du titre) : Home, Images, Jeux Switch, Jeux PC, Aide
+        let veilleOff = salonRoot.appendingPathComponent("veille-off"), ici: () -> Void = { self.openAdvancedSettings() }
         menu = SalonMenu(title: "Avancé", subtitle: nil, items: [
-            SalonMenuItem(label: "Clé SteamGridDB", detail: SteamGridDB.key() == nil ? "Absente — nécessaire pour trouver jaquettes, fonds et logos" : "Enregistrée", icon: "key.fill", action: { self.menu = nil; self.askKey() }),
-            SalonMenuItem(label: "Illustrations", icon: "folder.fill", action: { self.menu = nil; NSWorkspace.shared.open(salonRoot) }),
-            SalonMenuItem(label: "Alléger les constructions", icon: "externaldrive.badge.minus", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }),
-            SalonMenuItem(label: "Lancement direct Epic", icon: "bolt.fill", action: { self.menu = nil; Atelier.terminal("rocket-league-direct.command") }),
-            SalonMenuItem(label: "Construction silencieuse : \((config.discret ?? true) ? "activée" : "désactivée")", detail: (config.discret ?? true) ? "Plus lente, le Mac reste frais" : "Plus rapide, le Mac chauffe", icon: "thermometer.medium", tint: .teal, action: {
-                self.config.discret = !(self.config.discret ?? true); self.saveConfig(); self.openAdvancedSettings() }),
-            SalonMenuItem(label: "Caches de shaders : \((self.config.garderCaches ?? true) ? "oui" : "non")", detail: (self.config.garderCaches ?? true) ? "Reconstructions courtes, le Mac ne chauffe pas" : "Moins de place, reconstructions longues qui chauffent", icon: "externaldrive.fill", tint: .orange, action: {
-                self.config.garderCaches = !(self.config.garderCaches ?? true); self.saveConfig(); self.openAdvancedSettings() }),
-            SalonMenuItem(label: "Ouverture à la manette : \(FileManager.default.fileExists(atPath: salonRoot.appendingPathComponent("veille-off").path) ? "désactivé" : "activé")", icon: "gamecontroller.fill", tint: .green, action: {
-                let f = salonRoot.appendingPathComponent("veille-off")
-                if FileManager.default.fileExists(atPath: f.path) { try? FileManager.default.removeItem(at: f) } else { FileManager.default.createFile(atPath: f.path, contents: nil) }
-                self.openAdvancedSettings() }),
-            SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Cherchées dans Téléchargements/ProdKeys, ~/.switch, Téléchargements", icon: "key.fill", tint: .yellow, action: {
+            SalonMenuItem(label: "Ouverture à la manette : \(FileManager.default.fileExists(atPath: veilleOff.path) ? "non" : "oui")", detail: "Home s'ouvre quand une manette se connecte", icon: "gamecontroller.fill", section: "Home", tint: .green, action: {
+                if FileManager.default.fileExists(atPath: veilleOff.path) { try? FileManager.default.removeItem(at: veilleOff) } else { FileManager.default.createFile(atPath: veilleOff.path, contents: nil) }
+                ici() }),
+            SalonMenuItem(label: "Animations", detail: "Écran de démarrage, mouvements", icon: "sparkles", section: "Home", tint: .purple, action: { self.openAnimations() }),
+            SalonMenuItem(label: "Clé SteamGridDB", detail: SteamGridDB.key() == nil ? "Absente : pas de jaquettes" : "Enregistrée", icon: "key.fill", section: "Images", action: { self.menu = nil; self.askKey() }),
+            SalonMenuItem(label: "Dossier des images", detail: "Jaquettes, fonds et logos", icon: "folder.fill", section: "Images", action: { self.menu = nil; NSWorkspace.shared.open(salonRoot) }),
+            SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Ton fichier prod.keys", icon: "key.fill", section: "Jeux Switch", tint: .yellow, action: {
                 let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
                 p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
                 if p.runModal() == .OK, let u = p.url { self.config.cles = u.path; self.saveConfig() }
-                self.openAdvancedSettings() }),
-            SalonMenuItem(label: "Animation d'ouverture : \((config.ouverture ?? true) ? "activée" : "désactivée")", icon: "sparkles", tint: .purple, action: {
-                self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); self.openAdvancedSettings() }),
-            SalonMenuItem(label: "Journaux", icon: "doc.text.magnifyingglass", tint: .gray, action: { self.menu = nil; self.lancer("journaux.command", titre: "Copie des journaux") }),
+                ici() }),
+            SalonMenuItem(label: "Construction silencieuse : \((config.discret ?? true) ? "oui" : "non")", detail: (config.discret ?? true) ? "Plus lente, le Mac reste frais" : "Plus rapide, le Mac chauffe", icon: "thermometer.medium", section: "Jeux Switch", tint: .teal, action: {
+                self.config.discret = !(self.config.discret ?? true); self.saveConfig(); ici() }),
+            SalonMenuItem(label: "Garder les caches : \((self.config.garderCaches ?? true) ? "oui" : "non")", detail: (self.config.garderCaches ?? true) ? "Reconstructions courtes" : "Moins de place, reconstructions longues", icon: "externaldrive.fill", section: "Jeux Switch", tint: .orange, action: {
+                self.config.garderCaches = !(self.config.garderCaches ?? true); self.saveConfig(); ici() }),
+            SalonMenuItem(label: "Libérer de la place", detail: "Allège les dossiers de construction", icon: "externaldrive.badge.minus", section: "Jeux Switch", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }),
+            SalonMenuItem(label: "Lancement direct Epic", detail: "Un jeu Obelisk sans ouvrir Obelisk", icon: "bolt.fill", section: "Jeux PC", action: { self.menu = nil; Atelier.terminal("rocket-league-direct.command") }),
+            SalonMenuItem(label: "Journaux", detail: "Les copie pour Claude", icon: "doc.text.magnifyingglass", section: "Aide", tint: .gray, action: { self.menu = nil; self.lancer("journaux.command", titre: "Copie des journaux") }),
         ], hero: "gearshape.fill", back: { self.menu = self.plusMenu() })
+    }
+    /// Avancé → Animations : l'écran de démarrage (l'intro et son jingle) et les mouvements de l'interface
+    func openAnimations() {
+        let reduit = animationsReduites
+        menu = SalonMenu(title: "Animations", items: [
+            SalonMenuItem(label: "Écran de démarrage : \((config.ouverture ?? true) ? "oui" : "non")", icon: "play.rectangle.fill", tint: .purple, action: {
+                self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); self.openAnimations() }),
+            SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", icon: reduit ? "tortoise.fill" : "hare.fill", tint: .teal, action: {
+                UserDefaults.standard.set(!reduit, forKey: "animationsReduites"); self.openAnimations() }),
+        ], hero: "sparkles", back: { self.openAdvancedSettings() })
     }
     func openCategoryMenu(_ g: Game) {
         var items = categories.filter { $0 != Library.all }.map { c in SalonMenuItem(label: c, detail: c == g.category ? "Catégorie actuelle" : nil, icon: c == g.category ? "checkmark.circle.fill" : "circle", action: { self.menu = nil; self.setCategory(g, c) }) }
@@ -2053,9 +2070,11 @@ struct Background: View {
     }
 }
 /// Le mouvement de Home quand on se déplace (pastilles, tuiles de l'accueil) : court, net, sans rebond
-let glisse = Animation.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.24)
+/// « Animations réduites » (Avancé → Animations) : les mouvements de l'interface deviennent un fondu très court
+var animationsReduites: Bool { UserDefaults.standard.bool(forKey: "animationsReduites") }
+var glisse: Animation { animationsReduites ? .easeOut(duration: 0.10) : .timingCurve(0.2, 0.75, 0.2, 1, duration: 0.24) }
 /// Le mouvement de la bibliothèque : plus ample, doux au départ comme à l'arrivée
-let coule = Animation.timingCurve(0.32, 0.0, 0.16, 1, duration: 0.42)
+var coule: Animation { animationsReduites ? .easeOut(duration: 0.12) : .timingCurve(0.32, 0.0, 0.16, 1, duration: 0.42) }
 struct Tile: View {
     let image: NSImage; let selected: Bool; var isIcon = false
     static let cote: CGFloat = 180, zoom: CGFloat = 1.34
@@ -2123,10 +2142,9 @@ struct OuvertureView: View {
     @State private var manette = false   // la manette se pose
     @State private var nom = false       // HOME apparaît
     @State private var onde = false      // les anneaux partent
-    @State private var part = false      // tout s'en va
     private func carteDe(_ c: [Color]) -> some View { RoundedRectangle(cornerRadius: 34, style: .continuous).fill(LinearGradient(colors: c, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 190, height: 262) }
     var body: some View {
-        let l = lueurs || fige, ca = carte || fige, ev = eventail || fige, ma = manette || fige, no = nom || fige
+        let l = lueurs || fige, ca = carte || fige, ev = eventail || fige, ma = manette || fige, no = nom || fige, part = lib.ouverturePart
         ZStack {
             Color(red: 0.02, green: 0.02, blue: 0.05)
             // trois lueurs, aux couleurs des cartes
@@ -2154,10 +2172,11 @@ struct OuvertureView: View {
                 .scaleEffect(ca ? 1 : 0.72).opacity(ca ? 1 : 0)
                 Text("HOME").font(.system(size: 54, weight: .black).width(.expanded)).tracking(no ? 14 : 44).foregroundStyle(.white).opacity(no ? 1 : 0).padding(.leading, no ? 14 : 44)
             }
-            .scaleEffect(part ? 1.10 : 1).opacity(part ? 0 : 1).blur(radius: part ? 10 : 0)
+            .scaleEffect(part ? 1.10 : 1).opacity(part ? 0 : 1).animation(.easeInOut(duration: 0.5), value: part)
         }
+        .opacity(part ? 0 : 1).animation(.easeInOut(duration: 0.7), value: part)   // le fond s'efface pendant que la bibliothèque apparaît
         .ignoresSafeArea().contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false } }
+        .onTapGesture { lib.passerOuverture() }
         .onAppear {
             guard !fige else { return }
             let douce = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7)
@@ -2167,10 +2186,7 @@ struct OuvertureView: View {
             withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.45).delay(0.80)) { manette = true }
             withAnimation(.easeOut(duration: 1.3).delay(0.80)) { onde = true }
             withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7).delay(1.00)) { nom = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.15) {
-                withAnimation(.easeInOut(duration: 0.55)) { part = true }
-                withAnimation(.easeInOut(duration: 0.7)) { lib.ouverture = false }   // le fond s'efface pendant que la bibliothèque apparaît
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.15) { lib.passerOuverture() }
         }
     }
 }
@@ -2187,7 +2203,11 @@ struct Symbole: View {
         logos[n] = i; return i
     }
     var body: some View {
-        if nom.hasPrefix("logo:"), let i = Symbole.logo(String(nom.dropFirst(5))) { Image(nsImage: i).resizable().interpolation(.high).scaledToFit().frame(width: taille * 1.5, height: taille * 1.5) }
+        if nom == "logo:windows" {
+            let c = taille * 0.56, e = taille * 0.07, bleu = Color(red: 0.0, green: 0.55, blue: 0.95)
+            VStack(spacing: e) { HStack(spacing: e) { bleu.frame(width: c, height: c); bleu.frame(width: c, height: c) }; HStack(spacing: e) { bleu.frame(width: c, height: c); bleu.frame(width: c, height: c) } }
+        }
+        else if nom.hasPrefix("logo:"), let i = Symbole.logo(String(nom.dropFirst(5))) { Image(nsImage: i).resizable().interpolation(.high).scaledToFit().frame(width: taille * 1.5, height: taille * 1.5) }
         else { Image(systemName: nom.hasPrefix("logo:") ? "person.crop.circle.fill" : nom).font(.system(size: taille, weight: .medium)) }
     }
 }
@@ -2327,7 +2347,7 @@ struct MenuView: View {
             Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 150, alignment: .leading).shadow(radius: 12)
         } else {
             if let st = menu.subtitle { Text(st.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.6).lineLimit(1) }
-            Text(menu.title).font(.system(size: rangee ? 60 : 54, weight: .thin)).tracking(-1).lineLimit(1).minimumScaleFactor(0.6).padding(.top, 2)
+            Text(menu.title.uppercased()).font(.system(size: rangee ? 44 : 40, weight: .black).width(.expanded)).tracking(1).lineLimit(1).minimumScaleFactor(0.6).padding(.top, 4)
         }
     }
     private var aides: some View {
@@ -2874,7 +2894,7 @@ struct Screen: View {
                         Text((g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "Steam" : g.appPC?.hasPrefix("exe:") == true ? "Windows" : "Epic Games") : g.category).uppercased())
                             .font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.8)
                         if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 560, maxHeight: 180, alignment: .leading).shadow(radius: 12) }
-                        else { Text(g.name).font(.system(size: 72, weight: .thin)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.5).shadow(radius: 12) }
+                        else { Text(g.name.uppercased()).font(.system(size: 52, weight: .black).width(.expanded)).tracking(1).lineLimit(1).minimumScaleFactor(0.5).shadow(radius: 12) }
                         HStack(spacing: 16) {
                             HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running != nil ? "En cours…" : lib.enFond(g) ? "Reprendre" : "Jouer").font(.system(size: 20, weight: .semibold, design: .rounded)) }
                                 .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white.opacity(lib.running == nil ? 1 : 0.5)))
@@ -2889,7 +2909,7 @@ struct Screen: View {
                 } else {
                     // la case + : ajouter un jeu
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Ajouter un jeu").font(.system(size: 72, weight: .thin)).tracking(-1.5).shadow(radius: 12)
+                        Text("AJOUTER UN JEU").font(.system(size: 52, weight: .black).width(.expanded)).tracking(1).shadow(radius: 12)
                         HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text("Ajouter").font(.system(size: 20, weight: .semibold, design: .rounded)) }
                             .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white)).padding(.top, 14)
                             .onTapGesture { lib.openAddMenu() }
@@ -2917,7 +2937,7 @@ struct Screen: View {
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { PickerView(lib: lib) }
-            if lib.ouverture { OuvertureView(lib: lib).transition(.opacity).zIndex(20) }
+            if lib.ouverture { OuvertureView(lib: lib).zIndex(20) }
             if let t = lib.tache {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 64).padding(.bottom, 92)
                     .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .flou))
@@ -2969,7 +2989,7 @@ struct NowPlayingView: View {
                     .scaleEffect(breathe ? 1.02 : 1.0)
                     .onAppear { breathe = true }   // fixe : une animation sans fin ici tournait derrière le jeu pendant toute la partie
                 if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 420, maxHeight: 120).shadow(radius: 12) }
-                else { Text(game.name).font(.system(size: 56, weight: .thin)).tracking(-1) }
+                else { Text(game.name.uppercased()).font(.system(size: 42, weight: .black).width(.expanded)).tracking(1) }
                 HStack(spacing: 12) {
                     Circle().fill(Color.green).frame(width: 9, height: 9).shadow(color: .green.opacity(0.8), radius: 6)
                     Text(String(format: "%d:%02d:%02d", elapsed / 3600, elapsed % 3600 / 60, elapsed % 60)).font(.system(size: 17, weight: .medium, design: .rounded).monospacedDigit()).opacity(0.75)
@@ -3257,8 +3277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: {}), SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {})], roue: true)
             rendre(MenuView(lib: lib, menu: comptes, apercu: 1), "comptes.png")
             let ajout = SalonMenu(title: "Ajouter un jeu", items: [SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {}), SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: {}),
-                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "Jeu Windows", detail: "Déjà installé : son .exe", icon: "folder.fill", tint: .orange, action: {}),
-                SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {}), SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: {})])
+                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: {}),
+                SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: {}), SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: {})])
+            lib.openAdvancedSettings(); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 4), "avance.png") }; lib.menu = nil
             rendre(MenuView(lib: lib, menu: ajout, apercu: 2), "ajouter.png")
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
@@ -3385,8 +3406,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func nav(_ k: String) {
         // pendant la première seconde et demie, rien n'est pris en compte : un bouton tenu ou pressé au moment où Home (re)démarre
         // lançait le premier jeu de la liste sans qu'on le veuille
-        if Date().timeIntervalSince(demarrage) < 1.5 { if lib.ouverture, Date().timeIntervalSince(demarrage) > 0.4 { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false } }; return }
-        if lib.ouverture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false }; return }   // n'importe quelle touche ou bouton passe l'ouverture
+        if Date().timeIntervalSince(demarrage) < 1.5 { if lib.ouverture, Date().timeIntervalSince(demarrage) > 0.4 { lib.passerOuverture() }; return }
+        if lib.ouverture { lib.passerOuverture(); return }   // n'importe quelle touche ou bouton passe l'ouverture
         if let p = lib.picker {
             _ = p
             if lib.pickerSaisie { if k == "up" || k == "back" { lib.pickerSaisie = false; Sounds.shared.play("deplacer") }; return }
@@ -4585,10 +4606,10 @@ extension Library {
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
             SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
-            SalonMenuItem(label: "Jeu Windows", detail: "Déjà installé : son .exe", icon: "folder.fill", tint: .orange, action: { self.ajouterExe() }),
-            SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: { self.menu = nil; self.addGame() }),
-        ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games", "Steam", "Jeu Windows", "Installateur"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
+            SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: { self.installerDepuisSetup() }),
+            SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: { self.ajouterExe() }),
+        ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games", "Steam", "Jeu Windows", "Jeu Windows préinstallé"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
         hero: "plus.app.fill", back: back)
     }
     func ouvrirObelisk() {
