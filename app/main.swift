@@ -1923,15 +1923,25 @@ struct Background: View {
 struct Tile: View {
     let image: NSImage; let selected: Bool; var isIcon = false
     var body: some View {
-        Color.black.overlay {
-            if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(selected ? 40 : 28) } }
-            else { Image(nsImage: image).resizable().scaledToFill() }
+        let cote: CGFloat = selected ? 250 : 176, rayon: CGFloat = selected ? 34 : 25
+        ZStack {
+            // la signature de Home : deux cartes, orange et bleue, qui dépassent en éventail derrière le jeu visé
+            RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(LinearGradient(colors: Library.orange, startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: cote * 0.92, height: cote * 0.92).rotationEffect(.degrees(selected ? -11 : 0)).offset(x: selected ? -cote * 0.20 : 0, y: selected ? cote * 0.03 : 0).opacity(selected ? 1 : 0)
+            RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(LinearGradient(colors: Library.bleu, startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: cote * 0.92, height: cote * 0.92).rotationEffect(.degrees(selected ? 11 : 0)).offset(x: selected ? cote * 0.20 : 0, y: selected ? cote * 0.03 : 0).opacity(selected ? 1 : 0)
+            Color.black.overlay {
+                if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(selected ? 40 : 28) } }
+                else { Image(nsImage: image).resizable().scaledToFill() }
+            }
+            .frame(width: cote, height: cote).clipped()
+            .clipShape(RoundedRectangle(cornerRadius: rayon, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
+            .shadow(color: .black.opacity(0.55), radius: selected ? 26 : 12, y: selected ? 16 : 8)
         }
-            .frame(width: selected ? 250 : 176, height: selected ? 250 : 176).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: selected ? 18 : 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: selected ? 18 : 14, style: .continuous).stroke(.white.opacity(selected ? 0.95 : 0), lineWidth: 3))
-            .shadow(color: .black.opacity(0.6), radius: selected ? 30 : 14, y: 12).opacity(selected ? 1 : 0.72)
-            .animation(.spring(response: 0.42, dampingFraction: 0.68), value: selected)
+        .padding(.horizontal, selected ? 46 : 0)   // la place des deux cartes qui dépassent
+        .opacity(selected ? 1 : 0.8)
+        .animation(.spring(response: 0.42, dampingFraction: 0.7), value: selected)
     }
 }
 struct Hint: View {
@@ -2498,17 +2508,14 @@ struct DockProgression: View {
 struct AddTile: View {
     let selected: Bool
     var body: some View {
+        let cote: CGFloat = selected ? 250 : 176, rayon: CGFloat = selected ? 34 : 25
         ZStack {
-            RoundedRectangle(cornerRadius: selected ? 18 : 14, style: .continuous).fill(.white.opacity(selected ? 0.16 : 0.07))
-            RoundedRectangle(cornerRadius: selected ? 18 : 14, style: .continuous).strokeBorder(.white.opacity(selected ? 0.9 : 0.35), style: StrokeStyle(lineWidth: 3, dash: [10, 8]))
-            VStack(spacing: 12) {
-                Image(systemName: "plus").font(.system(size: selected ? 64 : 46, weight: .semibold))
-                if selected { Text("Ajouter un jeu").font(.system(size: 19, weight: .semibold, design: .rounded)) }
-            }.foregroundStyle(.white.opacity(selected ? 1 : 0.6))
+            RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(.white.opacity(selected ? 0.14 : 0.04))
+            RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0.3), style: StrokeStyle(lineWidth: selected ? 4 : 2, dash: selected ? [] : [7, 7]))
+            Image(systemName: "plus").font(.system(size: selected ? 60 : 44, weight: .light)).foregroundStyle(.white.opacity(selected ? 1 : 0.7))
         }
-        .frame(width: selected ? 250 : 176, height: selected ? 250 : 176)
-        .shadow(color: .black.opacity(0.5), radius: selected ? 30 : 12, y: 12)
-        .animation(.spring(response: 0.42, dampingFraction: 0.68), value: selected)
+        .frame(width: cote, height: cote)
+        .animation(.spring(response: 0.42, dampingFraction: 0.7), value: selected)
     }
 }
 struct PickerView: View {
@@ -2569,17 +2576,18 @@ struct Screen: View {
                 .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 1.04)), removal: .opacity)).animation(.easeInOut(duration: 0.7), value: g?.id)
             let veiled = lib.menu != nil || lib.picker != nil || lib.accueil != nil
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center, spacing: 6) {
+                HStack(alignment: .center, spacing: 10) {
                     ForEach(Array(lib.categories.enumerated()), id: \.offset) { i, c in
                         Text(c).font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .padding(.horizontal, 18).padding(.vertical, 8)
-                            .background(Capsule().fill(.white.opacity(i == lib.categoryIndex ? 0.95 : 0)))
-                            .foregroundStyle(i == lib.categoryIndex ? .black : .white.opacity(0.6))
+                            .padding(.horizontal, 22).padding(.vertical, 10)
+                            .background(Capsule().fill(.white.opacity(i == lib.categoryIndex ? 1 : 0.10)))
+                            .foregroundStyle(i == lib.categoryIndex ? .black : .white)
                             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: lib.categoryIndex)
                             .onTapGesture { lib.categoryIndex = i; lib.selected = 0; Sounds.shared.play("onglet") }
                     }
-                    Image(systemName: "plus.circle").font(.system(size: 21, weight: .medium)).opacity(0.55).padding(.leading, 10).onTapGesture { lib.openPlusMenu() }.help("Menu : ajouter un jeu, catégories, réglages")
+                    Image(systemName: "ellipsis").font(.system(size: 17, weight: .bold)).frame(width: 44, height: 44).background(Circle().fill(.white.opacity(0.10))).onTapGesture { lib.openPlusMenu() }.help("Menu")
                     Spacer()
+                    HStack(spacing: 0) {
                     HStack(spacing: 8) {
                         Image(systemName: lib.macVolume == 0 ? "speaker.slash.fill" : lib.macVolume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill").font(.system(size: 15, weight: .semibold))
                         ZStack(alignment: .leading) { Capsule().fill(.white.opacity(0.22)).frame(width: 70, height: 4); Capsule().fill(.white).frame(width: max(4, 70 * CGFloat(lib.macVolume)), height: 4) }.animation(.linear(duration: 0.08), value: lib.macVolume)
@@ -2592,45 +2600,34 @@ struct Screen: View {
                             Text("\(pct) %").font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                         }.opacity(0.75).padding(.leading, 18)
                     }
-                }.padding(.horizontal, 64).padding(.top, 36).foregroundStyle(.white)
+                    }.padding(.horizontal, 22).padding(.vertical, 9).background(.black.opacity(0.42), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+                }.padding(.horizontal, 84).padding(.top, 44).foregroundStyle(.white)
                 Spacer()
                 if let g {
                     VStack(alignment: .leading, spacing: 10) {
-                        if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 140, alignment: .leading).shadow(radius: 12) }
-                        else { Text(g.name).font(.system(size: 46, weight: .bold, design: .rounded)).shadow(radius: 12) }
-                        HStack(spacing: 18) {
-                            if let s = lib.stats[g.id], let d = s.lastPlayed {
-                                Label("Dernière partie \(d.formatted(.relative(presentation: .named)))", systemImage: "clock")
-                                if s.minutes > 0 { Label(s.minutes >= 60 ? "\(s.minutes / 60) h \(s.minutes % 60) min de jeu" : "\(s.minutes) min de jeu", systemImage: "gamecontroller") }
-                            } else { Label("Jamais joué", systemImage: "sparkles") }
-                            Label(g.category, systemImage: "tag")
-                            if g.viaObelisk { Label("via Obelisk", systemImage: "pc") }
-                            if g.viaHome { Label(g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows" : g.appPC?.hasPrefix("steam:") == true ? "Steam" : "Epic Games", systemImage: "pc") }
-                        }.font(.system(size: 17, weight: .medium, design: .rounded)).opacity(0.85)
+                        Text((g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "Steam" : g.appPC?.hasPrefix("exe:") == true ? "Windows" : "Epic Games") : g.category).uppercased())
+                            .font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.8)
+                        if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 560, maxHeight: 180, alignment: .leading).shadow(radius: 12) }
+                        else { Text(g.name).font(.system(size: 72, weight: .thin)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.5).shadow(radius: 12) }
                         HStack(spacing: 16) {
                             HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running == nil ? "Jouer" : "En cours…").font(.system(size: 20, weight: .semibold, design: .rounded)) }
-                                .foregroundStyle(.black).padding(.horizontal, 22).padding(.vertical, 10).background(Capsule().fill(.white.opacity(lib.running == nil ? 0.95 : 0.5)))
+                                .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white.opacity(lib.running == nil ? 1 : 0.5)))
                                 .shadow(color: .white.opacity(pulse ? 0.45 : 0.1), radius: pulse ? 22 : 8).scaleEffect(pulse ? 1.02 : 1.0)
                                 .onAppear { withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true } }
                                 .onTapGesture { lib.launch() }
-                            HStack(spacing: 10) { if let sym = lib.hints.options.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.options.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.white.opacity(0.7), lineWidth: 1.5)) }; Text("Options").font(.system(size: 20, weight: .semibold, design: .rounded)) }
-                                .foregroundStyle(.white).padding(.horizontal, 22).padding(.vertical, 10).background(Capsule().fill(.white.opacity(0.16))).overlay(Capsule().stroke(.white.opacity(0.35), lineWidth: 1))
+                            Image(systemName: "ellipsis").font(.system(size: 20, weight: .bold)).frame(width: 54, height: 54).background(Circle().fill(.black.opacity(0.4))).overlay(Circle().stroke(.white.opacity(0.24), lineWidth: 1.5))
                                 .onTapGesture { lib.openOptions() }
                         }.padding(.top, 14)
-                    }.padding(.horizontal, 64).padding(.bottom, 28).foregroundStyle(.white)
+                    }.padding(.horizontal, 84).padding(.bottom, 22).foregroundStyle(.white)
                      .id("info-\(g.id)").transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                 } else {
                     // la case + : ajouter un jeu
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Ajouter un jeu").font(.system(size: 46, weight: .bold, design: .rounded)).shadow(radius: 12)
-                        HStack(spacing: 18) {
-                            Label("Jeu Switch", systemImage: "gamecontroller"); Label("MacNativeGames", systemImage: "leaf"); Label("Epic Games et Steam", systemImage: "desktopcomputer"); Label("App Mac", systemImage: "macwindow")
-                        }.font(.system(size: 17, weight: .medium, design: .rounded)).opacity(0.85)
-                        if lib.visible.isEmpty { Text("Aucun jeu dans cette catégorie pour l'instant").font(.system(size: 16, weight: .medium, design: .rounded)).opacity(0.6) }
+                        Text("Ajouter un jeu").font(.system(size: 72, weight: .thin)).tracking(-1.5).shadow(radius: 12)
                         HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text("Ajouter").font(.system(size: 20, weight: .semibold, design: .rounded)) }
-                            .foregroundStyle(.black).padding(.horizontal, 22).padding(.vertical, 10).background(Capsule().fill(.white.opacity(0.95))).padding(.top, 14)
+                            .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white)).padding(.top, 14)
                             .onTapGesture { lib.openAddMenu() }
-                    }.padding(.horizontal, 64).padding(.bottom, 28).foregroundStyle(.white)
+                    }.padding(.horizontal, 84).padding(.bottom, 22).foregroundStyle(.white)
                      .id("info-plus").transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
                 }
                 ScrollViewReader { proxy in
@@ -2646,15 +2643,14 @@ struct Screen: View {
                                 .onTapGesture { if lib.selected >= lib.visible.count { lib.openAddMenu() } else { lib.selected = lib.visible.count; Sounds.shared.play("deplacer") } }
                                 .offset(y: appeared ? 0 : 80).opacity(appeared ? 1 : 0)
                                 .animation(.spring(response: 0.55, dampingFraction: 0.75).delay(Double(min(lib.visible.count, 8)) * 0.05), value: appeared)
-                        }.padding(.horizontal, 64).padding(.bottom, 20).padding(.top, 26)
+                        }.padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 30)
                     }.scrollClipDisabled()   // l'ombre des jaquettes (rayon 30) dépassait le haut du défilement et y était coupée net
                      .onChange(of: lib.selected) { _, _ in withAnimation(.easeInOut(duration: 0.3)) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
                      .onChange(of: lib.categoryIndex) { _, _ in appeared = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { appeared = true; if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } } }
                      .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { appeared = true } }
                 }
-                HStack(spacing: 26) { Hint(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Hint(k: lib.hints.options, t: "Options") }; Hint(k: lib.hints.plus, t: "Menu"); Hint(k: lib.hints.cat, t: "Catégorie"); Spacer();
-                    if let n = lib.hints.name { Label(n, systemImage: "gamecontroller").font(.system(size: 15, weight: .medium, design: .rounded)).opacity(0.55).padding(.trailing, 18) }; Text("\(lib.visible.count) jeux").font(.system(size: 16, weight: .medium, design: .rounded)).opacity(0.6) }
-                    .padding(.horizontal, 64).padding(.bottom, 34).foregroundStyle(.white)
+                HStack(spacing: 12) { Spacer(); Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie") }
+                    .padding(.horizontal, 84).padding(.bottom, 40).foregroundStyle(.white)
             }
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
@@ -2681,7 +2677,7 @@ struct Screen: View {
                 .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { lib.objectWillChange.send() } }
             }
             if let t = lib.toast {
-                VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.ultraThinMaterial, in: Capsule()).foregroundStyle(.white).padding(.bottom, 130) }
+                VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.bottom, 130) }
                     .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }
             }
         }.onReceive(clock) { now = $0 }.animation(.easeInOut(duration: 0.35), value: lib.current?.id).animation(.spring(response: 0.38, dampingFraction: 0.84), value: lib.menu?.title).animation(.spring(response: 0.38, dampingFraction: 0.84), value: lib.picker?.game.id)
@@ -2701,20 +2697,18 @@ struct NowPlayingView: View {
             if let bg = a?.background ?? a?.cover { Color.black.overlay { Image(nsImage: bg).resizable().scaledToFill().blur(radius: 40).saturation(0.6) }.opacity(0.22).clipped().ignoresSafeArea() }
             VStack(spacing: 26) {
                 Spacer()
-                Image(nsImage: lib.cover(game)).resizable().scaledToFill().frame(width: 300, height: 300).clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                Image(nsImage: lib.cover(game)).resizable().scaledToFill().frame(width: 300, height: 300).clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
                     .shadow(color: .black.opacity(0.7), radius: 40, y: 20).shadow(color: .white.opacity(breathe ? 0.12 : 0.04), radius: 60)
                     .scaleEffect(breathe ? 1.02 : 1.0)
                     .onAppear { breathe = true }   // fixe : une animation sans fin ici tournait derrière le jeu pendant toute la partie
                 if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 420, maxHeight: 120).shadow(radius: 12) }
-                else { Text(game.name).font(.system(size: 40, weight: .bold, design: .rounded)) }
+                else { Text(game.name).font(.system(size: 56, weight: .thin)).tracking(-1) }
                 HStack(spacing: 12) {
                     Circle().fill(Color.green).frame(width: 9, height: 9).shadow(color: .green.opacity(0.8), radius: 6)
-                    Text("En cours de jeu").font(.system(size: 17, weight: .semibold, design: .rounded))
-                    Text("·").opacity(0.4)
                     Text(String(format: "%d:%02d:%02d", elapsed / 3600, elapsed % 3600 / 60, elapsed % 60)).font(.system(size: 17, weight: .medium, design: .rounded).monospacedDigit()).opacity(0.75)
                 }
                 Spacer()
-                HStack(spacing: 26) { Hint(k: lib.hints.plus, t: "Menu rapide"); Hint(b: "R", t: "Volume"); Hint(k: lib.hints.plus, t: "Maintenir 1 s : Home") }.opacity(0.55).padding(.bottom, 44)
+                HStack(spacing: 12) { Pilule(k: lib.hints.plus, t: "Menu rapide") }.opacity(0.7).padding(.bottom, 44)
             }.foregroundStyle(.white)
         }.onReceive(clock) { now = $0 }
     }
@@ -2756,7 +2750,6 @@ struct HUDView: View {
                         HStack(spacing: 18) {
                             VStack(spacing: 4) {
                                 Image(systemName: v == 0 ? "speaker.slash.fill" : v < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill").font(.system(size: 26, weight: .medium))
-                                Text(general ? "Général" : "Jeu").font(.system(size: 11, weight: .semibold, design: .rounded)).opacity(0.7)
                             }.frame(width: 64)
                             ZStack(alignment: .leading) {
                                 Capsule().fill(.white.opacity(0.2)).frame(width: 440, height: 10)
@@ -2765,56 +2758,43 @@ struct HUDView: View {
                             }.animation(.linear(duration: 0.08), value: v)
                             Text(muted ? "Muet" : "\(Int((v * 100).rounded())) %").font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit()).frame(width: 84, alignment: .trailing)
                             Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 44)
-                            VStack(alignment: .leading, spacing: 6) { Hint(b: "L", t: "Régler"); Hint(k: lib.hints.tri, t: muted ? "Son" : "Muet"); Hint(k: lib.hints.back, t: "Retour") }.font(.system(size: 12)).scaleEffect(0.85)
+                            Hint(k: lib.hints.tri, t: muted ? "Son" : "Muet").font(.system(size: 13))
                         }
                         .padding(.horizontal, 26).padding(.vertical, 18)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.5)))
-                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
+                        .background(.ultraThinMaterial, in: Capsule()).background(Capsule().fill(Color.black.opacity(0.5))).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
                         .shadow(color: .black.opacity(0.6), radius: 30, y: 12).foregroundStyle(.white).padding(.bottom, 14)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    HStack(spacing: 14) {
-                        if let g {
-                            HStack(spacing: 12) {
-                                Image(nsImage: a?.cover ?? g.icon).resizable().scaledToFill().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(g.name).font(.system(size: 15, weight: .bold, design: .rounded)).lineLimit(1).frame(maxWidth: 180, alignment: .leading)
-                                    Text(String(format: "%d:%02d de jeu", elapsed / 3600, elapsed % 3600 / 60)).font(.system(size: 12, weight: .medium, design: .rounded).monospacedDigit()).opacity(0.65)
-                                }
-                            }.padding(.trailing, 6)
-                            Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 64)
-                        }
-                        ForEach(Array(lib.quickItems.enumerated()), id: \.offset) { i, it in
-                            let on = i == lib.quickIndex
+                    VStack(spacing: 12) {
+                        // le nom du choix visé, seul texte du menu ; pour un volume, son niveau
+                        if lib.quickItems.indices.contains(lib.quickIndex) {
+                            let it = lib.quickItems[lib.quickIndex]; let i = lib.quickIndex
                             let v = i == 4 ? lib.macVolume : lib.volume, muted = i == 4 ? lib.macMuted : lib.gameMuted
-                            VStack(spacing: 8) {
-                                Image(systemName: it.1).font(.system(size: 22, weight: .medium)).frame(height: 26)
-                                if it.0.hasPrefix("Volume") {
-                                    ZStack(alignment: .leading) { Capsule().fill(.white.opacity(0.22)).frame(width: 84, height: 5); Capsule().fill(.white).frame(width: max(5, 84 * CGFloat(v)), height: 5) }
-                                        .animation(.linear(duration: 0.08), value: v)
-                                    Text(muted ? "Muet · \(i == 4 ? "général" : "jeu")" : "\(Int((v * 100).rounded())) % · \(i == 4 ? "général" : "jeu")").font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit()).opacity(0.75)
-                                } else {
-                                    Text(it.0.replacingOccurrences(of: "les 15 dernières secondes", with: "15 s")).font(.system(size: 12, weight: .semibold, design: .rounded)).multilineTextAlignment(.center).lineLimit(2).frame(height: 30)
-                                }
-                            }
-                            .frame(width: 118, height: 92)
-                            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.white.opacity(on ? (lib.quickSlider ? 0.1 : 0.2) : 0.06)))
-                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(.white.opacity(on ? (lib.quickSlider ? 0.3 : 0.6) : 0), lineWidth: 1.5))
-                            .opacity(lib.quickSlider && !on ? 0.45 : 1)
-                            .scaleEffect(on ? 1.06 : 1.0).animation(.spring(response: 0.28, dampingFraction: 0.8), value: lib.quickIndex)
+                            Text(it.0.hasPrefix("Volume") ? "\(it.0) · \(muted ? "muet" : "\(Int((v * 100).rounded())) %")" : it.0.replacingOccurrences(of: "les 15 dernières secondes", with: "15 s"))
+                                .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit()).padding(.horizontal, 18).padding(.vertical, 8)
+                                .background(Capsule().fill(.white)).foregroundStyle(.black).opacity(lib.quickSlider ? 0.5 : 1).id(lib.quickIndex).transition(.opacity)
                         }
-                        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 64)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Hint(k: lib.hints.ok, t: lib.quickIndex >= 3 ? "Ouvrir" : "Valider"); Hint(k: lib.hints.back, t: "Fermer"); Hint(k: lib.hints.tri, t: "Muet"); Hint(b: "R", t: "Volume")
-                        }.font(.system(size: 12)).scaleEffect(0.85)
+                        HStack(spacing: 16) {
+                            if let g {
+                                Image(nsImage: a?.cover ?? g.icon).resizable().scaledToFill().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                Text(String(format: "%d:%02d", elapsed / 3600, elapsed % 3600 / 60)).font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit()).opacity(0.8)
+                                Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 44).padding(.horizontal, 4)
+                            }
+                            ForEach(Array(lib.quickItems.enumerated()), id: \.offset) { i, it in
+                                let on = i == lib.quickIndex
+                                Image(systemName: it.1).font(.system(size: on ? 29 : 23, weight: .medium)).frame(width: on ? 82 : 62, height: on ? 82 : 62)
+                                    .background(Circle().fill(on ? AnyShapeStyle(.white) : AnyShapeStyle(.white.opacity(0.12))))
+                                    .overlay(Circle().stroke(.white.opacity(on ? 0 : 0.16), lineWidth: 1))
+                                    .foregroundStyle(on ? .black : .white).opacity(lib.quickSlider && !on ? 0.45 : 1)
+                                    .animation(.spring(response: 0.28, dampingFraction: 0.75), value: lib.quickIndex)
+                            }
+                        }
+                        .padding(.horizontal, 22).padding(.vertical, 14)
+                        .background(.ultraThinMaterial, in: Capsule()).background(Capsule().fill(Color.black.opacity(0.45))).overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 1))
+                        .shadow(color: .black.opacity(0.6), radius: 40, y: 16)
+                        HStack(spacing: 10) { Pilule(k: lib.hints.ok, t: lib.quickIndex >= 3 ? "Ouvrir" : "Valider"); Pilule(k: lib.hints.back, t: "Fermer") }.scaleEffect(0.86)
                     }
-                    .padding(.horizontal, 22).padding(.vertical, 16)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
-                    .background(RoundedRectangle(cornerRadius: 26, style: .continuous).fill(Color.black.opacity(0.45)))
-                    .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.6), radius: 40, y: 16)
-                    .foregroundStyle(.white).padding(.bottom, 34)
+                    .foregroundStyle(.white).padding(.bottom, 28)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -2844,14 +2824,13 @@ struct JoueursView: View {
                     if j.count > 8 { Text("et \(j.count - 8) autre\(j.count - 8 > 1 ? "s" : "")").font(.system(size: 13, weight: .medium, design: .rounded)).opacity(0.6) }
                 }
             } else {
-                Text(joueurs == nil ? "Le serveur ne tourne pas : relance le jeu depuis Home" : "Personne n'est connecté pour l'instant").font(.system(size: 14, weight: .medium, design: .rounded)).opacity(0.65)
+                Text(joueurs == nil ? "Serveur arrêté" : "Personne").font(.system(size: 14, weight: .medium, design: .rounded)).opacity(0.65)
             }
-            HStack { Spacer(); Hint(k: back, t: "Fermer") }.font(.system(size: 12)).scaleEffect(0.85)
         }
-        .padding(.horizontal, 22).padding(.vertical, 18).frame(width: 380)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Color.black.opacity(0.5)))
-        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
+        .padding(.horizontal, 26).padding(.vertical, 22).frame(width: 380)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .background(RoundedRectangle(cornerRadius: 32, style: .continuous).fill(Color.black.opacity(0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
         .shadow(color: .black.opacity(0.6), radius: 30, y: 12).foregroundStyle(.white)
     }
 }
