@@ -12,7 +12,9 @@ publish = false
 [dependencies]
 steam-kit = { path = "../obelisk-src/crates/storefronts/steam-kit" }
 obelisk-core = { path = "../obelisk-src/crates/obelisk-core" }
-tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+obelisk-bridge = { path = "../obelisk-src/crates/obelisk-bridge" }
+game-runtime = { path = "../obelisk-src/crates/game-runtime" }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "signal"] }
 serde_json = "1"
 
 [profile.release]

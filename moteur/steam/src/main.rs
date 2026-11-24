@@ -5,8 +5,15 @@
 //!   home-steam connexion                 {"ev":"qr","url":…} à montrer en QR code, puis {"ev":"connecte","compte":…}
 //!   home-steam deconnexion               oublie le compte (trousseau)
 //!   home-steam bibliotheque              [{"app": 730, "nom": "…", "windows": true}, …]
-//!   home-steam installer APP DOSSIER     télécharge le jeu Windows dans DOSSIER/steam-APP-windows ; {"ev":"progress","frac":…}
+//!   home-steam installer APP             télécharge le jeu Windows (et, s'ils manquent, le moteur Voile et les composants de Valve) ;
+//!                                        {"ev":"progress","frac":…} puis {"ev":"installe","app":…,"nom":…,"dossier":…}
+//!   home-steam jeux                      les jeux Steam installés par Home : [{"app":…,"nom":…,"dossier":…}]
+//!   home-steam lancer APP                lance un jeu installé et reste là tant qu'il tourne ; un signal TERM ferme le jeu
 //!   home-steam plan APP DOSSIER_DU_JEU   {"exe": …, "args": […], "cwd": …} d'après Steam (PICS)
+//!
+//! installer et lancer passent par obelisk-bridge, la même porte d'entrée que l'app Obelisk : téléchargement des dépôts, préfixe
+//! Windows, hôte Steam (la bibliothèque de Valve, pilotée par obelisk-steam-host), sauvegardes Steam Cloud. Les dossiers sont ceux de
+//! Home : <Home>/pc/steam (jeux, reçus, sessions), <Home>/voile, <Home>/pc/prefixes, et l'hôte compilé dans <Home>/moteur/bin/SteamNative.
 //!   home-steam identifiants              les identifiants pour l'hôte Steam, en binaire sur la sortie (jamais affichés) : pour un tube
 //!
 //! Le compte : seuls le nom du compte et le jeton de session (refresh token) sont gardés, dans le trousseau de macOS
@@ -17,7 +24,10 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use obelisk_bridge as ob;
 use obelisk_core::{OnlineStatus, Platform};
+use std::path::PathBuf;
+use std::sync::Arc;
 use steam_kit::auth::{AuthClient, AuthTokens};
 use steam_kit::client::{Client, http_client};
 
@@ -167,37 +177,178 @@ async fn bibliotheque() {
     c.shutdown();
 }
 
-async fn installer(app_id: u32, parent: &Path) {
-    if !parent.is_absolute() {
-        echec("dossier d'installation attendu en chemin absolu");
+// ---------- installer et lancer : le circuit complet d'Obelisk, dans les dossiers de Home ----------
+fn racine() -> PathBuf {
+    PathBuf::from(std::env::var("HOME_RACINE").ok().filter(|r| r.starts_with('/')).unwrap_or_else(|| "/Applications/Home".into()))
+}
+
+fn lieux() -> ob::ObeliskLocations {
+    let r = racine();
+    let chemin = |p: PathBuf| p.to_string_lossy().into_owned();
+    let maison = std::env::var("HOME").unwrap_or_else(|_| echec("HOME manque"));
+    let mut l = ob::obelisk_locations(chemin(r.join("pc/steam")), chemin(r.join("moteur/bin")), maison);
+    let natifs = r.join("moteur/bin/SteamNative");
+    l.helper = chemin(natifs.join(game_runtime::package::HOST));
+    l.helpers = chemin(natifs);
+    let cache = r.join("pc/steam/Cache/SteamRuntime");
+    l.steam_runtime_package = chemin(game_runtime::valve::payload(&cache));
+    l.steam_runtime_cache = chemin(cache);
+    l.voile = chemin(r.join("voile"));               // le même Voile que les jeux Epic de Home
+    l.wine_prefixes = chemin(r.join("pc/prefixes"));
+    if !Path::new(&l.helper).is_file() {
+        echec("l'hôte Steam n'est pas compilé : relance « Préparer Steam »");
     }
-    let _ = std::fs::create_dir_all(parent);
-    let c = std::sync::Arc::new(client().await);
-    let suivi = {
-        let c = c.clone();
-        tokio::spawn(async move {
-            let mut dernier = -1.0f64;
-            loop {
-                tokio::time::sleep(Duration::from_millis(700)).await;
-                if let Some(p) = c.progress() {
-                    if p.total_bytes > 0 {
-                        let f = (p.completed_bytes as f64 / p.total_bytes as f64).clamp(0.0, 1.0);
-                        if (f - dernier).abs() >= 0.001 {
-                            dernier = f;
-                            dire(serde_json::json!({"ev": "progress", "frac": (f * 10000.0).round() / 10000.0}));
-                        }
-                    }
-                }
-            }
-        })
+    l
+}
+
+struct Compte {
+    session: Arc<ob::SteamSession>,
+    sessions: Arc<ob::StorefrontSessions>,
+    installations: Arc<ob::AccountInstallations>,
+}
+
+/// La session Steam du compte, ses parties (sessions de jeu) et ses installations, comme l'app Obelisk les assemble
+async fn compte_complet(statut: ob::OnlineStatus) -> Compte {
+    let t = exiger_compte();
+    let l = lieux();
+    let _ = std::fs::create_dir_all(&l.library);
+    let identifiants = ob::SteamCredentials { account_name: t.account_name.clone(), steam_id: t.steam_id, refresh_token: t.refresh_token.clone() };
+    let session = match ob::SteamSession::connect(identifiants.clone(), None, statut).await {
+        Ok(s) => s,
+        Err(e) => echec(&clair(&e.to_string())),
     };
-    let r = c.download(app_id, Platform::Windows, langue(), parent).await;
-    suivi.abort();
+    let sessions = ob::StorefrontSessions::new(ob::SessionStorefront::Steam, l.clone());
+    let recus = Path::new(&l.library).join(format!("steam-installations-{}.json", t.steam_id)).to_string_lossy().into_owned();
+    let installations = match ob::AccountInstallations::steam(session.clone(), identifiants, sessions.clone(), recus, l) {
+        Ok(i) => i,
+        Err(e) => echec(&clair(&e.to_string())),
+    };
+    Compte { session, sessions, installations }
+}
+
+fn installe(etat: &ob::InstallationsState, app_id: u32) -> Option<ob::Installation> {
+    etat.installations.iter().find(|i| i.game == app_id.to_string() && i.platform == ob::GamePlatform::Windows).cloned()
+}
+
+fn rapport(r: &ob::InstallationReport) -> String {
     match r {
-        Ok(i) => dire(serde_json::json!({"ev": "installe", "app": i.app_id, "nom": i.name, "dossier": parent.join(&i.directory), "octets": i.total_bytes})),
+        ob::InstallationReport::Storefront { key } => clair(key),
+        ob::InstallationReport::DownloadDirectory { message } => format!("dossier des jeux : {message}"),
+        ob::InstallationReport::GamesFolderUnavailable { path } => format!("dossier des jeux inaccessible : {path}"),
+        autre => format!("{autre:?}"),
+    }
+}
+
+async fn installer(app_id: u32) {
+    let c = compte_complet(ob::OnlineStatus::Invisible).await;
+    let nom = match c.session.games().await {
+        Ok(jeux) => jeux.into_iter().find(|j| j.app_id == app_id).map(|j| j.name),
         Err(e) => echec(&clair(&e.to_string())),
     }
-    c.shutdown();
+    .unwrap_or_else(|| echec("ce jeu n'est pas dans ta bibliothèque Steam"));
+    dire(serde_json::json!({"ev": "stage", "k": 1, "n": 1, "name": format!("Téléchargement de {nom}")}));
+    c.installations.install(ob::GameOffer::Steam { app_id, name: nom.clone(), language: langue().into() }, Some(ob::GamePlatform::Windows));
+    let (mut revision, mut dernier, mut vu) = (0u64, -1.0f64, false);
+    loop {
+        let e = tokio::time::timeout(Duration::from_secs(2), c.installations.changed(revision)).await.unwrap_or_else(|_| c.installations.state());
+        revision = e.revision;
+        if let Some(r) = &e.report {
+            echec(&rapport(r));
+        }
+        if let Some(t) = e.transfer.as_ref().filter(|t| t.game == app_id.to_string()) {
+            vu = true;
+            match t.state {
+                ob::TransferState::Failed | ob::TransferState::Cancelled => echec(&clair(&t.message)),
+                _ if t.total_bytes > 0 => {
+                    let f = (t.completed_bytes as f64 / t.total_bytes as f64).clamp(0.0, 1.0);
+                    if (f - dernier).abs() >= 0.001 {
+                        dernier = f;
+                        dire(serde_json::json!({"ev": "progress", "frac": (f * 10000.0).round() / 10000.0}));
+                    }
+                }
+                _ => {}
+            }
+        }
+        // fini : le Transfert a tourné, plus rien ne télécharge, et le reçu du jeu est là, complet
+        if (vu || e.transfer.is_none()) && !e.downloading && e.queued.is_empty() {
+            if let Some(i) = installe(&e, app_id).filter(|i| !i.needs_verification) {
+                dire(serde_json::json!({"ev": "installe", "app": app_id, "nom": i.name, "dossier": i.directory, "octets": i.total_bytes}));
+                c.session.shutdown();
+                return;
+            }
+        }
+    }
+}
+
+async fn jeux() {
+    let l = lieux();
+    let Some(t) = compte() else {
+        dire(serde_json::json!([]));
+        return;
+    };
+    // les reçus du compte, lus sans se connecter à Steam
+    let recus = Path::new(&l.library).join(format!("steam-installations-{}.json", t.steam_id));
+    let v: serde_json::Value = std::fs::read(&recus).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(serde_json::json!([]));
+    let sortie: Vec<_> = v
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|j| j["platform"].as_str().is_some_and(|p| p.eq_ignore_ascii_case("windows")) && j["directory"].as_str().is_some_and(|d| Path::new(d).is_dir()))
+        .map(|j| serde_json::json!({"app": j["appId"], "nom": j["name"], "dossier": j["directory"]}))
+        .collect();
+    dire(serde_json::Value::Array(sortie));
+}
+
+async fn lancer(app_id: u32) {
+    let c = compte_complet(ob::OnlineStatus::Online).await;
+    let Some(i) = installe(&c.installations.state(), app_id) else { echec("ce jeu n'est pas installé par Home") };
+    c.installations.launch(i.id.clone());
+    let mut terme = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap_or_else(|_| echec("signaux indisponibles"));
+    let (mut parti, mut en_jeu, mut etape, mut debut) = (false, false, String::new(), Instant::now());
+    loop {
+        tokio::select! {
+            _ = terme.recv() => {   // Home ferme le jeu : arrêt propre, les sauvegardes Cloud se règlent
+                let _ = c.sessions.stop().await;
+                debut = Instant::now();
+            }
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+        }
+        let e = c.installations.state();
+        if let Some(r) = &e.report {
+            echec(&rapport(r));
+        }
+        let s = c.sessions.state();
+        if let Some(a) = &s.active {
+            parti = true;
+            if let Some(offre) = &a.voile_update {   // une version plus récente du moteur : prise si le jeu la demande, sinon passée
+                let _ = c.sessions.answer_voile_update(a.id.clone(), if offre.required { ob::VoileUpdateAnswer::Update } else { ob::VoileUpdateAnswer::Skip });
+            }
+            if let Some(r) = &a.runtime_install {
+                dire(serde_json::json!({"ev": "progress", "frac": (r.fraction * 1000.0).round() / 1000.0, "quoi": format!("{:?}", r.component)}));
+            }
+            let maintenant = format!("{:?}", a.phase);
+            if maintenant != etape {
+                etape = maintenant;
+                dire(serde_json::json!({"ev": "phase", "phase": etape}));
+            }
+            if matches!(a.phase, ob::GamePhase::Running) {
+                en_jeu = true;
+            }
+        } else if s.rosetta.is_some() {
+            echec("Rosetta manque : dans le Terminal, tape  softwareupdate --install-rosetta --agree-to-license  puis relance le jeu");
+        } else if parti {
+            // la partie est finie : dernier état gardé par les sessions
+            let fin = s.last.as_ref().map(|l| format!("{:?}", l.phase)).unwrap_or_default();
+            if fin == "Failed" && !en_jeu {
+                echec("le jeu n'a pas démarré (journal dans <Home>/pc/steam)");
+            }
+            dire(serde_json::json!({"ev": "fini", "phase": fin}));
+            c.session.shutdown();
+            return;
+        } else if !e.launching && debut.elapsed() > Duration::from_secs(60) {
+            echec("le lancement n'a pas commencé");
+        }
+    }
 }
 
 async fn plan(app_id: u32, dossier: &Path) {
@@ -236,9 +387,11 @@ async fn main() {
             dire(serde_json::json!({"compte": null}));
         }
         Some("bibliotheque") => bibliotheque().await,
-        Some("installer") if a.len() == 3 => installer(app(a.get(1)), Path::new(&a[2])).await,
+        Some("installer") if a.len() == 2 => installer(app(a.get(1))).await,
+        Some("jeux") => jeux().await,
+        Some("lancer") if a.len() == 2 => lancer(app(a.get(1))).await,
         Some("plan") if a.len() == 3 => plan(app(a.get(1)), Path::new(&a[2])).await,
         Some("identifiants") => identifiants(),
-        _ => echec("commande inconnue : etat | connexion | deconnexion | bibliotheque | installer APP DOSSIER | plan APP DOSSIER | identifiants"),
+        _ => echec("commande inconnue : etat | connexion | deconnexion | bibliotheque | installer APP | jeux | lancer APP | plan APP DOSSIER | identifiants"),
     }
 }

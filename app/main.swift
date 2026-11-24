@@ -503,7 +503,7 @@ final class Library: ObservableObject {
             }
         }
         // Jeux Windows installés par Home (Epic Games, moteur/pc/pc.py) : <Home>/pc/jeux.json (identifiant, nom, dossier)
-        for j in PCHome.jeux() {
+        for j in PCHome.jeux() + PCHome.jeuxSteam() {
             let key = "pc:" + j.app
             let entry = config.jeux.first { $0.chemin == key }
             if entry?.masque == true || seen.contains(key) { continue }; seen.insert(key)
@@ -600,7 +600,7 @@ final class Library: ObservableObject {
         let played = st?.lastPlayed.map { "Dernière partie \($0.formatted(.relative(presentation: .named)))" } ?? "Jamais joué"
         let direct = g.viaObelisk && ObeliskDirect.recipe(for: g) != nil && ObeliskDirect.legendary() != nil
         var items: [SalonMenuItem] = [
-            SalonMenuItem(label: "Jouer", detail: g.viaHome ? (g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows, lancé par Home" : "Epic Games, lancé par Home") : g.viaObelisk ? (direct ? "Lancement direct (Epic Games)" : "Lancé par Obelisk") : nil, icon: "play.fill", action: { self.menu = nil; self.launch() }),
+            SalonMenuItem(label: "Jouer", detail: g.viaHome ? (g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows, lancé par Home" : g.appPC?.hasPrefix("steam:") == true ? "Steam, lancé par Home" : "Epic Games, lancé par Home") : g.viaObelisk ? (direct ? "Lancement direct (Epic Games)" : "Lancé par Obelisk") : nil, icon: "play.fill", action: { self.menu = nil; self.launch() }),
             SalonMenuItem(label: "Apparence", icon: "paintpalette.fill", action: { self.openApparence(g) }),
         ]
         if Atelier.modsPossibles(g) {
@@ -611,7 +611,7 @@ final class Library: ObservableObject {
         case .nxnative, .mng: items.append(SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: { self.openUpdateMenu(g) }))
         case .obelisk: items.append(SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: { self.menu = nil; self.ouvrirObelisk() }))
         case .pc: if g.appPC?.hasPrefix("exe:") != true { items.append(SalonMenuItem(label: "Mises à jour", detail: "Vérifie et télécharge la dernière version", icon: "arrow.down.circle.fill", action: {
-            self.menu = nil; if let a = g.appPC { self.lancer("pc.command", ["installer", a], titre: "Mise à jour de \(g.name)", jeux: [g.id]) } })) }
+            self.menu = nil; if let a = g.appPC { if a.hasPrefix("steam:") { self.lancer("steam.command", ["installer", String(a.dropFirst(6))], titre: "Mise à jour de \(g.name)", jeux: [g.id]) } else { self.lancer("pc.command", ["installer", a], titre: "Mise à jour de \(g.name)", jeux: [g.id]) } } })) }
         case .mac: break
         }
         if g.titleID != nil || Atelier.moteurDe(g) == .mng {
@@ -1209,13 +1209,13 @@ final class Library: ObservableObject {
     /// prépare le préfixe Windows au premier lancement, puis devient le script launch.sh du moteur Voile. Son journal : log/pc-<jeu>.log
     private func launchPC(_ g: Game) {
         guard let app = g.appPC else { running = nil; return }
-        toast = "Connexion à Epic…"
+        toast = app.hasPrefix("steam:") ? "Connexion à Steam…" : app.hasPrefix("exe:") ? "\(g.name) se prépare…" : "Connexion à Epic…"
         DispatchQueue.global().async { [weak self] in
             let appId = g.name.replacingOccurrences(of: "/", with: "-").unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }.map(String.init).joined()
             if let a = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.zagrios.obelisk.game.\(appId)" && !$0.isTerminated }) {   // déjà lancé : un anti-triche refuse une 2e instance
                 DispatchQueue.main.async { a.activate(); self?.watchedApp = a; self?.toast = "\(g.name) tourne déjà — je le remets devant" }; return
             }
-            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [Atelier.outils.appendingPathComponent("pc.command").path, "lancer", app]
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = app.hasPrefix("steam:") ? [Atelier.outils.appendingPathComponent("steam.command").path, "lancer", String(app.dropFirst(6))] : [Atelier.outils.appendingPathComponent("pc.command").path, "lancer", app]
             p.environment = ProcessInfo.processInfo.environment.merging(Dossiers.env, uniquingKeysWith: { $1 }); p.standardInput = FileHandle.nullDevice
             let logFile = Atelier.home.appendingPathComponent("log/pc-\(safeName(g.name)).log")
             FileManager.default.createFile(atPath: logFile.path, contents: nil); if let h = try? FileHandle(forWritingTo: logFile) { p.standardOutput = h; p.standardError = h }
@@ -1699,6 +1699,21 @@ enum PCHome {
             guard let a = j["app"] as? String, let n = j["nom"] as? String, let dos = j["dossier"] as? String, FileManager.default.fileExists(atPath: dos) else { return nil }
             return Jeu(app: a, nom: n.replacingOccurrences(of: "®", with: "").replacingOccurrences(of: "™", with: "").trimmingCharacters(in: .whitespaces), dossier: dos) }
     }
+    /// Les jeux Steam installés par Home : les reçus de home-steam (<Home>/pc/steam/steam-installations-<compte>.json), lus tels quels
+    static func jeuxSteam() -> [Jeu] {
+        let d = Atelier.home.appendingPathComponent("pc/steam")
+        let fichiers = ((try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? []).filter { $0.lastPathComponent.hasPrefix("steam-installations-") && $0.pathExtension == "json" }
+        var vus = Set<Int>(); var out: [Jeu] = []
+        for f in fichiers {
+            guard let data = try? Data(contentsOf: f), let l = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { continue }
+            for j in l {
+                guard let a = j["appId"] as? Int, let n = j["name"] as? String, let dos = j["directory"] as? String, (j["platform"] as? String)?.lowercased() == "windows",
+                      FileManager.default.fileExists(atPath: dos), vus.insert(a).inserted else { continue }
+                out.append(Jeu(app: "steam:\(a)", nom: n.replacingOccurrences(of: "®", with: "").replacingOccurrences(of: "™", with: "").trimmingCharacters(in: .whitespaces), dossier: dos))
+            }
+        }
+        return out
+    }
     /// pc.command <arguments> : sa sortie (la dernière ligne JSON pour etat et bibliotheque)
     static func run(_ args: [String], timeout: TimeInterval = 40) -> String {
         setenv("HOME_RACINE", Dossiers.home.path, 1); setenv("HOME_JEUX", Dossiers.jeux.path, 1)   // ObeliskDirect.run reprend l'environnement de Home
@@ -1743,7 +1758,7 @@ enum Compat {
         let n = norme(nom); return n.isEmpty ? nil : jeux.first { norme($0.nom) == n }
     }
     static func entree(_ g: Game) -> Jeu? {
-        if let a = g.appPC { return entree(epic: a, nom: g.name) }
+        if let a = g.appPC { return a.hasPrefix("steam:") ? entree(steam: String(a.dropFirst(6)), nom: g.name) : entree(epic: a, nom: g.name) }
         if g.viaObelisk, let i = ObeliskDirect.installations().first(where: { $0.folder == String(g.id.dropFirst(8)) }) { return entree(epic: i.store == "Epic" ? i.appName : nil, steam: i.store == "Steam" ? i.appName : nil, nom: i.name) }
         return nil
     }
@@ -2414,7 +2429,7 @@ struct Screen: View {
                             } else { Label("Jamais joué", systemImage: "sparkles") }
                             Label(g.category, systemImage: "tag")
                             if g.viaObelisk { Label("via Obelisk", systemImage: "pc") }
-                            if g.viaHome { Label(g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows" : "Epic Games", systemImage: "pc") }
+                            if g.viaHome { Label(g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows" : g.appPC?.hasPrefix("steam:") == true ? "Steam" : "Epic Games", systemImage: "pc") }
                         }.font(.system(size: 17, weight: .medium, design: .rounded)).opacity(0.85)
                         HStack(spacing: 16) {
                             HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running == nil ? "Jouer" : "En cours…").font(.system(size: 20, weight: .semibold, design: .rounded)) }
@@ -3818,7 +3833,7 @@ extension Library {
                     items.append(SalonMenuItem(label: "Préparer Steam", detail: "Compile l'outil Steam de Home (Rust, quelques minutes)", icon: "arrow.down.circle.fill", section: "Steam", tint: .blue, action: {
                         self.menu = nil; self.lancer("preparer-steam.command", titre: "Préparation de Steam") }))
                 } else if let cs = steam {
-                    items.append(SalonMenuItem(label: "Ma bibliothèque Steam", detail: "Compte \(cs) — à lire pour l'instant : l'installation arrive", icon: "books.vertical.fill", section: "Steam", tint: .blue, action: { self.openBibliothequeSteam(back: ici) }))
+                    items.append(SalonMenuItem(label: "Ma bibliothèque Steam", detail: "Compte \(cs)", icon: "books.vertical.fill", section: "Steam", tint: .blue, action: { self.openBibliothequeSteam(back: ici) }))
                     items.append(SalonMenuItem(label: "Déconnecter Steam", icon: "person.crop.circle.badge.minus", section: "Steam", tint: .gray, action: { _ = PCHome.steam(["deconnexion"]); ici() }))
                 } else {
                     items.append(SalonMenuItem(label: "Se connecter à Steam", detail: "Un QR code à scanner avec l'app Steam du téléphone, sans mot de passe", icon: "qrcode", section: "Steam", tint: .blue, action: { self.connexionSteam(retour: ici) }))
@@ -3919,8 +3934,8 @@ extension Library {
             retour()
         }
     }
-    /// La bibliothèque Steam du compte, avec la compatibilité de chaque jeu. L'installation et le lancement par Home ne sont pas encore
-    /// faits : en attendant, un jeu bloqué montre sa raison, les autres disent où ils en sont.
+    /// La bibliothèque Steam du compte, avec la compatibilité de chaque jeu : un jeu bloqué montre sa raison, les autres s'installent
+    /// (steam.command installer, le circuit d'Obelisk piloté par home-steam)
     func openBibliothequeSteam(back: @escaping () -> Void) {
         menu = SalonMenu(title: "Bibliothèque Steam", subtitle: "Lecture de ta bibliothèque…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "books.vertical.fill", back: back)
         DispatchQueue.global().async {
@@ -3935,7 +3950,11 @@ extension Library {
                     if let c, c.etat == "bloque" { return SalonMenuItem(label: nom, detail: "Incompatible — " + (c.raison ?? ""), icon: "xmark.shield.fill", tint: .red, action: { self.openBloque(nom, c, back: ici) }) }
                     if j["windows"] as? Bool == false { return SalonMenuItem(label: nom, detail: "Pas de version Windows", icon: "minus.circle", tint: .gray, info: true, action: {}) }
                     let detail = c?.etat == "verifie" ? "Vérifié sur Mac" : c?.etat == "linux" ? "Fonctionne sous Linux — pas encore confirmé sur Mac" : "Pas encore testé"
-                    return SalonMenuItem(label: nom, detail: detail, icon: c?.etat == "verifie" ? "checkmark.seal.fill" : "circle", tint: c?.etat == "verifie" ? .green : c?.etat == "linux" ? .teal : .gray, action: { self.toast = "L'installation des jeux Steam par Home arrive — en attendant, passe par Obelisk" })
+                    return SalonMenuItem(label: nom, detail: detail, icon: c?.etat == "verifie" ? "checkmark.seal.fill" : "circle", tint: c?.etat == "verifie" ? .green : c?.etat == "linux" ? .teal : .gray, action: {
+                        if PCHome.jeuxSteam().contains(where: { $0.app == "steam:\(app)" }) { self.toast = "\(nom) est déjà installé"; return }
+                        self.menu = SalonMenu(title: "Installer", subtitle: nom, items: [
+                            SalonMenuItem(label: "Télécharger et installer", detail: detail, icon: "arrow.down.circle.fill", tint: .green, action: { self.menu = nil; self.lancer("steam.command", ["installer", String(app)], titre: "Installation de \(nom)") }),
+                        ], hero: "arrow.down.circle.fill", text: "Au premier jeu, Home télécharge aussi le moteur Windows et les composants Steam de Valve.", back: ici) })
                 }
                 self.menu = SalonMenu(title: "Bibliothèque Steam", subtitle: "\(items.count) jeux", items: items.isEmpty ? [SalonMenuItem(label: "Aucun jeu sur ce compte", icon: "tray", info: true, action: {})] : items, hero: "books.vertical.fill", back: back)
             }
