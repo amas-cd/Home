@@ -302,6 +302,16 @@ def cmd_deconnexion():
     suivant = next((i for i in reste if i != a and nom_compte(i)), reste[0] if reste else 'defaut')
     noter_comptes(suivant, reste or ['defaut']); dire('Déconnecté d\'Epic')
 
+def cmd_images(app):
+    """Les images qu'Epic donne pour un jeu (jaquette, fond, logo), d'après ce que Legendary a déjà en mémoire : rien à demander en
+    ligne, pas de clé. Home s'en sert quand il n'a pas d'autre image."""
+    g = coeur().get_game(app, update_meta=False)
+    imgs = {i.get('type'): i.get('url') for i in ((g.metadata if g else None) or {}).get('keyImages', []) if i.get('url')}
+    def premier(*types): return next((imgs[t] for t in types if t in imgs), None)
+    dire(json.dumps({'jaquette': premier('DieselGameBoxTall', 'OfferImageTall', 'Thumbnail', 'DieselGameBox'),
+                     'fond': premier('DieselGameBox', 'OfferImageWide', 'DieselStoreFrontWide', 'Featured'),
+                     'logo': premier('DieselGameBoxLogo', 'ProductLogo')}, ensure_ascii=False))
+
 def cmd_importer():
     """Reprend dans Home ce qu'Obelisk avait installé sur ce Mac, sans rien retélécharger : le moteur Voile (copie sans place en
     plus sur un disque APFS), les jeux Epic (déplacés dans <Home>/pc/jeux, déclarés à Legendary) et les jeux Steam des comptes
@@ -630,6 +640,7 @@ def main():
     elif c == 'deconnexion': cmd_deconnexion()
     elif c == 'bibliotheque': cmd_bibliotheque()
     elif c == 'importer': cmd_importer()
+    elif c == 'images' and len(a) == 2: cmd_images(a[1])
     elif c == 'installer' and len(a) == 2: cmd_installer(a[1])
     elif c == 'lancer' and len(a) >= 2: cmd_lancer(a[1], essai='--essai' in a[2:])
     elif c == 'ajouter-exe' and len(a) >= 2:

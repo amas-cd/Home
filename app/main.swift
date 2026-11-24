@@ -607,12 +607,34 @@ final class Library: ObservableObject {
                 if a.cover == nil, let d = try? await URLSession.shared.data(from: URL(string: "https://api.nlib.cc/nx/\(t)/icon")!).0, let i = NSImage(data: d) { try? d.write(to: cache.appendingPathComponent("square.jpg")); got.cover = i }
                 if a.background == nil, let b = await EShop.banner(titleID: t), let d = try? await URLSession.shared.data(from: b.full).0, let i = NSImage(data: d) { try? d.write(to: cache.appendingPathComponent("hero.jpg")); got.background = i }   // bannière officielle de la boutique
             }
+            // Sans clé SteamGridDB, chaque boutique donne quand même ses images : le carré de l'eShop pour un jeu Switch, les images
+            // d'Epic (déjà connues de Legendary) ou celles de Steam (par le numéro du jeu) pour un jeu PC
+            func prendre(_ u: URL?, _ fichier: String) async -> NSImage? {
+                guard let u, let (d, r) = try? await URLSession.shared.data(from: u), (r as? HTTPURLResponse)?.statusCode == 200, let i = NSImage(data: d) else { return nil }
+                try? d.write(to: cache.appendingPathComponent(fichier)); return i
+            }
+            if a.cover == nil, got.cover == nil, let t = g.storeID, let sq = await EShop.info(titleID: t)?.square {
+                let grand = URL(string: sq.absoluteString.replacingOccurrences(of: "image500w.jpg", with: "image1600w.jpg"))   // la même image en 1600 px, quand Nintendo l'a
+                if let i = await prendre(grand, "square.jpg") { got.cover = i } else if let i = await prendre(sq, "square.jpg") { got.cover = i }
+            }
+            if let app = g.appPC, !app.hasPrefix("exe:"), a.cover == nil || a.background == nil || a.logo == nil {
+                var u: [String: [URL]] = [:]
+                if app.hasPrefix("steam:") {
+                    let b = "https://cdn.cloudflare.steamstatic.com/steam/apps/\(app.dropFirst(6))/"
+                    u = ["jaquette": ["library_600x900_2x.jpg", "library_600x900.jpg", "header.jpg"], "fond": ["library_hero.jpg"], "logo": ["logo.png"]].mapValues { $0.compactMap { URL(string: b + $0) } }
+                } else if let j = PCHome.json(PCHome.run(["images", app], timeout: 30)) as? [String: Any] {
+                    for (k, v) in j { if let t = v as? String, let x = URL(string: t) { u[k] = [x] } }
+                }
+                if a.cover == nil, got.cover == nil { for x in u["jaquette"] ?? [] { if let i = await prendre(x, "square.jpg") { got.cover = i; break } } }
+                if a.background == nil, got.background == nil { for x in u["fond"] ?? [] { if let i = await prendre(x, "hero.jpg") { got.background = i; break } } }
+                if a.logo == nil { for x in u["logo"] ?? [] { if let i = await prendre(x, "logo.png") { got.logo = trimTransparent(i); break } } }
+            }
             var nomSGDB = nomPerso ?? g.name   // sinon le titre de la boutique (« The Legend of Zelda: Ocarina of Time – Nintendo Switch 2 Edition »…) plutôt qu'un nom court
             if nomPerso == nil, let t = g.storeID, let i = await EShop.info(titleID: t) { nomSGDB = i.title }
             var gidSGDB: Int? = nil
             if let key = SteamGridDB.key() { gidSGDB = await SteamGridDB.gameID(name: nomSGDB, key: key); if gidSGDB == nil, nomSGDB != g.name { gidSGDB = await SteamGridDB.gameID(name: g.name, key: key) } }
             if let key = SteamGridDB.key(), let gid = gidSGDB {   // ce qui manque encore : SteamGridDB (fonds 3840×1240 d'abord)
-                for (slot, have) in [(Slot.cover, a.cover ?? got.cover), (.background, a.background ?? got.background), (.logo, a.logo)] where have == nil {
+                for (slot, have) in [(Slot.cover, a.cover ?? got.cover), (.background, a.background ?? got.background), (.logo, a.logo ?? got.logo)] where have == nil {
                     if let c = await SteamGridDB.candidates(slot, gameID: gid, key: key).first, let full = c.full, let d = try? await URLSession.shared.data(from: full).0, let i = NSImage(data: d) {
                         let name = slot == .cover ? "square.jpg" : slot == .background ? "hero.jpg" : "logo.png"
                         try? d.write(to: cache.appendingPathComponent(name))
