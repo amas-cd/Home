@@ -1,0 +1,20 @@
+# home-steam : Steam dans Home, sans Obelisk. Un petit outil en ligne de commande au-dessus de steam-kit, le code Steam
+# d'Obelisk (https://github.com/Zagrios/Obelisk, GPL-3.0) : cet outil est donc lui aussi sous GPL-3.0.
+# La source d'Obelisk est attendue à côté, dans ../obelisk-src, au commit de ../steam/OBELISK-REF (preparer-steam.command la clone).
+[package]
+name = "home-steam"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+steam-kit = { path = "../obelisk-src/crates/storefronts/steam-kit" }
+obelisk-core = { path = "../obelisk-src/crates/obelisk-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
+strip = true

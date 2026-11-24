@@ -1633,6 +1633,60 @@ final class ConnexionEpic: NSObject, WKNavigationDelegate, NSWindowDelegate {
     }
 }
 
+// Connexion à Steam par QR code : outils/steam.command connexion (home-steam, au-dessus du code Steam d'Obelisk) demande une session à
+// Steam et donne une adresse, montrée ici en QR code ; on la scanne avec l'app Steam du téléphone, qui valide. Aucun mot de passe, aucun
+// code à copier. Le jeton de session est gardé par l'outil dans le trousseau de macOS : Home ne le voit pas.
+final class ConnexionSteam: NSObject, NSWindowDelegate {
+    static var enCours: ConnexionSteam?
+    private var fenetre: NSWindow?; private var image: NSImageView?; private var processus: Process?; private var fin: ((String?, String?) -> Void)?
+    private var tampon = Data(); private var erreur: String?
+    /// fin(compte, erreur) : le nom du compte connecté, ou nil avec la raison (nil aussi si la fenêtre a été fermée)
+    static func ouvrir(_ fin: @escaping (String?, String?) -> Void) {
+        enCours?.terminer(nil)
+        let c = ConnexionSteam(); c.fin = fin; enCours = c
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 520), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.title = "Connexion à Steam"; w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating
+        let vue = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 520))
+        let img = NSImageView(frame: NSRect(x: 60, y: 170, width: 300, height: 300)); img.imageScaling = .scaleProportionallyUpOrDown; vue.addSubview(img); c.image = img
+        let t = NSTextField(wrappingLabelWithString: "Ouvre l'app Steam sur ton téléphone, touche le bouclier (Steam Guard) en bas, puis « Scanner un QR code » et vise ce code. Valide ensuite la connexion sur le téléphone.")
+        t.frame = NSRect(x: 30, y: 30, width: 360, height: 120); t.alignment = .center; t.font = .systemFont(ofSize: 14); vue.addSubview(t)
+        w.contentView = vue; w.center(); c.fenetre = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [Atelier.outils.appendingPathComponent("steam.command").path, "connexion"]
+        p.environment = ProcessInfo.processInfo.environment.merging(Dossiers.env, uniquingKeysWith: { $1 }); p.standardInput = FileHandle.nullDevice
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
+        pipe.fileHandleForReading.readabilityHandler = { h in let d = h.availableData; if !d.isEmpty { DispatchQueue.main.async { c.recu(d) } } }
+        p.terminationHandler = { _ in DispatchQueue.main.async { pipe.fileHandleForReading.readabilityHandler = nil; if c.fin != nil { c.terminer(nil) } } }
+        c.processus = p
+        if (try? p.run()) == nil { c.erreur = "L'outil Steam ne démarre pas"; c.terminer(nil) }
+    }
+    private func recu(_ d: Data) {
+        tampon.append(d)
+        while let r = tampon.firstIndex(of: 0x0a) {
+            let ligne = String(decoding: tampon[tampon.startIndex..<r], as: UTF8.self); tampon.removeSubrange(tampon.startIndex...r)
+            if ligne.hasPrefix("ÉCHEC : ") { erreur = String(ligne.dropFirst(8)); continue }
+            guard let j = (try? JSONSerialization.jsonObject(with: Data(ligne.utf8))) as? [String: Any] else { continue }
+            if j["ev"] as? String == "qr", let u = j["url"] as? String { image?.image = ConnexionSteam.qr(u) }
+            if j["ev"] as? String == "connecte" { terminer(j["compte"] as? String ?? "") }
+            if j["absent"] != nil { erreur = "L'outil Steam n'est pas encore préparé" }
+        }
+    }
+    /// Le QR code d'une adresse, net à n'importe quelle taille
+    static func qr(_ texte: String) -> NSImage? {
+        guard let f = CIFilter(name: "CIQRCodeGenerator") else { return nil }
+        f.setValue(Data(texte.utf8), forKey: "inputMessage"); f.setValue("M", forKey: "inputCorrectionLevel")
+        guard let ci = f.outputImage?.transformed(by: CGAffineTransform(scaleX: 12, y: 12)) else { return nil }
+        let rep = NSCIImageRep(ciImage: ci); let img = NSImage(size: rep.size); img.addRepresentation(rep); return img
+    }
+    func windowWillClose(_ n: Notification) { terminer(nil) }
+    private func terminer(_ compte: String?) {
+        guard let f = fin else { return }; fin = nil
+        if let p = processus, p.isRunning { p.terminate() }
+        fenetre?.delegate = nil; fenetre?.close(); fenetre = nil; ConnexionSteam.enCours = nil
+        f(compte, compte == nil ? erreur : nil)
+    }
+}
+
 // Jeux PC installés par Home lui-même (Epic Games, sans Obelisk) : moteur/pc/pc.py fait le travail, lancé par outils/pc.command
 enum PCHome {
     struct Jeu { let app: String; let nom: String; let dossier: String }
@@ -1653,6 +1707,12 @@ enum PCHome {
         return try? JSONSerialization.jsonObject(with: d)
     }
     static func echec(_ sortie: String) -> String? { sortie.split(separator: "\n").last(where: { $0.hasPrefix("ÉCHEC : ") }).map { String($0.dropFirst(8)) } }
+    /// steam.command <arguments> (home-steam) : sa sortie
+    static func steam(_ args: [String], timeout: TimeInterval = 40) -> String {
+        setenv("HOME_RACINE", Dossiers.home.path, 1); setenv("HOME_JEUX", Dossiers.jeux.path, 1)
+        return ObeliskDirect.run("/bin/bash", [Atelier.outils.appendingPathComponent("steam.command").path] + args, timeout: timeout)
+    }
+    static var steamPret: Bool { FileManager.default.isExecutableFile(atPath: Atelier.moteur.appendingPathComponent("bin/home-steam").path) }
 }
 
 // Compatibilité des jeux PC : moteur/compat/pc.json, une liste vérifiée avec ses sources. « bloque » = l'éditeur ou l'anti-triche du jeu
@@ -3634,7 +3694,7 @@ extension Library {
         let ici: () -> Void = { self.openBienvenue() }
         menu = SalonMenu(title: "Bienvenue dans Home", subtitle: "Que veux-tu préparer sur ce Mac ?", items: [
             SalonMenuItem(label: "Jeux Switch", detail: "Xcode, Homebrew, nxnative et MacNativeGames — pour construire tes jeux à partir de tes dumps", icon: "gamecontroller.fill", action: { self.openPreparation(back: ici) }),
-            SalonMenuItem(label: "Jeux PC", detail: "Le moteur Windows et ton compte Epic Games — connexion sur le site d'Epic, dans une fenêtre", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
+            SalonMenuItem(label: "Jeux PC", detail: "Le moteur Windows, ton compte Epic Games (connexion dans une fenêtre) et ton compte Steam (QR code)", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
             SalonMenuItem(label: "Plus tard", detail: "Tout se retrouve dans la case + et dans Menu → Mises à jour → Moteurs", icon: "arrow.right.circle", tint: .gray, action: { self.menu = nil }),
         ], hero: "house.fill")
     }
@@ -3685,6 +3745,7 @@ extension Library {
         menu = SalonMenu(title: "Jeux PC", subtitle: "Vérification…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "desktopcomputer", back: back)
         DispatchQueue.global().async {
             let e = PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]
+            let steam = PCHome.steamPret ? (PCHome.json(PCHome.steam(["etat"])) as? [String: Any])?["compte"] as? String : nil
             DispatchQueue.main.async {
                 guard self.menu?.title == "Jeux PC" else { return }
                 let voile = e["voile"] as? String, leg = e["legendary"] as? Bool ?? false, compte = e["compte"] as? String
@@ -3699,8 +3760,17 @@ extension Library {
                     items.append(SalonMenuItem(label: "Changer de compte", icon: "person.crop.circle.badge.plus", tint: .gray, action: { self.connexionEpic(retour: ici) }))
                 }
                 items.append(SalonMenuItem(label: voile.map { "Moteur Voile \($0)" } ?? "Moteur Voile absent", detail: (e["voile_source"] as? String) == "obelisk" ? "Celui d'Obelisk, déjà sur ce Mac" : nil, icon: voile == nil ? "circle" : "checkmark.circle.fill", section: "État", tint: voile == nil ? .orange : .green, info: true, action: {}))
-                if FileManager.default.fileExists(atPath: "/Applications/Obelisk.app") { items.append(SalonMenuItem(label: "Ouvrir Obelisk", detail: "Pour Steam et GOG, que Home ne gère pas encore", icon: "desktopcomputer", section: "Autres boutiques", tint: .indigo, action: { self.menu = nil; self.ouvrirObelisk() })) }
-                self.menu = SalonMenu(title: "Jeux PC", subtitle: "Epic Games, sans Obelisk", items: items, hero: "desktopcomputer", back: back)
+                if !PCHome.steamPret {
+                    items.append(SalonMenuItem(label: "Préparer Steam", detail: "Compile l'outil Steam de Home (Rust, quelques minutes)", icon: "arrow.down.circle.fill", section: "Steam", tint: .blue, action: {
+                        self.menu = nil; self.lancer("preparer-steam.command", titre: "Préparation de Steam") }))
+                } else if let cs = steam {
+                    items.append(SalonMenuItem(label: "Ma bibliothèque Steam", detail: "Compte \(cs) — à lire pour l'instant : l'installation arrive", icon: "books.vertical.fill", section: "Steam", tint: .blue, action: { self.openBibliothequeSteam(back: ici) }))
+                    items.append(SalonMenuItem(label: "Déconnecter Steam", icon: "person.crop.circle.badge.minus", section: "Steam", tint: .gray, action: { _ = PCHome.steam(["deconnexion"]); ici() }))
+                } else {
+                    items.append(SalonMenuItem(label: "Se connecter à Steam", detail: "Un QR code à scanner avec l'app Steam du téléphone, sans mot de passe", icon: "qrcode", section: "Steam", tint: .blue, action: { self.connexionSteam(retour: ici) }))
+                }
+                if FileManager.default.fileExists(atPath: "/Applications/Obelisk.app") { items.append(SalonMenuItem(label: "Ouvrir Obelisk", detail: "Pour installer et lancer les jeux Steam et GOG en attendant", icon: "desktopcomputer", section: "Autres boutiques", tint: .indigo, action: { self.menu = nil; self.ouvrirObelisk() })) }
+                self.menu = SalonMenu(title: "Jeux PC", subtitle: "Epic Games et Steam, sans Obelisk", items: items, hero: "desktopcomputer", back: back)
             }
         }
     }
@@ -3785,6 +3855,35 @@ extension Library {
                     return SalonMenuItem(label: (e as NSString).lastPathComponent, detail: court, icon: "play.rectangle.fill", action: { self.ajouterExe(prefixe: pre, exe: URL(fileURLWithPath: e), nom: n) })
                 }
                 self.menu = SalonMenu(title: "Quel est le programme du jeu ?", subtitle: n, items: items, hero: "questionmark.app.fill", text: "L'installation est finie. Choisis le programme qui lance le jeu (souvent le plus gros, en haut).")
+            }
+        }
+    }
+    func connexionSteam(retour: @escaping () -> Void) {
+        menu = nil; toast = "Scanne le QR code avec l'app Steam de ton téléphone"
+        ConnexionSteam.ouvrir { compte, erreur in
+            if let compte { self.toast = "Connecté à Steam : \(compte)" } else if let erreur { self.toast = erreur }
+            retour()
+        }
+    }
+    /// La bibliothèque Steam du compte, avec la compatibilité de chaque jeu. L'installation et le lancement par Home ne sont pas encore
+    /// faits : en attendant, un jeu bloqué montre sa raison, les autres disent où ils en sont.
+    func openBibliothequeSteam(back: @escaping () -> Void) {
+        menu = SalonMenu(title: "Bibliothèque Steam", subtitle: "Lecture de ta bibliothèque…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "books.vertical.fill", back: back)
+        DispatchQueue.global().async {
+            let s = PCHome.steam(["bibliotheque"], timeout: 120); let l = PCHome.json(s) as? [[String: Any]]
+            DispatchQueue.main.async {
+                guard self.menu?.title == "Bibliothèque Steam" else { return }
+                guard let l else { self.toast = PCHome.echec(s) ?? "Bibliothèque illisible"; back(); return }
+                let ici: () -> Void = { self.openBibliothequeSteam(back: back) }
+                let items: [SalonMenuItem] = l.compactMap { j in
+                    guard let app = j["app"] as? Int, let nom = j["nom"] as? String, !nom.isEmpty else { return nil }
+                    let c = Compat.entree(steam: String(app), nom: nom)
+                    if let c, c.etat == "bloque" { return SalonMenuItem(label: nom, detail: "Incompatible — " + (c.raison ?? ""), icon: "xmark.shield.fill", tint: .red, action: { self.openBloque(nom, c, back: ici) }) }
+                    if j["windows"] as? Bool == false { return SalonMenuItem(label: nom, detail: "Pas de version Windows", icon: "minus.circle", tint: .gray, info: true, action: {}) }
+                    let detail = c?.etat == "verifie" ? "Vérifié sur Mac" : c?.etat == "linux" ? "Fonctionne sous Linux — pas encore confirmé sur Mac" : "Pas encore testé"
+                    return SalonMenuItem(label: nom, detail: detail, icon: c?.etat == "verifie" ? "checkmark.seal.fill" : "circle", tint: c?.etat == "verifie" ? .green : c?.etat == "linux" ? .teal : .gray, action: { self.toast = "L'installation des jeux Steam par Home arrive — en attendant, passe par Obelisk" })
+                }
+                self.menu = SalonMenu(title: "Bibliothèque Steam", subtitle: "\(items.count) jeux", items: items.isEmpty ? [SalonMenuItem(label: "Aucun jeu sur ce compte", icon: "tray", info: true, action: {})] : items, hero: "books.vertical.fill", back: back)
             }
         }
     }

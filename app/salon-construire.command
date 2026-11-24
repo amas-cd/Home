@@ -60,7 +60,7 @@ if [ -d "$D/sons" ]; then mkdir -p "$B/Salon.app/Contents/Resources/sons"; cp -R
 # Depuis le dépôt, le moteur est à côté (../moteur) ; depuis l'installation (<Home>/moteur/salon), c'est le dossier parent.
 MO="$D/../moteur"; [ -d "$MO/outils" ] || MO="$D/.."
 if [ -d "$MO/outils" ]; then E="$B/Salon.app/Contents/Resources/moteur"; mkdir -p "$E/salon"
-  for d in outils tools patches obelisk pc compat mng; do [ -d "$MO/$d" ] && rsync -a --exclude .DS_Store --exclude __pycache__ --exclude tests --exclude notes --exclude 'recette-*.json' --exclude legendary-path.txt "$MO/$d" "$E/"; done
+  for d in outils tools patches obelisk pc compat mng steam; do [ -d "$MO/$d" ] && rsync -a --exclude .DS_Store --exclude __pycache__ --exclude tests --exclude target --exclude notes --exclude 'recette-*.json' --exclude legendary-path.txt "$MO/$d" "$E/"; done
   cp "$MO/.upstream-ref" "$MO/README.md" "$E/" 2>/dev/null
   rsync -a --exclude .DS_Store --exclude .build --exclude '*.log' --exclude 'main.swift.avant-*' --exclude 'cle-*' "$D/" "$E/salon/"
   ( cd "$E" && find . -type f ! -name .empreinte -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-64 ) > "$E/.empreinte"

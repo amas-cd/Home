@@ -23,3 +23,7 @@ title.keys
 
 # réglages personnels de Claude Code
 .claude/settings.local.json
+
+# Steam : la source d'Obelisk clonée à côté et les produits de cargo
+moteur/obelisk-src
+moteur/steam/target/
