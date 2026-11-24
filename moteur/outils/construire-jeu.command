@@ -10,7 +10,7 @@
 # nxnative garde le jeu extrait dans son dossier <jeu>_build (extract/v<version>/) et l'app est faite de clones APFS de ces
 # fichiers (aucune place en plus) : --depuis-build reconstruit à partir de là, sans le NSP, qui peut donc être supprimé.
 # Home retient ce qui a servi (sources/registre.json). Journal : /Applications/Home/log/construire-<jeu>.log
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 GAMES=$JX; H="$HR"; MOT="$H/moteur"; MNG="$H/MacNativeGames"; SRC="$H"; LOGD="$H/log"; CONS="$H/constructions"; mkdir -p "$CONS"
 mkdir -p "$SRC" "$LOGD"
 # HOME_DISCRET=1 (Home → Avancé → Construction silencieuse) : la construction tourne sur les cœurs économes du Mac

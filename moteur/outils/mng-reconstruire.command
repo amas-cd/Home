@@ -5,7 +5,7 @@
 # dossier de construction (--seed), toujours sans la ROM.
 #   mng-reconstruire.command <app> [dossier de construction]
 # Journal : /Applications/Home/log/mng-reconstruire.log
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Home lance sans le PATH du Terminal : les outils Homebrew (ffmpeg, ffprobe, llvm)
 APP="${1%/}"; GAMES=$JX; MNG="$HR/MacNativeGames"; LOGD="$HR/log"; mkdir -p "$LOGD"; LOG="$LOGD/mng-reconstruire.log"
 WORK="${2%/}"

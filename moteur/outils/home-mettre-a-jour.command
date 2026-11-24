@@ -2,7 +2,7 @@
 # Home recompilé depuis sa source (moteur/salon) et réinstallé dans /Applications/Home.app, puis rouvert — seulement si la
 # source a changé depuis la version installée (son empreinte est dans l'app) ; sinon « Home est déjà à jour ».
 # Lancé par Home lui-même : il se ferme pendant l'installation, la sortie vers lui est alors coupée (SIGPIPE ignoré).
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 trap '' PIPE
 S="$HR/moteur/salon"
 neuf="$(cat "$S/main.swift" "$S/veille.swift" "$S/salon-construire.command" "$S/icone.swift" 2>/dev/null | shasum -a 256 | cut -c1-64)"

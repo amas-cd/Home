@@ -7,7 +7,7 @@
 # Rien de propre à ce Mac n'est touché : recettes, journaux, clés, constructions, engine/, MacNativeGames/ restent.
 # La version figée de nxnative n'est remplacée que si ce Mac a encore celle que Home avait installée : un moteur mis à jour
 # ici (Mises à jour → Moteurs) ou modifié à la main est gardé.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 SRC="${1%/}"; M="$HR/moteur"
 [ -d "$SRC/outils" ] || { echo "ÉCHEC : pas de moteur embarqué dans $SRC"; exit 1; }
 mkdir -p "$M" "$HR/log" "$HR/constructions" "$JX" 2>/dev/null || { echo "ÉCHEC : impossible de créer $M (dossier protégé ? Choisis-en un autre dans Application Support/Salon/dossiers.json)"; exit 1; }

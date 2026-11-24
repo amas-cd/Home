@@ -6,7 +6,7 @@
 # Rien n'est supprimé dans /Applications/Home : les fichiers propres à ce Mac (recettes Obelisk, journaux, clés, sauvegardes
 # main.swift.avant-*) restent. Le dépôt est la source : ne modifie pas /Applications/Home/moteur à la main.
 set -e
-R="$(cd "$(dirname "$0")/.." && pwd)"; M="/Applications/Home/moteur"
+R="$(cd "$(dirname "$0")/.." && pwd)"; M="${HOME_RACINE:-$HOME/Library/Application Support/Home}/moteur"; [ -d "$M" ] || [ ! -d /Applications/Home/moteur ] || M=/Applications/Home/moteur   # une installation d'avant, pas encore déplacée
 [ -d "$M" ] || { echo "Pas d'installation de Home dans $M : rien à recopier."; exit 1; }
 EX=(--exclude .DS_Store --exclude __pycache__ --exclude .build --exclude compilation.log)
 mkdir -p "$M/salon" "$M/outils" "$M/tools" "$M/patches" "$M/obelisk"

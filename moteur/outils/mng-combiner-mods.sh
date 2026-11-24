@@ -4,7 +4,7 @@
 # mod_exefs.py les lit tous et refuse deux mods qui changent les mêmes octets), romfs/ : leurs fichiers, le dernier gagne.
 # Leurs modules de code (exefs/subsdkN, des NSO) sont listés dans <dossier combiné>/modules.txt, un par ligne, pour
 # build_app.py --mod-module. Affiche le dossier combiné s'il contient des correctifs ou des fichiers, rien sinon.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 D="${1%/}"; shift
 rm -rf "$D"; mkdir -p "$D/exefs"; : > "$D/modules.txt"
 for m in "$@"; do

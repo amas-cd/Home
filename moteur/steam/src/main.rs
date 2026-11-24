@@ -298,7 +298,8 @@ async fn bibliotheque() {
 
 // ---------- installer et lancer : le circuit complet d'Obelisk, dans les dossiers de Home ----------
 fn racine() -> PathBuf {
-    PathBuf::from(std::env::var("HOME_RACINE").ok().filter(|r| r.starts_with('/')).unwrap_or_else(|| "/Applications/Home".into()))
+    // le dossier que Home donne ; sinon celui par défaut, ~/Library/Application Support/Home
+    PathBuf::from(std::env::var("HOME_RACINE").ok().filter(|r| r.starts_with('/')).unwrap_or_else(|| format!("{}/Library/Application Support/Home", std::env::var("HOME").unwrap_or_default())))
 }
 
 fn lieux() -> ob::ObeliskLocations {

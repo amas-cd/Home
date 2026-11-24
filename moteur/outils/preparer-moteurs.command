@@ -11,7 +11,7 @@
 #   HOME_AUSSI_PC=1 : à la fin, aussi le moteur Windows des jeux PC (pc.command preparer : Voile et Legendary)
 #   preparer-moteurs.command --etat     seulement dire ce qui est prêt (une ligne « cle=ok|manque|… » par outil), sans rien installer
 # Journal : <Home>/log/preparer-moteurs.log
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:/usr/local/share/dotnet:$HOME/.dotnet:$PATH"   # Home lance sans le PATH du Terminal
 MOT="$HR/moteur"; MNG="$HR/MacNativeGames"; LOGD="$HR/log"; mkdir -p "$LOGD" "$HR/constructions" "$JX"
 ETAT=""; [ "$1" = "--etat" ] && ETAT=1

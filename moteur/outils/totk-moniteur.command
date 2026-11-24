@@ -1,7 +1,7 @@
 #!/bin/bash
 # Moniteur TOTK Online : en direct, ce qui compte pendant que tu joues — connexion au serveur, joueurs, sauvegardes envoyées,
 # plantage du jeu (avec notification), arrêt du serveur. Laisse la fenêtre ouverte à côté ; Ctrl+C pour fermer.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 GAME_LOG="$HOME/Library/Logs/MacNativeGames/totk.log"; SRV_LOG="$HR/log/totk-server.log"; SALON_LOG="$HR/log/salon.log"
 B=$'\e[1m'; G=$'\e[32m'; R=$'\e[31m'; Y=$'\e[33m'; C=$'\e[36m'; D=$'\e[2m'; N=$'\e[0m'
 notif() { osascript -e "display notification \"$2\" with title \"$1\"" >/dev/null 2>&1 & }

@@ -1,7 +1,7 @@
 #!/bin/bash
 # MacNativeGames à jour : la dernière version du dépôt (tes commits rejoués par-dessus, tools/serie.py), puis chaque app
 # MacNativeGames reconstruite avec — TOTK Online avec ses mods de code actuels — sans la ROM.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Home lance sans le PATH du Terminal : les outils Homebrew (ffmpeg, ffprobe, llvm)
 GAMES=$JX; MNG="$HR/MacNativeGames"; OUT="$HR/moteur/outils"
 cd "$MNG" || { echo "ÉCHEC : MacNativeGames introuvable dans $MNG"; exit 1; }

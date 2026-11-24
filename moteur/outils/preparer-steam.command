@@ -8,7 +8,7 @@
 # d'outils va dans <Home>/moteur/.rustup (rien dans ton dossier personnel). Les composants de Valve et le moteur Voile, eux, sont
 # téléchargés par l'outil au premier jeu installé.
 # Sans risque à relancer : rien n'est refait si tout est déjà à jour. Journal : <Home>/log/preparer-steam.log
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$PATH"   # Home lance sans le PATH du Terminal
 MOT="$HR/moteur"; S="$MOT/steam"; SRC="$MOT/obelisk-src"; LOGD="$HR/log"; mkdir -p "$LOGD" "$MOT/bin"
 exec > >(tee "$LOGD/preparer-steam.log") 2>&1

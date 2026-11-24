@@ -3,7 +3,7 @@
 # donc les joueurs connectés par Tailscale restent connectés (le mod ne se reconnecte pas tout seul).
 # Il s'arrête quand Tailscale est fermé ou déconnecté (plus d'adresse 100.64.0.0/10 sur le Mac pendant 30 s), une fois TOTK
 # quitté : en solo sans Tailscale, il tourne le temps de la partie. Ne fait rien si un serveur écoute déjà sur le port 10014.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 SRV="$HR/mods/0100F2C0115B6000/TOTK_Online_Server"
 PORT=10014
 if /usr/sbin/lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then echo "un serveur écoute déjà sur $PORT"; exit 0; fi

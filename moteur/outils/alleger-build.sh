@@ -5,7 +5,7 @@
 # ses fichiers sont à elle (le RomFS et les pipelines sont des clones APFS du dossier, qui restent). La construction suivante
 # refait ces fichiers (plus longue : la traduction et la compilation des shaders sont refaites).
 # Sans argument : tous les dossiers de construction nxnative de /Applications/Home/constructions.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 if [ $# -eq 0 ]; then for d in "$HR/constructions"/*; do [ -d "$d/extract" ] && /bin/bash "$0" "$d"; done
   case "$0" in */.salon/*|*alleger*) read -r -t 15 -p "Fenêtre fermée dans 15 s." _;; esac; exit 0; fi
 W="${1%/}"; [ -d "$W/extract" ] || { echo "pas un dossier de construction nxnative : $W"; exit 1; }

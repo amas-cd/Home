@@ -4,7 +4,7 @@ l'installation et le lancement d'un jeu.
 
 Home reprend ce que fait Obelisk (https://github.com/Zagrios/Obelisk, GPL-3.0), d'après sa source :
   - Voile, son moteur Windows, est téléchargé depuis le flux public de Zagrios/Voile (taille et SHA-256 vérifiés) dans
-    <Home>/voile/<version>. Un Voile déjà installé par Obelisk sur ce Mac est réutilisé (2,7 Go de moins).
+    <Home>/voile/<version>. Home n'utilise jamais les fichiers d'Obelisk ; « importer » reprend une fois ce qu'il avait installé.
   - Les jeux tournent sur le « moteur Linux » de Voile (voile-wine pour Linux, exécuté par fexdarwin-run) : c'est lui qui laisse
     Easy Anti-Cheat charger son module Linux (Rocket League, Fall Guys…). Il ne lance que des programmes Windows 64 bits qui
     ne sont pas en .NET. Les jeux Epic qui démarrent autrement sont refusés avec un message.
@@ -32,14 +32,14 @@ compatibilité (moteur/compat/pc.json), avec sa raison et sa source.
   pc.py ajouter-exe EXE [--nom NOM] [--prefixe DOSSIER]   un jeu déjà installé : son .exe devient une tuile (app « exe:<id> »)
   pc.py setup SETUP --nom NOM   lance un installateur (.exe 32 ou 64 bits, .msi) sur le moteur Rosetta, puis liste ce qu'il a installé
 """
-import hashlib, json, os, re, subprocess, sys, time, unicodedata, urllib.request
+import hashlib, json, os, re, shutil, subprocess, sys, time, unicodedata, urllib.request
 from pathlib import Path
 
-RACINE = Path(os.environ.get('HOME_RACINE') or '/Applications/Home')
+RACINE = Path(os.environ.get('HOME_RACINE') or Path.home() / 'Library/Application Support/Home')
 MOT = RACINE / 'moteur'
 PC = RACINE / 'pc'                      # jeux/, prefixes/, jeux.json, profils.json
 VOILE = RACINE / 'voile'
-VOILE_OBELISK = Path.home() / 'Library/Application Support/com.zagrios.obelisk/Voile'
+OBELISK = Path.home() / 'Library/Application Support/com.zagrios.obelisk'   # lu une seule fois, par « importer » : ce qu'Obelisk avait installé
 FLUX = 'https://raw.githubusercontent.com/Zagrios/Voile/main/voile-feed.json'
 PROFILS = 'https://raw.githubusercontent.com/Zagrios/Obelisk/main/crates/game-runtime/profiles.json'
 CONTRAT = 1                             # le « contrat » de Voile que cette commande de lancement connaît (docs/CONTRACT.md d'Obelisk)
@@ -73,8 +73,12 @@ def cle_version(v):
     return [int(a), int(b), int(c), int(r)] + ([0, int(beta)] if beta else [1, 0])
 
 def voile_installe():
-    """(dossier du moteur Linux, version, d'où) : le Voile de Home, sinon celui d'Obelisk ; None s'il n'y en a pas"""
-    for base, ou in ((VOILE, 'home'), (VOILE_OBELISK, 'obelisk')):
+    """(dossier du moteur Linux, version, d'où) : le Voile de Home (<Home>/voile) ; None s'il n'y en a pas"""
+    return voile_dans(VOILE, 'home')
+
+def voile_dans(base, ou):
+    """Le Voile le plus récent d'un dossier de Voile"""
+    for base, ou in ((base, ou),):
         trouves = []
         try: noms = [d for d in base.iterdir() if d.is_dir()]
         except OSError: noms = []
@@ -297,6 +301,69 @@ def cmd_deconnexion():
     reste = [i for i in ce['comptes'] if i != a or a == 'defaut']   # le compte de base garde sa place (vide), les autres disparaissent
     suivant = next((i for i in reste if i != a and nom_compte(i)), reste[0] if reste else 'defaut')
     noter_comptes(suivant, reste or ['defaut']); dire('Déconnecté d\'Epic')
+
+def cmd_importer():
+    """Reprend dans Home ce qu'Obelisk avait installé sur ce Mac, sans rien retélécharger : le moteur Voile (copie sans place en
+    plus sur un disque APFS), les jeux Epic (déplacés dans <Home>/pc/jeux, déclarés à Legendary) et les jeux Steam des comptes
+    connectés dans Home (déplacés dans <Home>/pc/steam/jeux, avec leur reçu). Après ça, Home n'a plus besoin d'Obelisk."""
+    faits, restes = [], []
+    # le moteur
+    if not voile_installe():
+        v = voile_dans(OBELISK / 'Voile', 'obelisk')
+        if v:
+            VOILE.mkdir(parents=True, exist_ok=True); src = v[0].parent
+            r = subprocess.run(['/bin/cp', '-cR', str(src), str(VOILE / src.name)], capture_output=True, text=True)
+            if r.returncode == 0 and voile_installe(): faits.append(f'moteur Voile {v[1]}')
+            else: shutil.rmtree(VOILE / src.name, ignore_errors=True); restes.append('moteur Voile : la copie a échoué, il sera téléchargé (Composants)')
+    def recus(magasin):
+        out = {}
+        for f in sorted(OBELISK.glob(f'{magasin}-installations-*.json')):
+            if '.incomplete' in f.name: continue
+            for j in lire_json(f, []):
+                if isinstance(j, dict) and Path(str(j.get('directory', ''))).is_dir(): out.setdefault(str(j.get('appName') or j.get('appId')), (f, j))
+        return out
+    def deplacer(src, dest):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists(): return False
+        try: os.rename(src, dest); return True          # même disque : immédiat, rien n'est copié
+        except OSError: return False
+    def recaler(app, dossier):
+        """Legendary connaissait peut-être déjà ce jeu à son ancien endroit (import fait avant) : il prend le nouveau dossier"""
+        k = coeur(); i = k.get_installed_game(app)
+        if i and Path(i.install_path) != Path(dossier): i.install_path = str(dossier); k.lgd.set_installed_game(app, i)
+    for j in jeux_home():       # un import d'avant, resté à l'ancien dossier chez Legendary
+        if j.get('namespace') and Path(j.get('dossier', '')).is_dir() and legendary_present():
+            try: recaler(j['app'], j['dossier'])
+            except Exception: pass
+    def nom_dossier(nom): return re.sub(r'[^A-Za-z0-9]+', '-', re.sub('[®™©]', '', nom)).strip('-') or 'jeu'
+    # Epic : le dossier vient dans <Home>/pc/jeux, Legendary l'adopte (import, sans revérifier 40 Go), Home le note
+    epic = recus('epic')
+    if epic:
+        c = coeur() if legendary_present() else None
+        if not c or not c.login(): restes += [f"{j['name']} (Epic) : connecte d'abord ton compte Epic dans Home" for _, j in epic.values()]
+        else:
+            for app, (_, j) in epic.items():
+                nom = re.sub('[®™©]', '', j.get('name') or app).strip(); src = Path(j['directory']); dest = PC / 'jeux' / nom_dossier(nom)
+                if any(x.get('app') == app for x in jeux_home()): continue
+                if not c.get_game(app, update_meta=True, platform='Windows'): restes.append(f"{nom} (Epic) : pas dans la bibliothèque du compte connecté dans Home"); continue
+                if not deplacer(src, dest): restes.append(f'{nom} (Epic) : son dossier n\'a pas pu être déplacé'); continue
+                r = subprocess.run([sys.executable, '-W', 'ignore', '-m', 'legendary.cli', '-y', 'import', app, str(dest), '--disable-check', '--platform', 'Windows'],
+                                   capture_output=True, text=True, stdin=subprocess.DEVNULL, env=dict(os.environ))
+                recaler(app, dest)
+                if not coeur().get_installed_game(app):
+                    os.rename(dest, src); restes.append(f'{nom} (Epic) : Legendary ne l\'a pas reconnu, remis où il était (' + ((r.stderr or r.stdout).strip().splitlines() or ['?'])[-1][:120] + ')'); continue
+                noter_jeu(app, nom, dest, j.get('namespace')); faits.append(f'{nom} (Epic)')
+    # Steam : seulement les jeux d'un compte connecté dans Home ; le reçu suit le jeu, avec son nouveau dossier
+    comptes = {str(x.get('steam_id')) for x in (lire_json(PC / 'steam/comptes.json', {}).get('comptes') or []) if isinstance(x, dict)}
+    for app, (f, j) in recus('steam').items():
+        ident = f.name[len('steam-installations-'):-len('.json')]; nom = j.get('name') or app
+        mien = PC / 'steam' / f.name; liste = lire_json(mien, [])
+        if any(str(x.get('appId')) == app for x in liste): continue
+        if ident not in comptes: restes.append(f"{nom} (Steam) : connecte d'abord ce compte Steam dans Home (Comptes)"); continue
+        src = Path(j['directory']); dest = PC / 'steam/jeux' / src.name
+        if not deplacer(src, dest): restes.append(f'{nom} (Steam) : son dossier n\'a pas pu être déplacé'); continue
+        ecrire_json(mien, liste + [dict(j, directory=str(dest))]); faits.append(f'{nom} (Steam)')
+    dire(json.dumps({'importes': faits, 'restes': restes}, ensure_ascii=False))
 
 def cmd_bibliotheque():
     c = coeur()
@@ -562,6 +629,7 @@ def main():
     elif c == 'compte-choisir' and len(a) == 2: cmd_compte_choisir(a[1])
     elif c == 'deconnexion': cmd_deconnexion()
     elif c == 'bibliotheque': cmd_bibliotheque()
+    elif c == 'importer': cmd_importer()
     elif c == 'installer' and len(a) == 2: cmd_installer(a[1])
     elif c == 'lancer' and len(a) >= 2: cmd_lancer(a[1], essai='--essai' in a[2:])
     elif c == 'ajouter-exe' and len(a) >= 2:

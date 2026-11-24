@@ -2,7 +2,7 @@
 # Super Mario Odyssey: Online server. Started by the game (DM_COMPANION), but it lives on its own: quitting or relaunching
 # Mario no longer restarts it, so the players connected through Tailscale stay connected (a restart dropped them, and their
 # game does not reconnect by itself). It keeps running until the Mac restarts. Does nothing if a server already listens on 1027.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 SRV="$HR/serveurs/SmoOnlineServer"
 LOG="$HR/log/smoo-server.log"   # Home y lit les joueurs connectés (menu rapide, carte Joueurs)
 if /usr/sbin/lsof -nP -iTCP:1027 -sTCP:LISTEN >/dev/null 2>&1; then echo "a server already listens on 1027: nothing to start"; exit 0; fi

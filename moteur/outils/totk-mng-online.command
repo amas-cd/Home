@@ -3,7 +3,7 @@
 # Première construction seulement : ~/Downloads/TOTK/base.xci (1.0.0) + update.nsp (1.2.1) + ~/Downloads/ProdKeys/prod.keys ;
 # ensuite, sans la ROM (mng-reconstruire.command).
 # App : /Applications/Jeux/The Legend of Zelda - Tears of the Kingdom.app (à côté de la version solo) — cache partagé : TOTK_mng_build — journal : log/build-totk-mng-online.log
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Home lance sans le PATH du Terminal : les outils Homebrew (ffmpeg, ffprobe, llvm)
 MNG="$HR/MacNativeGames"; GAMES=$JX; LOGD="$HR/log"; mkdir -p "$LOGD"; LOG="$LOGD/build-totk-mng-online.log"
 # Arguments : les dossiers des mods de code activés dans Home (avec exefs/) ; aucun = pas de mod de code.

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copie les rapports de plantage de Salon dans /Applications/Home/log/salon-crash pour que Claude les lise.
-HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 OUT="$HR/log/salon-crash"; mkdir -p "$OUT"
 n=0
 for f in "$HOME/Library/Logs/DiagnosticReports"/Salon*.ips "$HOME/Library/Logs/DiagnosticReports"/Salon*.crash; do [ -f "$f" ] && { cp "$f" "$OUT/"; n=$((n+1)); }; done

@@ -18,9 +18,10 @@ Un launcher de jeux façon console (style PS5) pour Mac, en Swift/SwiftUI. Tout 
 - **les jeux Switch / Switch 2 recompilés en apps Mac** avec [nxnative](https://github.com/seedds/nxnative) (Ocarina of Time,
   Super Mario Odyssey…). Les apps sont dans `/Applications/Jeux` et ont une clé `DMTitleID` dans leur Info.plist ;
 - **Tears of the Kingdom / Breath of the Wild** avec [MacNativeGames](https://github.com/ly05010419/MacNativeGames) (bundle id
-  `org.macnativegames.*`). La copie d'Anas est `/Applications/Home/MacNativeGames`, avec ses propres commits par-dessus ;
-- **les jeux PC Epic / Steam installés par Obelisk** (`com.zagrios.obelisk`). Home lit ses installations, et peut lancer
-  directement les jeux Epic avec Legendary (`moteur/obelisk/`) ;
+  `org.macnativegames.*`). La copie d'Anas est `~/Library/Application Support/Home/MacNativeGames`, avec ses propres commits par-dessus ;
+- **les jeux PC Epic / Steam**, installés, lancés et mis à jour par Home lui-même (`moteur/pc/pc.py` avec Legendary pour Epic,
+  `moteur/steam` pour Steam, moteur Windows Voile dans `<Home>/voile`). Home ne lit et n'ouvre jamais l'app Obelisk ;
+  `pc.command importer` reprend une fois ce qu'Obelisk avait installé (moteur et jeux déplacés, rien n'est retéléchargé) ;
 - **les apps Mac** ajoutées à la main.
 
 Il gère aussi :
@@ -49,11 +50,11 @@ Il n'y a qu'un dépôt : le code, et les releases que Home lit sans jeton pour s
 | `moteur/outils/` | Les scripts que Home lance (voir plus bas) |
 | `moteur/patches/` | Les patchs d'Anas pour nxnative (`series` donne l'ordre) |
 | `moteur/tools/` | `engine.py` (version figée de nxnative + patchs), `serie.py` (rejoue les patchs d'Anas sur une nouvelle version, avec réparations sûres : voir « Mises à jour des moteurs »), notes de version, tests |
-| `moteur/obelisk/` | Lancement direct Epic (Legendary), `launch.sh` du moteur Voile (repris d'Obelisk, GPL-3.0) |
+| `moteur/obelisk/` | `launch.sh`, le lanceur du moteur Voile (repris d'Obelisk, GPL-3.0) |
 | `moteur/pc/pc.py` | Jeux PC sans Obelisk : télécharge Voile, compte Epic (Legendary), bibliothèque, installation, lancement. Lancé par `outils/pc.command` |
 | `moteur/compat/pc.json` | Liste de compatibilité PC, avec sources : `bloque` (jamais lancé), `verifie`, `linux`. Un jeu absent n'est jamais bloqué |
 | `moteur/.upstream-ref`, `moteur/mng/` | Versions figées : commit de nxnative ; commit de MacNativeGames + les commits d'Anas en patchs |
-| `scripts/installer-local.sh` | Recopie le dépôt dans `/Applications/Home/moteur`, puis compile et installe Home sur ce Mac |
+| `scripts/installer-local.sh` | Recopie le dépôt dans `~/Library/Application Support/Home/moteur`, puis compile et installe Home sur ce Mac |
 | `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home-macSilicon.dmg` et `Home-win64-setup.exe` (chacun avec son `.sha256`) pour un tag `v*` ou pour « Run workflow » avec une version |
 | `.claude/` | Ce contexte : le hook Stop qui te rappelle de demander l'envoi de la mise à jour |
 
@@ -64,21 +65,24 @@ une partie : vérifie quand même `git status` avant chaque commit.
 
 ## Sur le Mac d'Anas (l'installation en service)
 
-Tant que Home n'est pas autonome, l'app installée lit ses scripts dans **`/Applications/Home/moteur`**, pas dans le dépôt.
+Le dossier de Home est **`~/Library/Application Support/Home`** (noté `<Home>` ; `HOME_RACINE` dans les scripts, `Dossiers.home` dans
+l'app). Il était dans `/Applications/Home` jusqu'en novembre 2026 : sur le Mac d'Anas un lien y reste, parce que des chemins
+enregistrés (réglages des jeux, environnements Python) passent encore par là. Le chemin contient une espace : toujours entre guillemets.
+L'app installée lit ses scripts dans **`<Home>/moteur`**, pas dans le dépôt.
 Le dépôt est la source : on modifie le dépôt, puis `scripts/installer-local.sh` recopie les fichiers là-bas.
 
 | Emplacement | Rôle |
 |---|---|
 | `/Applications/Home.app` | L'app installée |
 | `/Applications/Jeux/` | Les apps des jeux (nxnative, MacNativeGames…) |
-| `/Applications/Home/moteur/` | Copie en service de `app/` (dans `moteur/salon/`) et de `moteur/` ; `engine/` = nxnative + patchs |
-| `/Applications/Home/MacNativeGames/` | Le dépôt MacNativeGames d'Anas (ses commits par-dessus l'officiel) |
-| `/Applications/Home/constructions/` | Les dossiers de construction des jeux (fichiers extraits : permettent de reconstruire sans ROM) |
-| `/Applications/Home/registre.json` | Les jeux construits par Home et comment les refaire |
-| `/Applications/Home/mods/<title id>/` | Mods de code (ex. TOTK Online) |
-| `/Applications/Home/sauvegardes/<title id>/` | Sauvegardes des jeux nxnative (`DM_SAVE`) |
-| `/Applications/Home/serveurs/` | `totk-adresse.txt` (adresse du serveur TOTK Online), `totk-cle.pem` (**secret**), serveur SMO |
-| `/Applications/Home/log/` | `salon.log` (journal de Home), journaux des serveurs, `diag/` (« Journaux pour Claude ») |
+| `~/Library/Application Support/Home/moteur/` | Copie en service de `app/` (dans `moteur/salon/`) et de `moteur/` ; `engine/` = nxnative + patchs |
+| `~/Library/Application Support/Home/MacNativeGames/` | Le dépôt MacNativeGames d'Anas (ses commits par-dessus l'officiel) |
+| `~/Library/Application Support/Home/constructions/` | Les dossiers de construction des jeux (fichiers extraits : permettent de reconstruire sans ROM) |
+| `~/Library/Application Support/Home/registre.json` | Les jeux construits par Home et comment les refaire |
+| `~/Library/Application Support/Home/mods/<title id>/` | Mods de code (ex. TOTK Online) |
+| `~/Library/Application Support/Home/sauvegardes/<title id>/` | Sauvegardes des jeux nxnative (`DM_SAVE`) |
+| `~/Library/Application Support/Home/serveurs/` | `totk-adresse.txt` (adresse du serveur TOTK Online), `totk-cle.pem` (**secret**), serveur SMO |
+| `~/Library/Application Support/Home/log/` | `salon.log` (journal de Home), journaux des serveurs, `diag/` (« Journaux pour Claude ») |
 | `~/Library/Application Support/Salon/` | Réglages de Home : `jeux.json` (struct `Config`), `media/`, `cache/`, `mods/`, `statistiques.json`, `durees.json`, `steamgriddb-api-key` (**secret**) |
 | `~/Library/Application Support/nxnative/<title id>/env.txt` | Réglages d'un jeu nxnative (`DM_*`) ; `nxnative/volume.txt` = volume lu par le moteur patché |
 | `~/Library/Logs/nxnative/<title id>.log`, `~/Library/Logs/MacNativeGames/totk.log` | Journaux des jeux |
@@ -87,7 +91,7 @@ Le dépôt est la source : on modifie le dépôt, puis `scripts/installer-local.
 
 Les sections sont marquées `// MARK:`. Cherche-les par nom, les numéros de ligne changent.
 
-- **Modèle** : `Game` (un jeu ; `viaObelisk`, `titleID`, `storeID`), `Config` (jeux.json), `Entry`, `SalonMenu` / `SalonMenuItem` (tous les menus).
+- **Modèle** : `Game` (un jeu ; `viaHome` pour un jeu PC, `titleID`, `storeID`), `Config` (jeux.json), `Entry`, `SalonMenu` / `SalonMenuItem` (tous les menus).
 - **Sources d'images** : `EShop`, `SteamGridDB`, `PSStore`, `Wiki`.
 - **`Library`** (ObservableObject, le cœur) :
   - l'état de l'interface ;
@@ -98,12 +102,12 @@ Les sections sont marquées `// MARK:`. Cherche-les par nom, les numéros de lig
   - les menus d'options, de réglages et d'apparence.
 - **`Recorder`** : capture continue (ScreenCaptureKit) pour « Enregistrer les 15 dernières secondes ».
 - **`SystemVolume`, `BGM`** : volume général, volume par app via le périphérique Background Music. Échelle 0–100, 50 = normal.
-- **`ObeliskDirect`** : installations Obelisk, recettes de lancement direct, `run()` pour lancer une commande.
+- **`Commande`** : `run()` pour lancer une commande et lire ce qu'elle écrit.
 - **Vues** : `Screen`, `MenuView`, `TacheView` (avancement des scripts lancés dans le Terminal), `HUDView` (au-dessus du jeu), `JoueursView`.
 - **Manette** : `PadBattery`, `PadSeize` (saisie exclusive pendant le menu rapide).
 - **`AppDelegate`, `SalonMain`** (`@main`).
 - **`Atelier`** :
-  - les chemins (`Atelier.home` = `/Applications/Home`, `Atelier.jeux` = `/Applications/Jeux`) ;
+  - les chemins (`Atelier.home` = `~/Library/Application Support/Home`, `Atelier.jeux` = `/Applications/Jeux`) ;
   - le lancement des scripts dans le Terminal (`lancer`, `terminal`) ;
   - les mods, `registre.json`, GameBanana ;
   - le moteur d'un jeu (`moteurDe`, `scriptDedie`).
@@ -179,11 +183,11 @@ Home les lance dans le Terminal, sans le PATH du Terminal (ajoute Homebrew au PA
 | `installer-embarque.sh` | Installe dans `<Home>/moteur` ce que Home.app embarque (`Contents/Resources/moteur`). Lancé par Home au démarrage si l'empreinte a changé |
 | `preparer-moteurs.command` | « Préparer ce Mac » : Xcode, Metal, Homebrew, .NET, Python, nxnative, MacNativeGames. `--etat` : dit seulement ce qui manque |
 | `pc.command` | Lance `moteur/pc/pc.py` avec le bon Python (`etat`, `preparer`, `connexion`, `bibliotheque`, `installer`, `lancer [--essai]`) |
-| `home-mettre-a-jour.command` | « Mettre à jour Home » : recompile depuis `/Applications/Home/moteur/salon` si la source a changé |
+| `home-mettre-a-jour.command` | « Mettre à jour Home » : recompile depuis `~/Library/Application Support/Home/moteur/salon` si la source a changé |
 | `alleger-build.sh` | Allège un dossier de construction |
-| `journaux.command` | « Journaux pour Claude » : copie les journaux dans `/Applications/Home/log/diag` |
+| `journaux.command` | « Journaux pour Claude » : copie les journaux dans `~/Library/Application Support/Home/log/diag` |
 | `totk-server.sh`, `smoo-server.sh` | Serveurs en ligne locaux (TOTK Online n'est plus local, voir plus bas) |
-| `totk-moniteur.command`, `rocket-league-direct.command` | Moniteur TOTK Online, préparation du lancement direct Epic |
+| `totk-moniteur.command` | Moniteur TOTK Online |
 
 ## Mises à jour des moteurs : garder les changements d'Anas
 
@@ -214,7 +218,7 @@ une nouvelle version, dans un dossier à part : le clone en service ne bouge que
 Anas t'utilise surtout depuis l'**onglet Code** de l'app Claude. Regarde d'abord où tu es (`uname -s`) :
 
 - **Dans le cloud** (Linux, dépôt cloné depuis GitHub ; c'est le cas par défaut de l'onglet Code) :
-  - pas de macOS, donc pas de `swiftc` ni de `/Applications/Home` : tu ne peux ni compiler Home toi-même, ni l'installer
+  - pas de macOS, donc pas de `swiftc` ni de dossier de Home : tu ne peux ni compiler Home toi-même, ni l'installer
     sur son Mac. **La compilation est vérifiée par GitHub Actions**, après un push ;
   - pousser un tag est refusé (erreur 403) : publie les releases avec `gh workflow run` (voir « Envoyer une mise à jour ») ;
   - `gh` marche avec l'API REST (`gh api repos/amas-cd/home/...`, `gh run list`, `gh run watch`, `gh workflow run`), mais pas
@@ -288,7 +292,7 @@ Numéro de version `X.Y.Z` (dernière release : `gh api repos/amas-cd/home/relea
   - Ne lance jamais un jeu dans deux apps en même temps.
 - **Interdit** : contourner un DRM, un anti-triche ou une protection (EA FC, Denuvo…). Ajouter des jeux, des clés ou des fichiers
   système, ou dire où en trouver. Chacun utilise les dumps de sa propre console.
-- Le dépôt est la source. Si `/Applications/Home/moteur` diffère du dépôt sans raison connue, montre la différence à Anas
+- Le dépôt est la source. Si `~/Library/Application Support/Home/moteur` diffère du dépôt sans raison connue, montre la différence à Anas
   avant de recopier quoi que ce soit.
 
 ## Feuille de route
