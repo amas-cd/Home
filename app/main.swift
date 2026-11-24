@@ -1334,7 +1334,7 @@ final class Library: ObservableObject {
     }
     var quickItems: [(String, String)] { [("Enregistrer les 15 dernières secondes", Recorder.shared.active ? "record.circle" : "record.circle.fill"), ("Fermer le jeu", "xmark.circle"), ("Retour à Home", "house"),
                                           (volumeLabel, volume == 0 ? "speaker.slash" : volume < 0.5 ? "speaker.wave.1" : "speaker.wave.3"),
-                                          ("Volume général", macVolume == 0 ? "speaker.slash" : macVolume < 0.5 ? "speaker.wave.1" : "speaker.wave.3")]
+                                          ("Volume du Mac", macVolume == 0 ? "speaker.slash" : macVolume < 0.5 ? "speaker.wave.1" : "speaker.wave.3")]
                                           + (enLigne() != nil ? [("Joueurs", "person.2.fill")] : []) }
     /// Le jeu en cours joue-t-il en ligne : TOTK Online (serveur Kirbymimi, port 10014) ou un jeu nxnative avec le serveur Super Mario Odyssey: Online (port 1027)
     func enLigne() -> (nom: String, journal: URL, port: UInt16, smo: Bool)? {
@@ -1927,11 +1927,6 @@ struct Tile: View {
     var body: some View {
         let cote: CGFloat = selected ? 226 : 176, rayon: CGFloat = selected ? 31 : 25
         ZStack {
-            // la signature de Home : deux cartes, orange et bleue, qui dépassent en éventail derrière le jeu visé
-            RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(LinearGradient(colors: Library.orange, startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: cote * 0.92, height: cote * 0.92).rotationEffect(.degrees(selected ? -11 : 0)).offset(x: selected ? -cote * 0.20 : 0, y: selected ? cote * 0.03 : 0).opacity(selected ? 1 : 0)
-            RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(LinearGradient(colors: Library.bleu, startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: cote * 0.92, height: cote * 0.92).rotationEffect(.degrees(selected ? 11 : 0)).offset(x: selected ? cote * 0.20 : 0, y: selected ? cote * 0.03 : 0).opacity(selected ? 1 : 0)
             Color.black.overlay {
                 if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(selected ? 40 : 28) } }
                 else { Image(nsImage: image).resizable().scaledToFill() }
@@ -1941,7 +1936,6 @@ struct Tile: View {
             .overlay(RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
             .shadow(color: .black.opacity(0.55), radius: selected ? 26 : 12, y: selected ? 16 : 8)
         }
-        .padding(.horizontal, selected ? 40 : 0)   // la place des deux cartes qui dépassent
         .opacity(selected ? 1 : 0.8)
         .animation(glisse, value: selected)
     }
@@ -2096,6 +2090,7 @@ struct MenuView: View {
     var apercu: Int? = nil   // pour l'aperçu en image : le choix visé, sans attendre onAppear
     @State private var index = 0
     @State private var pop = false
+    @State private var paru = false   // les choix arrivent en cascade à l'ouverture du menu
     private var vise: Int { apercu ?? index }
     private func press() { pop = true; DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { pop = false } }
     /// Le choix suivant dans un sens, en sautant les lignes d'information
@@ -2138,19 +2133,23 @@ struct MenuView: View {
     /// Une ligne de la liste : un petit symbole, le nom ; visée, un fond clair et sa précision
     @ViewBuilder private func row(_ i: Int, _ it: SalonMenuItem) -> some View {
         let sel = i == vise && !it.info
+        let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
         HStack(spacing: 18) {
-            Image(systemName: it.icon).font(.system(size: 20, weight: .regular)).frame(width: 30).opacity(it.info ? 0.5 : 0.9)
+            Image(systemName: it.icon).font(.system(size: 21, weight: .semibold)).frame(width: 32).foregroundStyle(sel ? .white : c).opacity(it.info ? 0.6 : 1)
             VStack(alignment: .leading, spacing: 3) {
-                Text(it.label).font(.system(size: it.info ? 19 : 23, weight: sel ? .semibold : .regular)).lineLimit(1).truncationMode(.tail)
-                if sel || it.info, let d = it.detail { Text(d).font(.system(size: 15)).opacity(0.6).lineLimit(2) }
+                Text(it.label).font(.system(size: it.info ? 19 : 23, weight: sel ? .bold : .medium)).lineLimit(1).truncationMode(.tail)
+                if sel || it.info, let d = it.detail { Text(d).font(.system(size: 15, weight: .medium)).opacity(sel ? 0.85 : 0.6).lineLimit(2) }
             }
             Spacer(minLength: 0)
+            if sel { Image(systemName: "chevron.right").font(.system(size: 15, weight: .heavy)).opacity(0.8) }
         }
-        .foregroundStyle(it.destructive ? MenuView.rouge : .white).opacity(sel ? 1 : it.info ? 0.6 : 0.78)
+        .foregroundStyle(it.destructive && !sel ? MenuView.rouge : .white).opacity(sel ? 1 : it.info ? 0.6 : 0.85)
         .padding(.vertical, sel && it.detail != nil ? 11 : 14).padding(.horizontal, 18).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(sel ? 0.14 : 0)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(sel ? 0.55 : 0), lineWidth: 1.5))
-        .animation(.easeOut(duration: 0.16), value: index)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(LinearGradient(colors: [c.opacity(sel ? 0.95 : 0), c.opacity(sel ? 0.50 : 0)], startPoint: .leading, endPoint: .trailing)))
+        .shadow(color: c.opacity(sel ? 0.55 : 0), radius: 22, y: 6)
+        .animation(glisse, value: index)
+        .offset(x: paru || apercu != nil ? 0 : -28).opacity(paru || apercu != nil ? 1 : 0)
+        .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.36).delay(Double(min(i, 12)) * 0.03), value: paru)
         .contentShape(Rectangle()).onTapGesture { choisir(i) }
     }
     /// Les lignes (ou la grille) du menu long
@@ -2173,8 +2172,14 @@ struct MenuView: View {
         if let st = menu.step, let n = menu.steps, n > 0 {
             HStack(spacing: 8) { ForEach(1...n, id: \.self) { k in Capsule().fill(.white.opacity(k == st ? 0.95 : 0.25)).frame(width: k == st ? 34 : 10, height: 10) } }.padding(.bottom, 16)
         }
-        if let st = menu.subtitle { Text(st.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.6).lineLimit(1) }
-        Text(menu.title).font(.system(size: rangee ? 60 : 54, weight: .thin)).tracking(-1).lineLimit(1).minimumScaleFactor(0.6).padding(.top, 2)
+        if menu.art != nil, let g = lib.current, g.name == menu.title, let l = lib.art[g.id]?.logo {
+            Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 480, maxHeight: 150, alignment: .leading).shadow(radius: 12)
+        } else {
+            if let st = menu.subtitle { Text(st.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.6).lineLimit(1) }
+            Text(menu.title).font(.system(size: rangee ? 60 : 54, weight: .thin)).tracking(-1).lineLimit(1).minimumScaleFactor(0.6).padding(.top, 2)
+            LinearGradient(colors: [Library.orange[0], Library.violet[0], Library.bleu[1]], startPoint: .leading, endPoint: .trailing).frame(width: paru || apercu != nil ? 120 : 0, height: 5).clipShape(Capsule()).padding(.top, 12)
+                .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.5), value: paru)
+        }
     }
     private var aides: some View {
         HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Choisir"); Pilule(k: lib.hints.back, t: menu.back == nil ? "Fermer" : "Retour") }
@@ -2191,12 +2196,15 @@ struct MenuView: View {
                     HStack(spacing: 14) {
                         ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in
                             let sel = i == vise
-                            Image(systemName: it.icon).font(.system(size: sel ? 31 : 26, weight: .medium)).frame(width: sel ? 94 : 76, height: sel ? 94 : 76)
-                                .background(Circle().fill(sel ? AnyShapeStyle(.white) : AnyShapeStyle(.black.opacity(0.5))))
-                                .overlay(Circle().stroke(it.destructive && !sel ? MenuView.rouge.opacity(0.8) : .white.opacity(sel ? 0 : 0.24), lineWidth: 1.5))
-                                .foregroundStyle(sel ? (it.destructive ? Color(red: 0.8, green: 0.15, blue: 0.15) : .black) : (it.destructive ? MenuView.rouge : .white))
-                                .shadow(color: .black.opacity(sel ? 0.45 : 0), radius: 18, y: 8)
+                            let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
+                            Image(systemName: it.icon).font(.system(size: sel ? 32 : 26, weight: .semibold)).frame(width: sel ? 96 : 76, height: sel ? 96 : 76)
+                                .background(Circle().fill(sel ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(0.5))))
+                                .overlay(Circle().strokeBorder(sel ? .white.opacity(0.9) : c.opacity(0.45), lineWidth: sel ? 3 : 1.5))
+                                .foregroundStyle(sel ? .white : c)
+                                .shadow(color: c.opacity(sel ? 0.75 : 0), radius: 26, y: 6)
                                 .animation(glisse, value: index)
+                                .offset(y: paru || apercu != nil ? 0 : 26).opacity(paru || apercu != nil ? 1 : 0)
+                                .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.38).delay(Double(i) * 0.045), value: paru)
                                 .contentShape(Circle()).onTapGesture { choisir(i) }
                                 .onHover { dedans in if dedans, index != i { index = i } }
                         }
@@ -2205,12 +2213,12 @@ struct MenuView: View {
                     if menu.items.indices.contains(vise) {
                         let it = menu.items[vise]
                         VStack(alignment: .leading, spacing: 5) {
-                            Text(it.label).font(.system(size: 27, weight: .semibold)).lineLimit(1)
+                            HStack(spacing: 10) { Circle().fill(menuTint(it.icon, tint: it.tint, destructive: it.destructive)).frame(width: 10, height: 10); Text(it.label).font(.system(size: 27, weight: .semibold)).lineLimit(1) }
                             Text(it.detail ?? menu.text ?? " ").font(.system(size: 17)).opacity(0.62).lineLimit(2).frame(maxWidth: 900, alignment: .leading)
-                        }.padding(.top, 20).padding(.leading, 6).id(vise).transition(.opacity).frame(height: 96, alignment: .topLeading)
+                        }.padding(.top, 20).padding(.leading, 6).id(vise).transition(.opacity).frame(height: 92, alignment: .topLeading)
                     }
-                }.padding(.leading, 96).padding(.bottom, 84)
-                aides.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, 52)
+                    aides.padding(.top, 14)
+                }.padding(.leading, 96).padding(.bottom, 44)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     entete
@@ -2232,7 +2240,7 @@ struct MenuView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white).ignoresSafeArea()
         .scaleEffect(pop ? 0.995 : 1.0).animation(.spring(response: 0.18, dampingFraction: 0.7), value: pop)
         .transition(.opacity)
-        .onAppear { let f = next(-1, 1); index = f < 0 ? 0 : f }
+        .onAppear { let f = next(-1, 1); index = f < 0 ? 0 : f; DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { paru = true } }
         .onReceive(NotificationCenter.default.publisher(for: .salonNav)) { n in
             guard let k = n.object as? String else { return }
             let step = menu.grid ? MenuView.cols : 1
@@ -2651,7 +2659,7 @@ struct Screen: View {
                      .onChange(of: lib.categoryIndex) { _, _ in appeared = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { appeared = true; if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } } }
                      .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { appeared = true } }
                 }
-                HStack(spacing: 12) { Spacer(); Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie") }
+                HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie"); Spacer() }
                     .padding(.horizontal, 84).padding(.bottom, 40).foregroundStyle(.white)
             }
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
@@ -2784,9 +2792,12 @@ struct HUDView: View {
                             }
                             ForEach(Array(lib.quickItems.enumerated()), id: \.offset) { i, it in
                                 let on = i == lib.quickIndex
-                                Image(systemName: it.1).font(.system(size: on ? 29 : 23, weight: .medium)).frame(width: on ? 82 : 62, height: on ? 82 : 62)
+                                let estVolume = it.0.hasPrefix("Volume"), niveau = i == 4 ? lib.macVolume : lib.volume, muet = i == 4 ? lib.macMuted : lib.gameMuted
+                                Image(systemName: estVolume ? (i == 4 ? "laptopcomputer" : "gamecontroller.fill") : it.1).font(.system(size: on ? 29 : 23, weight: .medium)).frame(width: on ? 82 : 62, height: on ? 82 : 62)
                                     .background(Circle().fill(on ? AnyShapeStyle(.white) : AnyShapeStyle(.white.opacity(0.12))))
                                     .overlay(Circle().stroke(.white.opacity(on ? 0 : 0.16), lineWidth: 1))
+                                    .overlay { if estVolume { Circle().trim(from: 0, to: muet ? 0 : CGFloat(max(0.02, niveau))).stroke(i == 4 ? Library.bleu[0] : Library.orange[0], style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90)).padding(-5).animation(.linear(duration: 0.08), value: niveau) } }
+                                    .overlay(alignment: .bottomTrailing) { if estVolume { Image(systemName: muet || niveau == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(.white).frame(width: 24, height: 24).background(Circle().fill(i == 4 ? Library.bleu[1] : Library.orange[1])).offset(x: 4, y: 4) } }
                                     .foregroundStyle(on ? .black : .white).opacity(lib.quickSlider && !on ? 0.45 : 1)
                                     .animation(glisse, value: lib.quickIndex)
                             }
