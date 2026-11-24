@@ -1431,7 +1431,11 @@ final class Library: ObservableObject {
             Sounds.shared.play("valider"); toast = "Enregistrement du clip…"
             Recorder.shared.saveLast(seconds: 15, game: g.name) { [weak self] url in DispatchQueue.main.async { self?.toast = url.map { "Clip enregistré : Vidéos/Salon/\($0.lastPathComponent)" } ?? "Clip impossible (voir salon.log)"; Sounds.shared.play(url == nil ? "retour" : "lancer") } }
             closeQuick()
-        case 1: Sounds.shared.play("valider"); closeQuick(); if let d = direct, d.isRunning { d.terminate() } else { watchedApp?.terminate() }; toast = "Fermeture du jeu…"
+        case 1:   // fermer le jeu : Home repasse devant d'abord, le jeu se ferme derrière lui (sinon macOS montrait le bureau entre les deux)
+            Sounds.shared.play("valider"); closeQuick(); toast = "Fermeture du jeu…"
+            let d = direct, app = watchedApp
+            NotificationCenter.default.post(name: .salonShow, object: nil); NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if let d, d.isRunning { d.terminate() } else { app?.terminate() } }
         case 2: closeQuick(); backToSalon(); NSApp.activate(ignoringOtherApps: true)
         case 5: quickJoueurs.toggle(); Sounds.shared.play(quickJoueurs ? "ouvrir" : "retour")
         default: quickSlider.toggle(); Sounds.shared.play(quickSlider ? "ouvrir" : "retour")
@@ -1446,6 +1450,13 @@ final class Library: ObservableObject {
         let app = watchedApp, d = direct
         gameEnded(g, comeBack: false, garde: true)
         if app?.isTerminated == false || d?.isRunning == true { fond = (g, app, d); log("\(g.name) : laissé ouvert derrière Home") }
+    }
+    /// Le jeu surveillé vient de se fermer (signal immédiat de macOS, sans attendre la vérification de chaque seconde) : Home repasse
+    /// devant aussitôt. Un jeu qui se relance lui-même (lanceur puis jeu) garde sa session : la vérification de chaque seconde s'en occupe.
+    func appTerminee(_ a: NSRunningApplication) {
+        guard let g = running, let w = watchedApp, w.processIdentifier == a.processIdentifier else { return }
+        if let b = a.bundleIdentifier, NSWorkspace.shared.runningApplications.contains(where: { $0.bundleIdentifier == b && $0.processIdentifier != a.processIdentifier && !$0.isTerminated }) { return }
+        log("\(g.name) : fermé (signal de macOS)"); gameEnded(g, comeBack: true)
     }
     /// Le jeu laissé derrière est-il celui-ci ? (encore en vie)
     func enFond(_ g: Game) -> Bool { guard let f = fond, f.jeu.id == g.id else { return false }; return f.app?.isTerminated == false || f.direct?.isRunning == true }
@@ -1963,20 +1974,18 @@ struct Background: View {
 let glisse = Animation.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.24)
 struct Tile: View {
     let image: NSImage; let selected: Bool; var isIcon = false
+    static let cote: CGFloat = 196
     var body: some View {
-        let cote: CGFloat = selected ? 226 : 176, rayon: CGFloat = selected ? 31 : 25
-        ZStack {
-            Color.black.overlay {
-                if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(selected ? 40 : 28) } }
-                else { Image(nsImage: image).resizable().scaledToFill() }
-            }
-            .frame(width: cote, height: cote).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: rayon, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
-            .shadow(color: .black.opacity(0.55), radius: selected ? 26 : 12, y: selected ? 16 : 8)
+        Color.black.overlay {
+            if isIcon { ZStack { LinearGradient(colors: [Color(white: 0.22), Color(white: 0.08)], startPoint: .top, endPoint: .bottom); Image(nsImage: image).resizable().scaledToFit().padding(30) } }
+            else { Image(nsImage: image).resizable().scaledToFill() }
         }
-        .opacity(selected ? 1 : 0.8)
-        .animation(glisse, value: selected)
+        .frame(width: Tile.cote, height: Tile.cote).clipped()
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0), lineWidth: 4))
+        .shadow(color: .black.opacity(selected ? 0.6 : 0.35), radius: selected ? 22 : 10, y: selected ? 14 : 6)
+        .scaleEffect(selected ? 1.08 : 1, anchor: .bottom).brightness(selected ? 0 : -0.12)
+        .animation(.easeOut(duration: 0.14), value: selected)
     }
 }
 struct Hint: View {
@@ -2138,73 +2147,87 @@ struct MenuView: View {
         while menu.items.indices.contains(n) { if !menu.items[n].info { return n }; n += d }
         return from
     }
-    private static let cols = 3
     private static let rouge = Color(red: 1, green: 0.45, blue: 0.42)
-    /// Un menu court devient une rangée de pastilles
+    /// Un menu court (les options d'un jeu) est une rangée de pastilles ; tous les autres sont une grille de tuiles
     private var rangee: Bool { !menu.grid && menu.step == nil && menu.items.count <= 7 && !menu.items.isEmpty && menu.items.allSatisfy { !$0.info && $0.image == nil } }
-    private func choisir(_ i: Int) { guard menu.items.indices.contains(i), !menu.items[i].info else { return }; index = i; Sounds.shared.play("valider"); press(); menu.items[i].action() }
-
-    /// Une carte de la grille (mods) : l'aperçu en grand, le nom dessous
-    @ViewBuilder private func card(_ i: Int, _ it: SalonMenuItem) -> some View {
-        let sel = i == vise && !it.info
-        VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Color.white.opacity(0.08)
-                if let u = it.image {
-                    AsyncImage(url: u) { phase in
-                        if let img = phase.image { img.resizable().scaledToFill() }
-                        else if phase.error != nil { Image(systemName: it.icon).font(.system(size: 40, weight: .regular)).foregroundStyle(.white.opacity(0.7)) }
-                        else { ProgressView().controlSize(.small).tint(.white) }
-                    }
-                } else { Image(systemName: it.icon).font(.system(size: 40, weight: .regular)).foregroundStyle(.white.opacity(0.7)) }
-            }
-            .frame(width: 330, height: 186).clipped()
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(sel ? 0.95 : 0.10), lineWidth: sel ? 3.5 : 1))
-            .shadow(color: .black.opacity(sel ? 0.6 : 0.3), radius: sel ? 20 : 8, y: 8)
-            Text(it.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(it.destructive ? MenuView.rouge : .white).lineLimit(1).frame(width: 330, alignment: .leading)
-            if sel, let d = it.detail { Text(d).font(.system(size: 14)).opacity(0.6).lineLimit(1).frame(width: 330, alignment: .leading) }
+    private var cols: Int { menu.grid ? 4 : 5 }
+    private var taille: CGSize { menu.grid ? CGSize(width: 296, height: 176) : CGSize(width: 232, height: 150) }
+    /// Les tuiles par groupes (un groupe par titre de section) puis par rangs : c'est ce que la manette parcourt
+    private var groupes: [(titre: String?, rangs: [[Int]])] {
+        var g: [(String?, [Int])] = []
+        for (i, it) in menu.items.enumerated() {
+            let t = it.section?.trimmingCharacters(in: .whitespaces)
+            if g.isEmpty || it.section != nil { g.append(((t?.isEmpty ?? true) ? nil : t, [i])) } else { g[g.count - 1].1.append(i) }
         }
-        .scaleEffect(sel ? 1.03 : 0.97).opacity(sel || it.info ? 1 : 0.8)
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: index)
-        .contentShape(Rectangle()).onTapGesture { choisir(i) }
+        let n = cols
+        return g.map { groupe in
+            let ids: [Int] = groupe.1
+            var rangs: [[Int]] = []
+            var d = 0
+            while d < ids.count { rangs.append(Array(ids[d..<min(d + n, ids.count)])); d += n }
+            return (titre: groupe.0, rangs: rangs)
+        }
     }
-    /// Une ligne de la liste : un petit symbole, le nom ; visée, un fond clair et sa précision
-    @ViewBuilder private func row(_ i: Int, _ it: SalonMenuItem) -> some View {
+    private var rangs: [[Int]] { groupes.flatMap { $0.rangs } }
+    private func choisir(_ i: Int) { guard menu.items.indices.contains(i), !menu.items[i].info else { return }; index = i; Sounds.shared.play("valider"); press(); menu.items[i].action() }
+    /// Monter ou descendre d'un rang : la tuile la plus proche de la même colonne, en sautant les rangs sans choix
+    private func rang(_ d: Int) -> Int {
+        let r = rangs; guard let ici = r.firstIndex(where: { $0.contains(index) }), let col = r[ici].firstIndex(of: index) else { return index }
+        var n = ici + d
+        while r.indices.contains(n) {
+            let libres = r[n].enumerated().filter { !menu.items[$0.element].info }
+            if let m = libres.min(by: { abs($0.offset - col) < abs($1.offset - col) }) { return m.element }
+            n += d
+        }
+        return index
+    }
+
+    /// Une tuile : son symbole et son nom ; avec un aperçu (mods), l'image la remplit et le nom vient par-dessus. Visée, elle prend sa couleur.
+    @ViewBuilder private func tuile(_ i: Int, _ it: SalonMenuItem) -> some View {
         let sel = i == vise && !it.info
         let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
-        HStack(spacing: 18) {
-            Image(systemName: it.icon).font(.system(size: 21, weight: .semibold)).frame(width: 32).foregroundStyle(sel ? .white : c).opacity(it.info ? 0.6 : 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(it.label).font(.system(size: it.info ? 19 : 23, weight: sel ? .bold : .medium)).lineLimit(1).truncationMode(.tail)
-                if sel || it.info, let d = it.detail { Text(d).font(.system(size: 15, weight: .medium)).opacity(sel ? 0.85 : 0.6).lineLimit(2) }
+        let morceaux = it.label.components(separatedBy: " : ")   // « Construction silencieuse : activée » : l'état à part, en petit
+        ZStack(alignment: .bottomLeading) {
+            if let u = it.image {
+                Color.white.opacity(0.06)
+                AsyncImage(url: u) { phase in
+                    if let img = phase.image { img.resizable().scaledToFill() } else if phase.error != nil { Image(systemName: it.icon).font(.system(size: 34)).opacity(0.5) } else { ProgressView().controlSize(.small).tint(.white) }
+                }.frame(width: taille.width, height: taille.height).clipped()
+                LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .center, endPoint: .bottom)
+                Text(it.label).font(.system(size: 17, weight: .bold, design: .rounded)).lineLimit(2).padding(16)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    Image(systemName: it.icon).font(.system(size: menu.grid ? 40 : 34, weight: .medium)).foregroundStyle(sel ? .white : it.info ? .white.opacity(0.6) : c).frame(height: 42, alignment: .leading)
+                    Spacer(minLength: 0)
+                    Text(morceaux[0]).font(.system(size: it.info ? 17 : 19, weight: .bold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.8).fixedSize(horizontal: false, vertical: true)
+                    if morceaux.count > 1 { Text(morceaux[1].capitalized).font(.system(size: 13, weight: .heavy, design: .rounded)).tracking(0.6).opacity(sel ? 0.9 : 0.55).padding(.top, 3) }
+                    else if it.info, let d = it.detail { Text(d).font(.system(size: 13, weight: .medium)).opacity(0.6).lineLimit(2).padding(.top, 3) }
+                }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            Spacer(minLength: 0)
-            if sel { Image(systemName: "chevron.right").font(.system(size: 15, weight: .heavy)).opacity(0.8) }
         }
-        .foregroundStyle(it.destructive && !sel ? MenuView.rouge : .white).opacity(sel ? 1 : it.info ? 0.6 : 0.85)
-        .padding(.vertical, sel && it.detail != nil ? 11 : 14).padding(.horizontal, 18).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(LinearGradient(colors: [c.opacity(sel ? 0.95 : 0), c.opacity(sel ? 0.50 : 0)], startPoint: .leading, endPoint: .trailing)))
-        .shadow(color: c.opacity(sel ? 0.55 : 0), radius: 22, y: 6)
-        .animation(glisse, value: index)
-        .offset(x: paru || apercu != nil ? 0 : -28).opacity(paru || apercu != nil ? 1 : 0)
-        .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.36).delay(Double(min(i, 12)) * 0.03), value: paru)
-        .contentShape(Rectangle()).onTapGesture { choisir(i) }
+        .frame(width: taille.width, height: taille.height)
+        .background(RoundedRectangle(cornerRadius: 28, style: .continuous).fill(sel && it.image == nil ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.6)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(it.info ? 0.22 : 0.46))))
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(sel ? 0.95 : it.info ? 0.05 : 0.10), lineWidth: sel ? 3.5 : 1))
+        .foregroundStyle(it.destructive && !sel ? MenuView.rouge : .white).shadow(color: (it.image == nil ? c : .black).opacity(sel ? 0.6 : 0), radius: 24, y: 8)
+        .scaleEffect(sel ? 1.05 : 1).animation(.easeOut(duration: 0.14), value: index)
+        .offset(y: paru || apercu != nil ? 0 : 22).opacity(paru || apercu != nil ? 1 : 0)
+        .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.32).delay(Double(min(i, 24)) * 0.018), value: paru)
+        .contentShape(Rectangle()).onTapGesture { choisir(i) }.onHover { dedans in if dedans, !it.info, index != i { index = i } }
     }
-    /// Les lignes (ou la grille) du menu long
-    @ViewBuilder private var contenu: some View {
-        if menu.grid {
-            LazyVGrid(columns: Array(repeating: GridItem(.fixed(330), spacing: 24, alignment: .top), count: MenuView.cols), alignment: .leading, spacing: 26) {
-                ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in card(i, it).id(i) }
-            }.padding(.vertical, 14).padding(.horizontal, 6)
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in
-                    if let sec = it.section, !sec.trimmingCharacters(in: .whitespaces).isEmpty { Text(sec.uppercased()).font(.system(size: 13, weight: .heavy, design: .rounded)).tracking(2).opacity(0.42).padding(.top, i == 0 ? 2 : 20).padding(.bottom, 4).padding(.horizontal, 18) }
-                    row(i, it).id(i)
+    /// La grille : chaque groupe sous son titre en petites capitales
+    @ViewBuilder private var grille: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(groupes.enumerated()), id: \.offset) { n, g in
+                if let t = g.titre { Text(t.uppercased()).font(.system(size: 13, weight: .heavy, design: .rounded)).tracking(2).opacity(0.5).padding(.top, n == 0 ? 0 : 26).padding(.bottom, 12).padding(.leading, 4) }
+                else if n > 0 { Spacer().frame(height: 18) }
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(Array(g.rangs.enumerated()), id: \.offset) { _, r in
+                        HStack(spacing: 18) { ForEach(r, id: \.self) { i in tuile(i, menu.items[i]).id(i) } }
+                    }
                 }
-            }.padding(.vertical, 6)
-        }
+            }
+        }.padding(.vertical, 16).padding(.horizontal, 10)
     }
     /// L'en-tête commun : l'étape d'un assistant, le sous-titre en petites capitales, le titre fin
     @ViewBuilder private var entete: some View {
@@ -2225,10 +2248,9 @@ struct MenuView: View {
     }
     var body: some View {
         ZStack(alignment: rangee ? .bottomLeading : .topLeading) {
-            // l'ombre qui porte le texte : en bas pour la rangée, à gauche pour la liste (la grille, plus large, assombrit tout)
+            // l'ombre qui porte le texte : en bas pour la rangée ; la grille assombrit tout l'écran
             if rangee { LinearGradient(colors: [.clear, .black.opacity(0.55), .black.opacity(0.88)], startPoint: .init(x: 0.5, y: 0.25), endPoint: .bottom) }
-            else if menu.grid { Color.black.opacity(0.62) }
-            else { LinearGradient(colors: [.black.opacity(0.90), .black.opacity(0.72), .black.opacity(0.10)], startPoint: .leading, endPoint: .init(x: 0.72, y: 0.5)) }
+            else { Color.black.opacity(0.66) }
             if rangee {
                 VStack(alignment: .leading, spacing: 0) {
                     entete
@@ -2261,19 +2283,20 @@ struct MenuView: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     entete
-                    if let t = menu.text { Text(t).font(.system(size: 17)).opacity(0.62).lineLimit(3).fixedSize(horizontal: false, vertical: true).padding(.top, 10) }
-                    if apercu != nil { contenu.padding(.top, 26); Spacer(minLength: 0) }   // l'aperçu en image ne dessine pas les zones qui défilent
+                    // la précision du choix visé (ou l'explication du menu) : une seule ligne, toujours au même endroit
+                    Text(menu.items.indices.contains(vise) ? (menu.items[vise].detail ?? menu.text ?? " ") : (menu.text ?? " ")).font(.system(size: 18, weight: .medium)).opacity(0.7).lineLimit(1)
+                        .padding(.top, 18).padding(.leading, 4).frame(maxWidth: 1300, alignment: .leading)
+                    if apercu != nil { grille.padding(.top, 8); Spacer(minLength: 0) }   // l'aperçu en image ne dessine pas les zones qui défilent
                     else {
                         ScrollViewReader { proxy in
-                            ScrollView(.vertical, showsIndicators: false) { contenu }
-                                .padding(.top, 26)
-                                .onChange(of: index) { _, _ in withAnimation { proxy.scrollTo(index) } }
+                            ScrollView(.vertical, showsIndicators: false) { grille }
+                                .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.035), .init(color: .black, location: 0.95), .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))   // les tuiles s'effacent en haut et en bas au lieu d'être coupées net
+                                .padding(.top, 8)
+                                .onChange(of: index) { _, _ in withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(index, anchor: .center) } }
                         }
                     }
-                    aides.padding(.top, 18)
-                }
-                .frame(width: menu.grid ? 1070 : 720, alignment: .leading)
-                .padding(.leading, 96).padding(.top, 76).padding(.bottom, 52)
+                    aides.padding(.top, 14)
+                }.padding(.leading, 86).padding(.top, 70).padding(.bottom, 44)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white).ignoresSafeArea()
@@ -2282,13 +2305,10 @@ struct MenuView: View {
         .onAppear { let f = next(-1, 1); index = f < 0 ? 0 : f; DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { paru = true } }
         .onReceive(NotificationCenter.default.publisher(for: .salonNav)) { n in
             guard let k = n.object as? String else { return }
-            let step = menu.grid ? MenuView.cols : 1
-            // la rangée se parcourt de gauche à droite ; la liste de haut en bas ; les deux sens marchent partout hors grille
-            let avant = menu.grid ? k == "right" : (k == "right" || k == "down"), arriere = menu.grid ? k == "left" : (k == "left" || k == "up")
-            if k == "down", menu.grid { let n = min(index + step, menu.items.count - 1); if n != index, !menu.items[n].info { index = n; Sounds.shared.play("deplacer") } }
-            else if k == "up", menu.grid { let n = max(index - step, 0); if n != index, !menu.items[n].info { index = n; Sounds.shared.play("deplacer") } }
-            else if avant { let n = next(index, 1); if n != index { index = n; Sounds.shared.play("deplacer") } }
-            else if arriere { let n = next(index, -1); if n != index { index = n; Sounds.shared.play("deplacer") } }
+            var cible = index
+            if rangee { cible = (k == "right" || k == "down") ? next(index, 1) : (k == "left" || k == "up") ? next(index, -1) : index }   // la rangée : de gauche à droite
+            else { cible = k == "right" ? next(index, 1) : k == "left" ? next(index, -1) : k == "down" ? rang(1) : k == "up" ? rang(-1) : index }   // la grille : quatre directions
+            if cible != index { index = cible; Sounds.shared.play("deplacer") }
             else if k == "ok", menu.items.indices.contains(index), !menu.items[index].info { Sounds.shared.play("valider"); press(); menu.items[index].action() }
         }
     }
@@ -2557,46 +2577,55 @@ struct DockProgression: View {
 struct AddTile: View {
     let selected: Bool
     var body: some View {
-        let cote: CGFloat = selected ? 226 : 176, rayon: CGFloat = selected ? 31 : 25
         ZStack {
-            RoundedRectangle(cornerRadius: rayon, style: .continuous).fill(.white.opacity(selected ? 0.14 : 0.04))
-            RoundedRectangle(cornerRadius: rayon, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0.3), style: StrokeStyle(lineWidth: selected ? 4 : 2, dash: selected ? [] : [7, 7]))
-            Image(systemName: "plus").font(.system(size: selected ? 60 : 44, weight: .light)).foregroundStyle(.white.opacity(selected ? 1 : 0.7))
+            RoundedRectangle(cornerRadius: 28, style: .continuous).fill(.white.opacity(selected ? 0.14 : 0.04))
+            RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(selected ? 1 : 0.3), style: StrokeStyle(lineWidth: selected ? 4 : 2, dash: selected ? [] : [7, 7]))
+            Image(systemName: "plus").font(.system(size: 48, weight: .light)).foregroundStyle(.white.opacity(selected ? 1 : 0.7))
         }
-        .frame(width: cote, height: cote)
-        .animation(glisse, value: selected)
+        .frame(width: Tile.cote, height: Tile.cote)
+        .scaleEffect(selected ? 1.08 : 1, anchor: .bottom)
+        .animation(.easeOut(duration: 0.14), value: selected)
     }
 }
 struct PickerView: View {
     @ObservedObject var lib: Library
     var body: some View {
         if let p = lib.picker {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 14) { Text("\(p.slot.rawValue) — \(p.game.name)").font(.system(size: 28, weight: .bold, design: .rounded)); if lib.pickerLoading { ProgressView().controlSize(.small).tint(.white) } }
-                if let n = lib.pickerNote { Text(n).font(.system(size: 15, weight: .medium, design: .rounded)).opacity(0.75) }
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 18) {
-                            ForEach(Array(p.items.enumerated()), id: \.element.id) { i, c in
-                                Group {
-                                    if let t = c.thumb { AsyncImage(url: t) { ph in ph.resizable().scaledToFit() } placeholder: { ProgressView().frame(width: 200, height: 200) } }
-                                    else { VStack(spacing: 10) { Image(systemName: "folder").font(.system(size: 44)); Text("Depuis un fichier…").font(.system(size: 18, weight: .medium, design: .rounded)) }.frame(width: 220, height: p.slot == .background ? 170 : 260).background(.white.opacity(0.12)) }
+            let h: CGFloat = p.slot == .background ? 220 : 280
+            ZStack(alignment: .topLeading) {
+                LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0.25), .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(p.game.name.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.6).lineLimit(1)
+                    HStack(spacing: 16) { Text(p.slot.rawValue).font(.system(size: 60, weight: .thin)).tracking(-1); if lib.pickerLoading { ProgressView().controlSize(.small).tint(.white) } }
+                    if let n = lib.pickerNote { Text(n).font(.system(size: 17, weight: .medium)).opacity(0.7).lineLimit(2).padding(.top, 6).frame(maxWidth: 1100, alignment: .leading) }
+                    Spacer(minLength: 0)
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .bottom, spacing: 22) {
+                                ForEach(Array(p.items.enumerated()), id: \.element.id) { i, c in
+                                    let sel = i == lib.pickIndex
+                                    Group {
+                                        if let t = c.thumb { AsyncImage(url: t) { ph in ph.resizable().scaledToFit() } placeholder: { ProgressView().tint(.white).frame(width: h, height: h) } }
+                                        else { Image(systemName: "folder.fill").font(.system(size: 54, weight: .light)).frame(width: h * 0.9, height: h).background(.white.opacity(0.10)) }
+                                    }
+                                    .frame(height: h).frame(minWidth: 150).clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(sel ? 1 : 0), lineWidth: 4))
+                                    .shadow(color: .black.opacity(sel ? 0.6 : 0.3), radius: sel ? 22 : 10, y: sel ? 14 : 6)
+                                    .scaleEffect(sel ? 1.06 : 1, anchor: .bottom).brightness(sel ? 0 : -0.15).animation(.easeOut(duration: 0.14), value: lib.pickIndex)
+                                    .id(c.id).onTapGesture { lib.pickIndex = i; lib.pickCandidate() }
                                 }
-                                .frame(height: p.slot == .background ? 170 : 260).frame(minWidth: 170).clipped()
-                                .clipShape(RoundedRectangle(cornerRadius: 14)).overlay(RoundedRectangle(cornerRadius: 14).stroke(.white, lineWidth: i == lib.pickIndex ? 4 : 0))
-                                .overlay(alignment: .top) { if c.thumb != nil { Text(c.source).font(.system(size: 11, weight: .bold, design: .rounded)).padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(.black.opacity(0.6))).padding(8) } }
-                                .overlay(alignment: .bottom) { if c.thumb != nil { Text(c.width > 0 ? "\(c.width) × \(c.height)" : "taille inconnue").font(.system(size: 12, weight: .semibold, design: .rounded).monospacedDigit()).padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(c.width >= 1600 || (p.slot != .background && c.width >= 600) ? Color.green.opacity(0.55) : c.width > 0 ? Color.orange.opacity(0.6) : Color.black.opacity(0.6))).padding(8) } }
-                                .scaleEffect(i == lib.pickIndex ? 1.0 : 0.94).opacity(i == lib.pickIndex ? 1 : 0.6).animation(.spring(response: 0.3, dampingFraction: 0.8), value: lib.pickIndex)
-                                .id(c.id).onTapGesture { lib.pickIndex = i; lib.pickCandidate() }
-                            }
-                        }.padding(.horizontal, 8).padding(.vertical, 10)
-                    }.onChange(of: lib.pickIndex) { _, _ in if p.items.indices.contains(lib.pickIndex) { withAnimation { proxy.scrollTo(p.items[lib.pickIndex].id, anchor: .center) } } }
-                }
-                Text(p.items.indices.contains(lib.pickIndex) && p.items[lib.pickIndex].thumb != nil ? { let c = p.items[lib.pickIndex]; return "\(c.source)" + (c.author.isEmpty ? "" : " · \(c.author)") + (c.width > 0 ? " · \(c.width) × \(c.height) px" : "") + (c.game.isEmpty ? "" : " · jeu : \(c.game)") }() : " ").opacity(0.7)
-                HStack(spacing: 20) { Hint(b: "←→", t: "Parcourir"); Hint(k: lib.hints.ok, t: "Utiliser"); Hint(k: lib.hints.back, t: "Annuler") }
-            }.padding(28).frame(maxWidth: 1500).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-            .background(RoundedRectangle(cornerRadius: 28, style: .continuous).fill(Color.black.opacity(0.3))).shadow(color: .black.opacity(0.5), radius: 50, y: 24).foregroundStyle(.white)
-            .transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .scale(scale: 1.04).combined(with: .opacity)))
+                            }.padding(.horizontal, 96).padding(.top, 30).padding(.bottom, 8)
+                        }.scrollClipDisabled()
+                         .onChange(of: lib.pickIndex) { _, _ in if p.items.indices.contains(lib.pickIndex) { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(p.items[lib.pickIndex].id, anchor: .center) } } }
+                    }.padding(.horizontal, -96)
+                    // l'image visée : d'où elle vient et sa taille, en une ligne
+                    Text(p.items.indices.contains(lib.pickIndex) ? { let c = p.items[lib.pickIndex]; return c.thumb == nil ? "Depuis un fichier…" : c.source + (c.width > 0 ? "  ·  \(c.width) × \(c.height)" : "") }() : " ")
+                        .font(.system(size: 20, weight: .semibold)).padding(.top, 20).padding(.leading, 6)
+                    HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Utiliser"); Pilule(k: lib.hints.back, t: "Annuler") }.padding(.top, 18)
+                }.padding(.horizontal, 96).padding(.top, 70).padding(.bottom, 44)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white).ignoresSafeArea().transition(.opacity)
         }
     }
 }
@@ -2622,7 +2651,7 @@ struct Screen: View {
         let g = lib.current; let a = g.flatMap { lib.art[$0.id] }
         ZStack {
             Group { if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(g?.id ?? "salon-plus")
-                .transition(.opacity).animation(.easeInOut(duration: 0.5), value: g?.id)
+                .transition(.opacity).animation(.easeInOut(duration: 0.35), value: g?.id)
             let veiled = lib.menu != nil || lib.picker != nil || lib.accueil != nil
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 10) {
@@ -2694,7 +2723,7 @@ struct Screen: View {
                                 .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45).delay(Double(min(lib.visible.count, 8)) * 0.05), value: appeared)
                         }.padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 30)
                     }.scrollClipDisabled()   // l'ombre des jaquettes (rayon 30) dépassait le haut du défilement et y était coupée net
-                     .onChange(of: lib.selected) { _, _ in withAnimation(.easeInOut(duration: 0.3)) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
+                     .onChange(of: lib.selected) { _, _ in withAnimation(.easeOut(duration: 0.18)) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
                      .onChange(of: lib.categoryIndex) { _, _ in appeared = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { appeared = true; if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } } }
                      .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { appeared = true } }
                 }
@@ -2703,7 +2732,7 @@ struct Screen: View {
             }
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
-            if lib.picker != nil { Color.black.opacity(0.6).ignoresSafeArea(); PickerView(lib: lib) }
+            if lib.picker != nil { PickerView(lib: lib) }
             if let e = lib.accueil { AccueilView(lib: lib, etat: e).transition(.opacity).zIndex(5) }
             if lib.ouverture { OuvertureView(lib: lib).transition(.opacity).zIndex(20) }
             if let t = lib.tache {
@@ -2729,7 +2758,7 @@ struct Screen: View {
                 VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.bottom, 130) }
                     .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }
             }
-        }.onReceive(clock) { now = $0 }.animation(.easeInOut(duration: 0.25), value: lib.current?.id).animation(.easeInOut(duration: 0.22), value: lib.menu?.title).animation(.easeInOut(duration: 0.22), value: lib.picker?.game.id)
+        }.onReceive(clock) { now = $0 }.animation(.easeOut(duration: 0.15), value: lib.current?.id).animation(.easeInOut(duration: 0.22), value: lib.menu?.title).animation(.easeInOut(duration: 0.22), value: lib.picker?.game.id)
     }
 }
 
@@ -2789,9 +2818,12 @@ struct HUDView: View {
             if lib.quick {
                 // bas : centre de contrôle — carte du jeu à gauche, cartes d'action au milieu, aides à droite
                 VStack { Spacer()
-                    if lib.quickJoueurs, let e = lib.enLigne() {
-                        JoueursView(titre: e.nom, joueurs: lib.joueursConnectes(), back: lib.hints.back).padding(.bottom, 14)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // la carte des joueurs existe dès que le jeu est en ligne et ne fait que se montrer : créée au moment de l'ouvrir, elle
+                    // apparaissait d'un coup la première fois, sans son animation
+                    if let e = lib.enLigne() {
+                        JoueursView(titre: e.nom, joueurs: lib.quickJoueurs ? lib.joueursConnectes() : nil, back: lib.hints.back).padding(.bottom, 14)
+                            .opacity(lib.quickJoueurs ? 1 : 0).offset(y: lib.quickJoueurs ? 0 : 22).scaleEffect(lib.quickJoueurs ? 1 : 0.96, anchor: .bottom)
+                            .frame(height: lib.quickJoueurs ? nil : 0, alignment: .bottom).allowsHitTesting(lib.quickJoueurs)
                     }
                     if lib.quickSlider {
                         // grand curseur de volume (jeu ou général selon la carte) : stick gauche / flèches pour régler, △ muet, ○ pour revenir aux cartes
@@ -3029,6 +3061,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let long = SalonMenu(title: "Bibliothèque Epic Games", subtitle: "32 jeux", items: ["Celeste", "Fall Guys", "Fortnite", "Hades", "Rocket League", "Sifu", "Subnautica", "Control", "Alan Wake", "Death Stranding", "Dishonored", "Prey"].enumerated().map { i, n in
                 SalonMenuItem(label: n, detail: n == "Fortnite" ? "Incompatible — anti-triche" : n == "Fall Guys" ? "Vérifié sur Mac" : "Pas encore testé", icon: n == "Fortnite" ? "xmark.shield.fill" : n == "Fall Guys" ? "checkmark.seal.fill" : "arrow.down.circle", destructive: n == "Fortnite", action: {}) })
             rendre(MenuView(lib: lib, menu: long, apercu: 1), "menu-liste.png")
+            rendre(MenuView(lib: lib, menu: lib.plusMenu(), apercu: 2), "menu-tuiles.png")
+            let sous = SalonMenu(title: "Réglages", subtitle: "Super Mario Odyssey", items: [
+                SalonMenuItem(label: "Images par seconde : 60", detail: "Jusqu'à 120 sur un écran qui le permet", icon: "speedometer", section: "Image", action: {}), SalonMenuItem(label: "MetalFX : activé", icon: "sparkles", action: {}),
+                SalonMenuItem(label: "Résolution : 1080p", icon: "rectangle.expand.vertical", action: {}), SalonMenuItem(label: "Plein écran : activé", icon: "arrow.up.left.and.arrow.down.right", action: {}),
+                SalonMenuItem(label: "Serveur en ligne : Azure", icon: "globe", section: "En ligne", action: {}), SalonMenuItem(label: "Joueurs", detail: "3 connectés", icon: "person.2.fill", info: true, action: {}),
+                SalonMenuItem(label: "Volume du jeu : 65 %", icon: "speaker.wave.2.fill", section: "Son", action: {})])
+            rendre(MenuView(lib: lib, menu: sous, apercu: 1), "menu-sous.png")
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
@@ -3137,6 +3176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         pad = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in self?.pollPad() }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] n in
+            if let a = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication { self?.lib.appTerminee(a) }
+        }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             guard let self, let a = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             // une autre app passe devant : si c'est le jeu laissé ouvert derrière Home, sa session reprend (menu rapide, volume)
@@ -3158,7 +3200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if k == "back", lib.fermerTache() { return }
         switch k {
         case "left": lib.move(-1); case "right": lib.move(1); case "up": lib.moveCategory(-1); case "down": lib.moveCategory(1)
-        case "ok": lib.launch(); case "options": lib.openOptions(); case "plus": lib.openPlusMenu(); default: break
+        case "ok": lib.launch(); case "options": lib.openOptions(); case "plus": lib.openPlusMenu()
+        case "back": lib.openQuitter()
+        default: break
         }
     }
     @objc func reload() { lib.load() }
@@ -3867,6 +3911,10 @@ extension Library {
             if let dedie { items.append(SalonMenuItem(label: "Reconstruire", icon: "hammer.fill", action: { self.menu = nil; self.lancer(dedie, dedie == "totk-mng-online.command" ? self.modsCode(g) : [], titre: "Reconstruction de \(g.name)", jeux: [g.id]) })) }
             items.append(SalonMenuItem(label: "Installer une mise à jour", icon: "arrow.down.circle.fill", action: {
                 self.assistant(Assistant(moteur: m == .mng ? "mng" : "nxnative", etapes: ["base", "maj", "recap"], sortie: g.url, titre: g.name, mods: self.modsCode(g)), 0, retour: { self.openUpdateMenu(g) }) }))
+            // plus de dossier de construction pour ce jeu : le reconstruire redemande le jeu de base (ton dump)
+            if dedie == nil { items.append(SalonMenuItem(label: "Reconstruire", detail: "Le dossier de construction n'existe plus : il faut le jeu de base", icon: "hammer.fill", action: {
+                var a = Assistant(moteur: m == .mng ? "mng" : "nxnative", etapes: ["base", "recap"], sortie: g.url, titre: g.name, mods: self.modsCode(g)); a.icone = self.iconePourBuild(g)
+                self.assistant(a, 0, retour: { self.openUpdateMenu(g) }) })) }
         }
         menu = SalonMenu(title: "Mises à jour", subtitle: g.name, items: items, hero: "arrow.down.circle.fill", back: retour)
     }
@@ -4066,6 +4114,15 @@ extension Library {
                 if !self.lancer("preparer-moteurs.command", env: self.modePC ? ["HOME_AUSSI_PC": "1"] : [:], titre: "Installation pour : \(self.modeResume)") { self.apresTache = nil }
             }
         }
+    }
+    /// Le bouton retour sur la bibliothèque : quitter Home, seulement si on le confirme
+    func openQuitter() {
+        guard running == nil, menu == nil else { return }
+        Sounds.shared.play("ouvrir")
+        menu = SalonMenu(title: "Quitter Home ?", items: [
+            SalonMenuItem(label: "Rester", icon: "arrow.uturn.backward", action: { self.menu = nil }),
+            SalonMenuItem(label: "Quitter Home", icon: "power", destructive: true, action: { self.menu = nil; Sounds.shared.play("retour"); DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) } }),
+        ])
     }
     /// « Préparer ce Mac » : ce qu'il faut pour construire les jeux Switch (outils d'Apple, Homebrew, les deux moteurs), ce qui est déjà
     /// là, et le script qui installe le reste (preparer-moteurs.command). L'état est lu par le même script (--etat), hors du fil principal.
