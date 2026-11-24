@@ -61,6 +61,7 @@ sealed class Fenetre : Window
         {
             Journal.Ecrire($"Home {Bibliotheque.Version} démarre ({Environment.OSVersion})");
             manette = new Manette(lib, () => IsActive);
+            if (Icones.Inconnues().ToList() is { Count: > 0 } inconnues) Journal.Ecrire("icônes inconnues : " + string.Join(", ", inconnues));
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
             if (Bibliotheque.Demo) await lib.ChargerDemo(); else _ = Catalogue.Charger();   // le catalogue sert aussi à proposer les mises à jour des recomps

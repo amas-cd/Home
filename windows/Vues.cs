@@ -4,7 +4,9 @@
 //
 // Deux règles tiennent tout le fichier :
 //  - une vue reste en place et on change ses propriétés (c'est ce qui l'anime) ; on ne la reconstruit que si son contenu change ;
-//  - on n'anime jamais une taille : la taille de dessin est fixe, on anime RenderTransform (déplacement, échelle) et l'opacité.
+//  - on n'anime jamais une taille : la taille de dessin est fixe, on anime RenderTransform (déplacement, échelle) et l'opacité ;
+//  - aucun flou ni ombre calculés en direct (BlurEffect, DropShadowEffect) : Avalonia les recalcule à chaque image dès que quelque
+//    chose bouge dessous, et tout saccade. Un flou est une image minuscule étirée (`U.Flou`), ou une photo réduite de l'écran.
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Animation.Easings;
@@ -18,7 +20,7 @@ using Avalonia.Media.Transformation;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Ellipse = Avalonia.Controls.Shapes.Ellipse;
-using Forme = Avalonia.Controls.Shapes.Path;
+using FluentIcons.Common;
 using Rectangle = Avalonia.Controls.Shapes.Rectangle;
 
 namespace Home;
@@ -65,24 +67,44 @@ static class Mouvement
 
 static class U
 {
-    public static readonly FontFamily Police = new("Segoe UI Variable Display, Segoe UI, SF Pro Rounded, Helvetica Neue, Arial");
-    /// L'écriture de Home pour les titres : capitales très grasses et larges (SF Pro Expanded Black sur Mac). Windows n'a pas de police
-    /// large : la plus grasse de Segoe, avec un peu d'air entre les lettres.
-    public static readonly FontFamily PoliceLarge = new("Segoe UI, Arial Black, Helvetica Neue, Arial");
+    /// L'écriture de Home sur Windows : Mona Sans, embarquée dans l'app (SF Pro, celle du Mac, ne peut pas être redistribuée)
+    public static readonly FontFamily Police = new("avares://Home/polices#Mona Sans");
+    /// Pour les titres : sa version large, en très gras (SF Pro Expanded Black sur Mac)
+    public static readonly FontFamily PoliceLarge = new("avares://Home/polices/MonaSansExpanded-Black.ttf#Mona Sans Expanded");
+    /// La même en gras seulement, pour les choix de la roue
+    public static readonly FontFamily PoliceLargeGras = new("avares://Home/polices/MonaSansExpanded-Bold.ttf#Mona Sans Expanded");
     public static IBrush Blanc(double a = 1) => new SolidColorBrush(Colors.White, a);
     public static IBrush Noir(double a = 1) => new SolidColorBrush(Colors.Black, a);
     public static readonly RelativePoint Centre = RelativePoint.Center, Bas = new(0.5, 1, RelativeUnit.Relative), Gauche = new(0, 0.5, RelativeUnit.Relative);
     public static TextBlock Texte(string s, double taille, FontWeight poids = FontWeight.Normal, double opacite = 1) =>
         new() { Text = s, FontSize = taille, FontWeight = poids, Opacity = opacite, FontFamily = Police, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center };
-    /// Un titre dans l'écriture de Home : capitales, très gras, lettres espacées. `place` : la largeur à ne pas dépasser, le texte rétrécit pour y tenir.
+    /// Un titre dans l'écriture de Home : capitales larges, très grasses. `place` : la largeur à ne pas dépasser, le texte rétrécit pour y tenir.
     public static TextBlock Titre(string s, double taille, double espace = 1, double opacite = 1, double place = 0)
     {
         var t = s.ToUpper();
-        if (place > 0) taille = Math.Max(taille * 0.5, Math.Min(taille, place / Math.Max(1, t.Length) / 0.72));   // une capitale très grasse fait environ 0,72 fois sa taille de large
-        return new() { Text = t, FontSize = taille, FontWeight = FontWeight.Black, Opacity = opacite, FontFamily = PoliceLarge, LetterSpacing = espace + taille * 0.02, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        if (place > 0) taille = Math.Max(taille * 0.5, Math.Min(taille, place / Math.Max(1, t.Length) / 0.84));   // une capitale large fait environ 0,84 fois sa taille
+        return new() { Text = t, FontSize = taille, FontWeight = FontWeight.Black, Opacity = opacite, FontFamily = PoliceLarge, LetterSpacing = espace, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
     }
-    public static Control Icone(string sf, double taille, IBrush? couleur = null) =>
-        new Forme { Data = Icones.De(sf), Fill = couleur ?? Brushes.White, Stretch = Stretch.Uniform, Width = taille, Height = taille, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+    static readonly Dictionary<int, Typeface> policesIcones = new[] { 16, 20, 24, 28, 32, 48 }.ToDictionary(t => t, t => new Typeface($"avares://FluentIcons.Resources.Avalonia/Assets#Fluent System Icons Size{t}"));
+    static readonly Dictionary<(Icon, int), Geometry?> traces = new();
+    /// Une icône : le symbole du Mac traduit en icône Fluent pleine, dans un carré de sa taille (donc toujours centrée).
+    /// La police d'icônes impose sa couleur (noir) quand on l'écrit comme du texte : on prend le tracé du caractère, qu'on remplit de la
+    /// couleur voulue. Le caractère : 0xF0000 + 4 × l'icône + sa variante (1 = pleine). Trois dessins selon la taille, comme chez Microsoft.
+    public static Control Icone(string sf, double taille, IBrush? couleur = null)
+    {
+        var icone = Icones.De(sf); var dessin = taille >= 40 ? 2 : taille >= 26 ? 1 : 0;
+        if (!traces.TryGetValue((icone, dessin), out var trace))
+        {
+            // chaque icône n'existe pas dans toutes les tailles de dessin : la plus proche de celle qu'on veut, parmi celles qui l'ont
+            var point = 0xF0000 + 4 * (int)icone + (int)IconVariant.Filled;
+            int[] ordre = dessin == 2 ? [48, 32, 28, 24, 20, 16] : dessin == 1 ? [28, 24, 32, 20, 48, 16] : [20, 24, 16, 28, 32, 48];
+            var police = ordre.Select(t => policesIcones[t]).FirstOrDefault(p => p.GlyphTypeface.TryGetGlyph((uint)point, out _), policesIcones[20]);
+            traces[(icone, dessin)] = trace = new FormattedText(char.ConvertFromUtf32(point), System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight, police, 100, Brushes.White).BuildGeometry(new Point(0, 0));
+        }
+        // le tracé est dessiné dans un carré de 100 (la taille du caractère), puis mis à l'échelle : l'icône garde ses marges d'origine
+        var forme = new Avalonia.Controls.Shapes.Path { Data = trace, Fill = couleur ?? Brushes.White, Width = 100, Height = 100, Stretch = Stretch.None, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative), RenderTransform = new ScaleTransform(taille / 100, taille / 100) };
+        return new Canvas { Width = taille, Height = taille, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Children = { forme } };
+    }
     public static LinearGradientBrush Degrade(Color a, Color b, bool diagonale = true) => new()
     {
         StartPoint = new RelativePoint(diagonale ? 0 : 0.5, 0, RelativeUnit.Relative), EndPoint = new RelativePoint(diagonale ? 1 : 0.5, 1, RelativeUnit.Relative),
@@ -120,7 +142,16 @@ static class U
     /// Un îlot du haut de l'écran (batterie de la manette)
     public static Border Ilot(params Control[] c) => new() { Background = Noir(0.42), BorderBrush = Blanc(0.14), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(22), Height = 44, Padding = new Thickness(16, 0), Child = Ligne(8, c) };
     public static async void Distante(Image img, string url, int largeur, Action? chargee = null) { if (await Images.Distante(url, largeur) is { } b) { img.Source = b; chargee?.Invoke(); } }
-    public static IEffect Ombre(double rayon, double opacite = 0.55) => new DropShadowEffect { BlurRadius = rayon, Color = Colors.Black, Opacity = opacite, OffsetX = 0, OffsetY = 0 };
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Bitmap, Bitmap> flous = new();
+    /// Une image floue sans rien calculer à l'écran : l'image réduite à quelques points, que l'affichage étire en la lissant
+    public static Bitmap Flou(Bitmap b, int cote = 20)
+    {
+        if (flous.TryGetValue(b, out var f)) return f;
+        var k = (double)cote / Math.Max(1, Math.Max(b.PixelSize.Width, b.PixelSize.Height));
+        f = b.CreateScaledBitmap(new PixelSize(Math.Max(2, (int)(b.PixelSize.Width * k)), Math.Max(2, (int)(b.PixelSize.Height * k))), BitmapInterpolationMode.HighQuality);
+        flous.Add(b, f); return f;
+    }
+    public static Image ImageFloue(Bitmap? b) { var i = new Image { Source = b != null ? Flou(b) : null, Stretch = Stretch.UniformToFill }; RenderOptions.SetBitmapInterpolationMode(i, BitmapInterpolationMode.HighQuality); return i; }
 }
 
 /// Une vue qui en remplace une autre en fondu : l'ancienne s'efface, la nouvelle arrive (en glissant ou en grandissant si on le demande)
@@ -166,32 +197,27 @@ sealed class Anneau : Control
     }
 }
 
-/// Le fond : l'image du jeu visé (floutée quand il n'a que sa jaquette), en fondu enchaîné d'un jeu à l'autre, avec un zoom très lent.
-/// Sur la case + : des halos de couleur qui dérivent, et quelques symboles (`AddBackground`).
+/// Le fond : l'image du jeu visé (floutée quand il n'a que sa jaquette), en fondu enchaîné d'un jeu à l'autre.
+/// Sur la case + : des halos de couleur et quelques symboles qui flottent (`AddBackground`).
+/// Le zoom lent du Mac (1,00 ↔ 1,05 en 30 s) n'est pas repris : sur Avalonia il fait redessiner tout l'écran à chaque image.
 sealed class FondVue : Panel
 {
-    readonly Panel[] couches = [new(), new()]; readonly CancellationTokenSource?[] zooms = new CancellationTokenSource?[2]; int devant; string cle = "?";
+    readonly Panel[] couches = [new(), new()]; int devant; string cle = "?";
     readonly Panel plus = new() { Opacity = 0 };
     public FondVue()
     {
         ClipToBounds = true; Background = Brushes.Black; IsHitTestVisible = false;
         plus.Children.Add(new Border { Background = U.Degrade(Color.FromRgb(13, 15, 43), Color.FromRgb(3, 3, 13), false) });
         var halos = new Canvas();
-        (Color c, double x, double y, double dx, double dy, double s)[] taches =
-            [(Color.FromRgb(242, 64, 89), 0.14, 0.13, 420, 260, 57), (Color.FromRgb(64, 115, 255), 0.72, 0.30, -380, 300, 79), (Color.FromRgb(51, 217, 140), 0.40, 0.62, 340, -280, 66), (Color.FromRgb(158, 82, 242), 0.86, 0.70, -460, -220, 90)];
-        foreach (var (c, x, y, dx, dy, s) in taches)
-        {
-            var e = U.Lueur(c, 1267, 0.55); e.RenderTransform = new TranslateTransform();
-            Canvas.SetLeft(e, 1920 * x - 633); Canvas.SetTop(e, 1080 * y - 633); halos.Children.Add(e);
-            if (!Mouvement.Reduit) e.AttachedToVisualTree += (_, _) => Mouvement.Boucle(e, s, true, new SineEaseInOut(), (TranslateTransform.XProperty, 0d, dx), (TranslateTransform.YProperty, 0d, dy));
-        }
-        (string sf, double x, double y)[] symboles = [("gamecontroller", 0.16, 0.30), ("desktopcomputer", 0.82, 0.24), ("puzzlepiece", 0.70, 0.62), ("leaf", 0.30, 0.66), ("plus.circle", 0.50, 0.18), ("arrow.down", 0.90, 0.55)];
+        (Color c, double x, double y)[] taches = [(Color.FromRgb(242, 64, 89), 0.20, 0.20), (Color.FromRgb(64, 115, 255), 0.70, 0.32), (Color.FromRgb(51, 217, 140), 0.44, 0.60), (Color.FromRgb(158, 82, 242), 0.84, 0.66)];
+        foreach (var (c, x, y) in taches) { var e = U.Lueur(c, 1267, 0.55); Canvas.SetLeft(e, 1920 * x - 633); Canvas.SetTop(e, 1080 * y - 633); halos.Children.Add(e); }
+        (string sf, double x, double y)[] symboles = [("gamecontroller", 0.16, 0.30), ("desktopcomputer", 0.82, 0.24), ("puzzlepiece", 0.70, 0.62), ("leaf", 0.30, 0.66), ("plus.circle", 0.50, 0.18), ("arrow.down.circle", 0.90, 0.55)];
         for (var k = 0; k < symboles.Length; k++)
         {
             var (sf, x, y) = symboles[k]; var taille = 100 + 34 * (k % 3); var i = U.Icone(sf, taille, U.Blanc(0.07)); i.RenderTransform = new TranslateTransform();
             Canvas.SetLeft(i, 1920 * x - taille / 2.0); Canvas.SetTop(i, 1080 * y - taille / 2.0); halos.Children.Add(i);
-            double dx = 30 + 6 * k, dy = 24 + 5 * k;
-            if (!Mouvement.Reduit) i.AttachedToVisualTree += (_, _) => Mouvement.Boucle(i, 11 + 2.5 * (dx - 30) / 6, true, new SineEaseInOut(), (TranslateTransform.XProperty, -dx, dx), (TranslateTransform.YProperty, dy, -dy));
+            double dx = 30 + 6 * k, dy = 24 + 5 * k, duree = 11 + 2.5 * k;
+            if (!Mouvement.Reduit) i.AttachedToVisualTree += (_, _) => Mouvement.Boucle(i, duree, true, new SineEaseInOut(), (TranslateTransform.XProperty, -dx, dx), (TranslateTransform.YProperty, dy, -dy));
         }
         plus.Children.Add(halos); plus.Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) };
         Children.Add(plus);
@@ -201,36 +227,31 @@ sealed class FondVue : Panel
     public void Montrer(string cle, Bitmap? image, bool flou)
     {
         if (cle == this.cle) return;
-        this.cle = cle; var ancien = couches[devant]; devant = 1 - devant; var c = couches[devant]; var n = devant;
+        this.cle = cle; var ancien = couches[devant]; devant = 1 - devant; var c = couches[devant];
         // la nouvelle image arrive par-dessus l'ancienne, qui reste pleine jusqu'à la fin du fondu : jamais de creux noir entre deux jeux
-        zooms[n]?.Cancel(); zooms[n] = null; c.Children.Clear();
-        Mouvement.SansAnimer(c, () => c.Opacity = 0);
+        c.Children.Clear(); Mouvement.SansAnimer(c, () => c.Opacity = 0);
         c.ZIndex = 2; ancien.ZIndex = 1; plus.Opacity = image == null ? 1 : 0;
         if (image == null) { ancien.Opacity = 0; return; }
-        var img = new Image { Source = image, Stretch = Stretch.UniformToFill, RenderTransformOrigin = U.Centre };
-        if (flou) { img.Effect = new BlurEffect { Radius = 70 }; img.RenderTransform = new ScaleTransform(1.3, 1.3); }
-        else if (!Mouvement.Reduit) img.RenderTransform = new ScaleTransform(1, 1);
-        c.Children.Add(img);
-        Mouvement.Apres(() =>
-        {
-            if (this.cle != cle) return;
-            c.Opacity = 1;
-            if (!flou && !Mouvement.Reduit) zooms[n] = Mouvement.Boucle(img, 30, true, new LinearEasing(), (ScaleTransform.ScaleXProperty, 1d, 1.05), (ScaleTransform.ScaleYProperty, 1d, 1.05));
-        });
+        if (flou) { var i = U.ImageFloue(image); i.RenderTransformOrigin = U.Centre; i.RenderTransform = new ScaleTransform(1.3, 1.3); c.Children.Add(i); }
+        else c.Children.Add(new Image { Source = image, Stretch = Stretch.UniformToFill });
+        Mouvement.Apres(() => { if (this.cle == cle) c.Opacity = 1; });
         Mouvement.Dans(0.45, () => { if (this.cle == cle) ancien.Opacity = 0; });
     }
 }
 
 /// Une tuile de jeu (`Tile`) : un carré de 180 dont la taille de dessin ne change jamais. Visée, elle est agrandie d'un bloc par le bas
 /// (échelle 1,34), son bord blanc apparaît, elle s'éclaircit. Sa place dans la rangée est un déplacement, pas une marge : rien n'est remis en page.
+/// Une jaquette qui n'est pas carrée (celles de Steam sont en hauteur) est montrée entière, sur sa propre image floutée : rien n'est rogné.
 sealed class Tuile : Panel
 {
     public const double Cote = 180, Zoom = 1.34;
     readonly Panel carre = new() { Width = Cote, Height = Cote, RenderTransformOrigin = U.Bas };
     readonly Border ombre = new(), cadre = new() { ClipToBounds = true }, sombre = new() { Background = Brushes.Black, IsHitTestVisible = false }, contour = new() { BorderBrush = Brushes.White, BorderThickness = new Thickness(3), Opacity = 0 };
-    readonly Image image = new() { Stretch = Stretch.UniformToFill };
+    readonly Image image = new() { Stretch = Stretch.UniformToFill }, entiere = new() { Stretch = Stretch.Uniform }, givre = U.ImageFloue(null);
+    readonly Border voile = new() { Background = U.Noir(0.35), IsVisible = false };
     readonly Rectangle? pointille;
     public readonly Jeu? Jeu;
+    Bitmap? montree; (bool visee, double x, bool floue)? etat;
     public Tuile(Jeu? jeu)
     {
         Jeu = jeu; Width = Height = Cote; Background = Brushes.Transparent;
@@ -240,14 +261,16 @@ sealed class Tuile : Panel
         {   // la case + (`AddTile`) : un contour en pointillés, plein quand elle est visée
             cadre.Background = U.Blanc(0.04); sombre.Background = Brushes.White; sombre.Opacity = 0;
             pointille = new Rectangle { RadiusX = 26, RadiusY = 26, Stroke = U.Blanc(0.3), StrokeThickness = 2, StrokeDashArray = [3.5, 3.5] };
-            dedans.Children.Add(U.Icone("plus", 40, U.Blanc(0.85)));
+            dedans.Children.Add(U.Icone("plus", 44, U.Blanc(0.85)));
         }
         else
         {
             var initiales = string.Concat(jeu.Nom.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(m => char.ToUpper(m[0])));
             dedans.Children.Add(new Border { Background = U.Degrade(Color.FromRgb(56, 56, 56), Color.FromRgb(20, 20, 20), false),
-                Child = new TextBlock { Text = initiales, FontSize = 64, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, Foreground = U.Blanc(0.5), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
-            dedans.Children.Add(image);
+                Child = new TextBlock { Text = initiales, FontSize = 56, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, Foreground = U.Blanc(0.5), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } });
+            RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.HighQuality); RenderOptions.SetBitmapInterpolationMode(entiere, BitmapInterpolationMode.HighQuality);
+            givre.Opacity = 0; givre.Transitions = new Transitions { Mouvement.Opacite(0.42, Mouvement.Coule) };
+            dedans.Children.AddRange([image, voile, entiere, givre]);
             ombre.Background = Brushes.Black; ombre.BoxShadow = BoxShadows.Parse("0 5 8 0 #4D000000"); sombre.Opacity = 0.12;
         }
         cadre.Child = dedans;
@@ -260,12 +283,22 @@ sealed class Tuile : Panel
         contour.Transitions = new Transitions { Mouvement.Opacite(0.42, coule) }; sombre.Transitions = new Transitions { Mouvement.Opacite(0.42, coule) };
         if (pointille != null) pointille.Transitions = new Transitions { Mouvement.Opacite(0.42, coule) };
     }
-    public void Mettre(Bitmap? couverture, bool visee, double x)
+    /// `floue` : la tuile est dans une rangée voisine, qu'on devine seulement (le flou du Mac, sans flou calculé : la jaquette réduite à quelques points)
+    public void Mettre(Bitmap? couverture, bool visee, double x, bool floue)
     {
-        if (image.Source != couverture) image.Source = couverture;
+        if (couverture != montree && Jeu != null)
+        {
+            montree = couverture;
+            var ratio = couverture == null ? 1 : (double)couverture.PixelSize.Width / Math.Max(1, couverture.PixelSize.Height); var carree = ratio is > 0.9 and < 1.12;
+            image.Source = couverture == null ? null : carree ? couverture : U.Flou(couverture); entiere.Source = carree ? null : couverture; voile.IsVisible = !carree;
+            givre.Source = couverture != null ? U.Flou(couverture) : null;
+        }
+        // rien n'a changé : on ne touche à rien (réécrire la même valeur relancerait la transition en cours)
+        if (etat == (visee, x, floue)) return;
+        etat = (visee, x, floue);
         RenderTransform = Mouvement.Deplace(x, 0); carre.RenderTransform = Mouvement.Echelle(visee ? Zoom : 1); contour.Opacity = visee ? 1 : 0; ZIndex = visee ? 1 : 0;
         if (Jeu == null) { sombre.Opacity = visee ? 0.10 : 0; pointille!.Opacity = visee ? 0 : 1; }
-        else { sombre.Opacity = visee ? 0 : 0.12; ombre.BoxShadow = BoxShadows.Parse(visee ? "0 10 16 0 #8C000000" : "0 5 8 0 #4D000000"); }
+        else { sombre.Opacity = visee ? 0 : 0.12; givre.Opacity = floue ? 1 : 0; ombre.BoxShadow = BoxShadows.Parse(visee ? "0 10 16 0 #8C000000" : "0 5 8 0 #4D000000"); }
     }
 }
 
@@ -273,7 +306,7 @@ sealed class Tuile : Panel
 sealed class RangeeJeux : Canvas
 {
     const double Marge = 84, Pas = Tuile.Cote + 22, Pousse = Tuile.Cote * (Tuile.Zoom - 1);   // la tuile visée, agrandie, pousse ses voisines de la moitié de chaque côté
-    readonly Bibliotheque lib; readonly Canvas piste = new(); readonly List<Tuile> tuiles = new(); string cle = "?"; double decalage;
+    readonly Bibliotheque lib; readonly Canvas piste = new(); readonly List<Tuile> tuiles = new(); string cle = "?"; double decalage, pose;
     public bool Active;
     public RangeeJeux(Bibliotheque lib)
     {
@@ -281,7 +314,7 @@ sealed class RangeeJeux : Canvas
         piste.RenderTransform = Mouvement.Deplace(0, 0); piste.Transitions = new Transitions { Mouvement.Transfo(0.42, Mouvement.Coule) };
         Children.Add(piste);
     }
-    public void Mettre(List<Jeu> jeux, int? visee)
+    public void Mettre(List<Jeu> jeux, int? visee, bool floue)
     {
         var c = string.Join("|", jeux.Select(j => j.Id)); var neuve = c != cle;
         if (neuve)
@@ -299,7 +332,7 @@ sealed class RangeeJeux : Canvas
             }
         }
         for (var i = 0; i < tuiles.Count; i++)
-            tuiles[i].Mettre(tuiles[i].Jeu is { } j ? lib.Arts.GetValueOrDefault(j.Id)?.Couverture : null, i == visee, Marge + i * Pas + (visee is { } v ? i > v ? Pousse : i == v ? Pousse / 2 : 0 : 0));
+            tuiles[i].Mettre(tuiles[i].Jeu is { } j ? lib.Arts.GetValueOrDefault(j.Id)?.Couverture : null, i == visee, Marge + i * Pas + (visee is { } v ? i > v ? Pousse : i == v ? Pousse / 2 : 0 : 0), floue);
         if (neuve) piste.Children.AddRange(tuiles);   // posées après avoir pris leur place : elles n'y glissent pas depuis le bord
         // Comme scrollTo(anchor: .center) : la tuile visée au milieu, sans dépasser les bords de la rangée. Une rangée qu'on quitte garde son défilement.
         if (visee is { } s)
@@ -307,7 +340,8 @@ sealed class RangeeJeux : Canvas
             double centre = Marge + s * Pas + Pousse / 2 + Tuile.Cote / 2, largeur = 2 * Marge + tuiles.Count * Pas - 22 + Pousse;
             decalage = Math.Clamp(centre - 960, 0, Math.Max(0, largeur - 1920));
         }
-        if (neuve) Mouvement.SansAnimer(piste, () => piste.RenderTransform = Mouvement.Deplace(-decalage, 0)); else piste.RenderTransform = Mouvement.Deplace(-decalage, 0);
+        if (neuve) Mouvement.SansAnimer(piste, () => piste.RenderTransform = Mouvement.Deplace(-decalage, 0)); else if (decalage != pose) piste.RenderTransform = Mouvement.Deplace(-decalage, 0);
+        pose = decalage;
     }
 }
 
@@ -356,7 +390,7 @@ sealed class Ouverture : Panel
             cartes.Children.Add(glisse);
             etapes.Add((0.50, () => { tourne.RenderTransform = Mouvement.Tourne(15 * sens); glisse.RenderTransform = Mouvement.Deplace(92 * sens, 14); }));
         }
-        var manette = U.Icone("gamecontroller", 96); manette.Opacity = 0; manette.RenderTransformOrigin = U.Centre; manette.RenderTransform = Mouvement.Echelle(0.5);
+        var manette = U.Icone("gamecontroller", 124); manette.Opacity = 0; manette.RenderTransformOrigin = U.Centre; manette.RenderTransform = Mouvement.Echelle(0.5);
         manette.Transitions = new Transitions { Mouvement.Transfo(0.45, douce), Mouvement.Opacite(0.45, douce) };
         cartes.Children.Add(new Border { CornerRadius = new CornerRadius(34), Background = U.Degrade(Violet[0], Violet[1]), BorderBrush = U.Blanc(0.35), BorderThickness = new Thickness(2), BoxShadow = BoxShadows.Parse("0 16 30 0 #80000000"), Child = manette });
         etapes.Add((0.10, () => { cartes.Opacity = 1; cartes.RenderTransform = Mouvement.Echelle(1); }));
@@ -409,7 +443,7 @@ sealed class PastilleTache : Border
     Tache? montree; CancellationTokenSource? tourne; string etat = "";
     public PastilleTache()
     {
-        Height = 68; CornerRadius = new CornerRadius(34); Padding = new Thickness(10, 0, 22, 0); Background = new SolidColorBrush(Color.FromArgb(200, 14, 14, 18)); BorderThickness = new Thickness(1); BorderBrush = U.Blanc(0.16);
+        Height = 68; CornerRadius = new CornerRadius(34); Padding = new Thickness(10, 0, 22, 0); Background = new SolidColorBrush(Color.FromArgb(215, 84, 84, 88)); BorderThickness = new Thickness(1); BorderBrush = U.Blanc(0.16);
         BoxShadow = BoxShadows.Parse("0 10 22 0 #66000000"); HorizontalAlignment = HorizontalAlignment.Right; VerticalAlignment = VerticalAlignment.Bottom; Margin = new Thickness(0, 0, 84, 30);
         Opacity = 0; IsHitTestVisible = false; RenderTransform = Mouvement.Deplace(0, 16);
         anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.9), Easing = new CubicEaseInOut() } };
@@ -460,9 +494,12 @@ public sealed class Ecran : Panel
 {
     readonly Bibliotheque lib;
     readonly FondVue fond = new();
-    readonly Grid contenu = new() { RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto,Auto"), RenderTransformOrigin = U.Centre };
+    readonly Grid contenu = new() { RowDefinitions = new RowDefinitions("Auto,*,Auto,Auto,Auto") };
+    readonly Panel scene = new();   // le fond et la bibliothèque : ce qu'un menu recouvre
+    readonly Image voile = new() { Stretch = Stretch.Fill, Opacity = 0, IsHitTestVisible = false };
+    bool voilee, sousVoile, sousJeu; int onglet = -1;
     readonly StackPanel onglets = new() { Orientation = Orientation.Horizontal, Spacing = 10 }, droite = new() { Orientation = Orientation.Horizontal, Spacing = 10 };
-    readonly TextBlock heure = new() { FontSize = 26, FontWeight = FontWeight.SemiBold, FontFamily = U.Police, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0), Effect = U.Ombre(6, 0.5) };
+    readonly TextBlock heure = new() { FontSize = 26, FontWeight = FontWeight.SemiBold, FontFamily = U.Police, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
     readonly Echange infos = new() { Margin = new Thickness(84, 0, 84, 22) };
     readonly Panel pile = new() { Height = 294 };
     readonly StackPanel aides = new() { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(84, 0, 84, 40) };
@@ -482,16 +519,15 @@ public sealed class Ecran : Panel
         droite.Children.Add(heure); haut.Children.Add(onglets); Grid.SetColumn(droite, 1); haut.Children.Add(droite);
         Grid.SetRow(infos, 2); Grid.SetRow(pile, 3); Grid.SetRow(aides, 4);
         contenu.Children.AddRange([haut, infos, pile, aides]);
-        // la bibliothèque derrière un menu : floue et un peu reculée
-        contenu.RenderTransform = Mouvement.Echelle(1); contenu.Effect = new BlurEffect { Radius = 0 };
-        contenu.Transitions = new Transitions { Mouvement.Transfo(0.35, new CubicEaseInOut()), Mouvement.Flou(0.35) };
+        scene.Children.AddRange([fond, contenu]);
+        RenderOptions.SetBitmapInterpolationMode(voile, BitmapInterpolationMode.HighQuality); voile.Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) };
         // l'arrivée de la bibliothèque : la pile de rangées monte de 36 en apparaissant
         pile.Opacity = 0; pile.RenderTransform = Mouvement.Deplace(0, 36);
         pile.Transitions = new Transitions { Mouvement.Transfo(0.45, Mouvement.Glisse), Mouvement.Opacite(0.45, Mouvement.Glisse) };
         pile.AttachedToVisualTree += (_, _) => Mouvement.Dans(0.1, () => { pile.Opacity = 1; pile.RenderTransform = Mouvement.Deplace(0, 0); });
         toast.Child = texteToast; toast.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()) };
         coucheJeu.Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) }; coucheSaisie.Transitions = new Transitions { Mouvement.Opacite(0.2) };
-        Children.AddRange([fond, contenu, coucheMenu, pastille, coucheJeu, toast, coucheSaisie, coucheOuverture]);
+        Children.AddRange([scene, voile, coucheMenu, pastille, coucheJeu, toast, coucheSaisie, coucheOuverture]);
         lib.Change += Rafraichir;
         lib.PasserOuverture = () => ouverture?.Passer() ?? false;
         horloge.Tick += (_, _) => Seconde(); horloge.Start();
@@ -522,10 +558,27 @@ public sealed class Ecran : Panel
         fond.Montrer(j == null ? "+" : j.Id + (art?.Fond != null ? "f" : art?.Couverture != null ? "c" : ""), art?.Fond ?? art?.Couverture, art?.Fond == null);
         Haut(); Infos(j, art); Pile(); Aides(j);
         Menus();
-        var voilee = lib.Menu != null || lib.Saisie != null;
-        contenu.Effect = new BlurEffect { Radius = voilee ? 16 : 0 }; contenu.RenderTransform = Mouvement.Echelle(voilee ? 0.985 : 1);
+        Voiler(lib.Menu != null || lib.Saisie != null);
         Jeu(); pastille.Mettre(lib.Tache); Toast(); MontrerSaisie();
     }
+
+    /// La bibliothèque derrière un menu est floue. Pas de flou calculé (il serait refait à chaque image tant que le menu bouge) : une
+    /// photo de la bibliothèque réduite au dixième, étirée sur tout l'écran, qui arrive en fondu. Dessous, la bibliothèque ne se dessine plus.
+    void Voiler(bool oui)
+    {
+        if (oui == voilee) return;
+        voilee = oui;
+        if (!oui) { sousVoile = false; Scene(); voile.Opacity = 0; return; }
+        if (Bounds.Width > 0 && Bounds.Height > 0)
+        {
+            const int largeur = 192; var k = largeur / Bounds.Width;
+            var hauteur = Math.Max(1, (int)(Bounds.Height * k)); var photo = new RenderTargetBitmap(new PixelSize(largeur, hauteur));
+            using (var dessin = photo.CreateDrawingContext()) dessin.FillRectangle(new VisualBrush { Visual = scene, Stretch = Stretch.Fill }, new Rect(0, 0, largeur, hauteur)); var ancienne = voile.Source as IDisposable; voile.Source = photo; ancienne?.Dispose();
+        }
+        voile.Opacity = 1;
+        Mouvement.Dans(0.4, () => { if (voilee) { sousVoile = true; Scene(); } });
+    }
+    void Scene() => scene.IsVisible = !sousVoile && !sousJeu;
 
     /// Les onglets de catégorie, nus : celui en cours est blanc et souligné, les autres s'effacent. À droite, la batterie de la manette et l'heure.
     void Haut()
@@ -533,11 +586,11 @@ public sealed class Ecran : Panel
         var cle = string.Join("|", lib.Categories);
         if (cle != cleCategories)
         {
-            cleCategories = cle; onglets.Children.Clear(); vuesOnglets.Clear();
+            cleCategories = cle; onglets.Children.Clear(); vuesOnglets.Clear(); onglet = -1;
             for (var i = 0; i < lib.Categories.Count; i++)
             {
                 var n = i;
-                var texte = U.Titre(lib.Categories[i], 17, 1.2); texte.Margin = new Thickness(0, 9, 18, 9); texte.Effect = U.Ombre(5); texte.Transitions = new Transitions { Mouvement.Opacite(0.24, Mouvement.Glisse) };
+                var texte = U.Titre(lib.Categories[i], 17, 1.2); texte.Margin = new Thickness(0, 9, 18, 9); texte.Transitions = new Transitions { Mouvement.Opacite(0.24, Mouvement.Glisse) };
                 var trait = new Border { Width = 26, Height = 3, CornerRadius = new CornerRadius(1.5), Background = Brushes.White, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom,
                     RenderTransformOrigin = U.Gauche, RenderTransform = Mouvement.Echelle(0, 1), Transitions = new Transitions { Mouvement.Transfo(0.24, Mouvement.Glisse) } };
                 var onglet = new Panel { Background = Brushes.Transparent, Children = { texte, trait } };
@@ -548,7 +601,7 @@ public sealed class Ecran : Panel
             menu.PointerPressed += (_, _) => { if (lib.Menu == null && lib.EnCours == null) lib.OuvrirPlus(); };
             onglets.Children.Add(menu);
         }
-        for (var i = 0; i < vuesOnglets.Count; i++) { var ici = i == lib.IndexCategorie; vuesOnglets[i].texte.Opacity = ici ? 1 : 0.5; vuesOnglets[i].trait.RenderTransform = Mouvement.Echelle(ici ? 1 : 0, 1); }
+        if (onglet != lib.IndexCategorie) for (var i = 0; i < vuesOnglets.Count; i++) { var ici = i == lib.IndexCategorie; onglet = lib.IndexCategorie; vuesOnglets[i].texte.Opacity = ici ? 1 : 0.5; vuesOnglets[i].trait.RenderTransform = Mouvement.Echelle(ici ? 1 : 0, 1); }
         var batterie = lib.Batterie?.ToString() ?? "";
         if (batterie != cleBatterie)
         {
@@ -582,14 +635,14 @@ public sealed class Ecran : Panel
         var bloc = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Left };
         if (j == null)
         {
-            bloc.Children.Add(Avec(U.Titre("Ajouter un jeu", 52, 1), t => t.Effect = U.Ombre(12)));
+            bloc.Children.Add(U.Titre("Ajouter un jeu", 52, 1));
             bloc.Children.Add(Avec(U.Ligne(16, Jouer("Ajouter", lib.OuvrirAjout)), l => l.Margin = new Thickness(0, 14, 0, 0)));
         }
         else
         {
             bloc.Children.Add(new TextBlock { Text = j.Categorie.ToUpper(), FontSize = 15, FontWeight = FontWeight.ExtraBold, FontFamily = U.Police, LetterSpacing = 2, Foreground = Brushes.White, Opacity = 0.8 });
-            if (art?.Logo != null) bloc.Children.Add(new Image { Source = art.Logo, MaxWidth = 560, MaxHeight = 180, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Effect = U.Ombre(12) });
-            else bloc.Children.Add(Avec(U.Titre(j.Nom, 52, 1, place: 1500), t => t.Effect = U.Ombre(12)));
+            if (art?.Logo != null) bloc.Children.Add(new Image { Source = art.Logo, MaxWidth = 560, MaxHeight = 180, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left });
+            else bloc.Children.Add(U.Titre(j.Nom, 52, 1, place: 1500));
             var options = new Border { Width = 54, Height = 54, CornerRadius = new CornerRadius(27), Background = U.Noir(0.4), BorderBrush = U.Blanc(0.24), BorderThickness = new Thickness(1.5), Child = U.Icone("ellipsis", 22), VerticalAlignment = VerticalAlignment.Center };
             options.PointerPressed += (_, _) => { if (lib.Menu == null && lib.EnCours == null) lib.OuvrirOptions(); };
             bloc.Children.Add(Avec(U.Ligne(16, Jouer("Jouer", lib.Lancer), options), l => l.Margin = new Thickness(0, 14, 0, 0)));
@@ -610,8 +663,8 @@ public sealed class Ecran : Panel
             pile.Children.Clear(); rangees.Clear(); ecarts.Clear();
             for (var c = 0; c < n; c++)
             {
-                var r = new RangeeJeux(lib) { IsVisible = false, VerticalAlignment = VerticalAlignment.Top, RenderTransform = Mouvement.Deplace(0, 0), Effect = new BlurEffect { Radius = 0 } };
-                r.Transitions = new Transitions { Mouvement.Transfo(0.42, Mouvement.Coule), Mouvement.Opacite(0.42, Mouvement.Coule), Mouvement.Flou(0.42, Mouvement.Coule) };
+                var r = new RangeeJeux(lib) { IsVisible = false, VerticalAlignment = VerticalAlignment.Top, RenderTransform = Mouvement.Deplace(0, 0) };
+                r.Transitions = new Transitions { Mouvement.Transfo(0.42, Mouvement.Coule), Mouvement.Opacite(0.42, Mouvement.Coule) };
                 rangees.Add(r); ecarts.Add(null); pile.Children.Add(r);
             }
         }
@@ -619,8 +672,9 @@ public sealed class Ecran : Panel
         {
             int tour = ((c - lib.IndexCategorie) % n + n) % n, d = tour > n / 2 ? tour - n : tour; var r = rangees[c];
             if (Math.Abs(d) > 1) { r.IsVisible = false; ecarts[c] = null; continue; }
-            r.Active = d == 0; r.Mettre(lib.JeuxDe(c), d == 0 ? lib.Selection : null);
-            void Placer() { r.RenderTransform = Mouvement.Deplace(0, d * 236); r.Opacity = d == 0 ? 1 : d == 1 ? 0.45 : 0; r.Effect = new BlurEffect { Radius = d == 0 ? 0 : 14 }; }
+            r.Active = d == 0; r.Mettre(lib.JeuxDe(c), d == 0 ? lib.Selection : null, floue: d != 0);
+            if (ecarts[c] == d) continue;   // déjà à sa place
+            void Placer() { r.RenderTransform = Mouvement.Deplace(0, d * 236); r.Opacity = d == 0 ? 1 : d == 1 ? 0.45 : 0; }
             // une rangée qui n'était pas là, ou qui passe d'un bout à l'autre de la pile, prend sa place d'un coup : elle ne traverse pas l'écran
             if (ecarts[c] is { } avant && Math.Abs(avant - d) <= 1) Placer(); else Mouvement.SansAnimer(r, Placer);
             r.IsVisible = true; r.IsHitTestVisible = d == 0; r.ZIndex = d == 0 ? 1 : 0; ecarts[c] = d;
@@ -670,14 +724,14 @@ public sealed class Ecran : Panel
         cleJeu = cle; duree = null;
         if (lib.EnCours is not { } j)
         {   // la partie est finie : l'écran s'efface, la bibliothèque reprend ses mouvements
-            fond.IsVisible = contenu.IsVisible = true; coucheJeu.Opacity = 0; coucheJeu.IsHitTestVisible = false;
+            sousJeu = false; Scene(); coucheJeu.Opacity = 0; coucheJeu.IsHitTestVisible = false;
             Mouvement.Dans(0.45, () => { if (lib.EnCours == null) coucheJeu.Children.Clear(); });
             return;
         }
         coucheJeu.Children.Clear();
         var art = lib.Arts.GetValueOrDefault(j.Id);
         coucheJeu.Children.Add(new Border { Background = Brushes.Black });
-        if ((art?.Fond ?? art?.Couverture) is { } bg) coucheJeu.Children.Add(new Image { Source = bg, Stretch = Stretch.UniformToFill, Opacity = 0.22, Effect = new BlurEffect { Radius = 40 } });
+        if ((art?.Fond ?? art?.Couverture) is { } bg) coucheJeu.Children.Add(Avec(U.ImageFloue(bg), i => i.Opacity = 0.22));
         var jaquette = new Border { Width = 300, Height = 300, CornerRadius = new CornerRadius(40), ClipToBounds = true, Background = U.Degrade(Color.FromRgb(56, 56, 56), Color.FromRgb(20, 20, 20), false),
             Child = art?.Couverture != null ? new Image { Source = art.Couverture, Stretch = Stretch.UniformToFill } : null };
         var cadre = new Panel { Width = 300, Height = 300, HorizontalAlignment = HorizontalAlignment.Center, Children = { new Border { CornerRadius = new CornerRadius(40), Background = Brushes.Black, BoxShadow = BoxShadows.Parse("0 20 40 0 #B3000000, 0 0 60 0 #1FFFFFFF") }, jaquette } };
@@ -692,7 +746,7 @@ public sealed class Ecran : Panel
         coucheJeu.Children.Add(bas);
         coucheJeu.IsHitTestVisible = true; Mouvement.Apres(() => { if (lib.EnCours != null) coucheJeu.Opacity = 1; });
         // derrière le jeu, plus rien ne bouge : le zoom du fond et le bouton qui respire ne tournent pas pendant toute la partie
-        Mouvement.Dans(0.5, () => { if (lib.EnCours != null) fond.IsVisible = contenu.IsVisible = false; });
+        Mouvement.Dans(0.5, () => { if (lib.EnCours != null) { sousJeu = true; Scene(); } });
     }
 
     void Toast()
@@ -711,7 +765,7 @@ public sealed class Ecran : Panel
         foreach (var etat in new[] { "", "PointerOver", "Focused" }) { champ.Resources["TextControlBorderBrush" + etat] = U.Blanc(0.95); champ.Resources["TextControlBackground" + etat] = U.Noir(0.7); }   // pas le bleu de Windows : le blanc de Home
         champ.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; lib.ValiderSaisie(champ.Text ?? ""); } };
         coucheSaisie.Children.Add(new Border { Background = U.Degrade(0, 0.5, 1, 0.5, (U.NoirA(0.92), 0), (U.NoirA(0.80), 0.5), (U.NoirA(0.62), 1)) });
-        coucheSaisie.Children.Add(Avec(U.Colonne(26, U.Titre(s.Titre, 38, 1, place: 1500), champ, U.Ligne(12, U.Pilule("⏎", "Valider"), U.Pilule("Échap", "Annuler"))),
+        coucheSaisie.Children.Add(Avec(U.Colonne(26, U.Titre(s.Titre, 38, 1, place: 1500), champ, U.Ligne(12, U.Pilule("Entrée", "Valider"), U.Pilule("Échap", "Annuler"))),
             c => { c.VerticalAlignment = VerticalAlignment.Center; c.HorizontalAlignment = HorizontalAlignment.Left; c.Margin = new Thickness(96, 0, 96, 0); }));
         coucheSaisie.IsHitTestVisible = true; coucheSaisie.Opacity = 1;
         Dispatcher.UIThread.Post(() => champ.Focus(), DispatcherPriority.Background);

@@ -3,7 +3,7 @@
 using System.Text.Json;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Material.Icons;
+using FluentIcons.Common;
 
 namespace Home;
 
@@ -71,7 +71,7 @@ public sealed class Tache { public string Titre = ""; public string Etape = "Dé
 /// Une touche affichée dans les aides : lettre de la manette (A, B…) ou touche du clavier
 public sealed record Aides(string Ok, string Retour, string Options, string Plus, string Cat, string? Nom)
 {
-    public static readonly Aides Clavier = new("⏎", "Échap", "O", "N", "Tab", null);
+    public static readonly Aides Clavier = new("Entrée", "Échap", "O", "N", "Tab", null);
     public static readonly Aides Xbox = new("A", "B", "≡", "⧉", "LB RB", "Manette Xbox");
 }
 
@@ -111,32 +111,31 @@ public static class Json
     }
 }
 
-/// Les menus gardent les noms de symboles de la version Mac (SF Symbols) : ici on les traduit en icônes Material, par préfixe.
+/// Les menus gardent les noms de symboles de la version Mac (SF Symbols) : ici on les traduit en icônes Fluent (la bibliothèque
+/// d'icônes de Microsoft, en version pleine : le dessin le plus proche des symboles du Mac), par préfixe.
 public static class Icones
 {
-    static readonly (string sf, string mdi)[] table =
+    static readonly (string sf, string fluent)[] table =
     [
-        ("play", "Play"), ("photo", "Image"), ("paint", "Palette"), ("textformat", "FormatText"), ("tag", "Tag"), ("puzzle", "Puzzle"),
-        ("square.and.arrow.down", "Download"), ("arrow.down", "Download"), ("arrow.clockwise", "Refresh"), ("arrow.up", "ArrowUpBold"), ("arrow", "ArrowRight"),
-        ("hammer", "Hammer"), ("folder", "Folder"), ("gamecontroller", "GamepadVariant"), ("globe", "Web"), ("magnifying", "Magnify"),
-        ("shippingbox", "PackageVariant"), ("pencil", "Pencil"), ("ellipsis", "DotsHorizontal"), ("checkmark", "Check"), ("doc", "FileDocument"),
-        ("bolt", "LightningBolt"), ("safari", "Compass"), ("plus.circle", "PlusCircleOutline"), ("plus", "Plus"), ("desktop", "DesktopTower"), ("pc", "MicrosoftWindows"),
-        ("mac", "Laptop"), ("key", "Key"), ("power", "Power"), ("speaker.slash", "VolumeOff"), ("speaker", "VolumeHigh"), ("display", "Monitor"),
-        ("record", "Record"), ("rectangle", "Fullscreen"), ("trash", "Delete"), ("eye.slash", "EyeOff"), ("eye", "Eye"), ("xmark", "Close"),
-        ("leaf", "Leaf"), ("sparkles", "Creation"), ("clock", "ClockOutline"), ("gear", "Cog"), ("info", "InformationOutline"), ("exclamation", "AlertOutline"),
-        ("chevron.right", "ChevronRight"), ("star", "Star"), ("shield", "ShieldCheckOutline"), ("link", "Github"), ("person", "Account"), ("battery", "Battery"),
-        ("wand", "AutoFix"), ("figure", "Run"),
+        ("play", "Play"), ("photo", "Image"), ("paint", "PaintBrush"), ("textformat", "TextFont"), ("tag", "Tag"), ("puzzle", "PuzzlePiece"),
+        ("square.and.arrow.down", "ArrowDownload"), ("arrow.down.circle", "ArrowCircleDown"), ("arrow.down", "ArrowDown"), ("arrow.clockwise", "ArrowClockwise"), ("arrow.up", "ArrowUp"), ("arrow.left", "ArrowLeft"), ("arrow", "ArrowRight"),
+        ("hammer", "WrenchScrewdriver"), ("folder", "Folder"), ("gamecontroller", "Games"), ("globe", "Globe"), ("magnifying", "Search"),
+        ("shippingbox", "Box"), ("pencil", "Edit"), ("ellipsis", "MoreHorizontal"), ("checkmark", "Checkmark"), ("doc.on.clipboard", "ClipboardPaste"), ("doc", "Document"),
+        ("bolt", "Flash"), ("safari", "Open"), ("plus.circle", "AddCircle"), ("plus", "Add"), ("desktop", "DesktopTower"), ("pc", "Window"),
+        ("mac", "Laptop"), ("key", "Key"), ("power", "Power"), ("speaker.slash", "SpeakerMute"), ("speaker", "Speaker2"), ("display", "Desktop"),
+        ("record", "Record"), ("rectangle", "FullScreenMaximize"), ("trash", "Delete"), ("eye.slash", "EyeOff"), ("eye", "Eye"), ("xmark", "Dismiss"),
+        ("leaf", "LeafOne"), ("sparkles", "Sparkle"), ("clock", "Clock"), ("gear", "Settings"), ("info", "Info"), ("exclamation", "Warning"),
+        ("chevron.right", "ChevronRight"), ("star", "Star"), ("shield", "ShieldCheckmark"), ("link", "Code"), ("person", "Person"), ("battery", "Battery10"),
     ];
-    static readonly Dictionary<string, Geometry> cache = new();
-    public static Geometry De(string sf)
+    static readonly Dictionary<string, Icon> cache = new();
+    public static Icon De(string sf)
     {
-        if (cache.TryGetValue(sf, out var g)) return g;
-        var nom = table.FirstOrDefault(t => sf.StartsWith(t.sf)).mdi ?? "CircleOutline";
-        var kind = Enum.TryParse<MaterialIconKind>(nom, out var k) ? k : MaterialIconKind.CircleOutline;
-        return cache[sf] = Geometry.Parse(MaterialIconDataProvider.GetData(kind));
+        if (cache.TryGetValue(sf, out var s)) return s;
+        var nom = table.FirstOrDefault(t => sf.StartsWith(t.sf)).fluent ?? "Circle";
+        return cache[sf] = Enum.TryParse<Icon>(nom, out var k) ? k : Icon.Circle;
     }
-    /// Pour les tests : les icônes de la table que Material ne connaît pas
-    public static IEnumerable<string> Inconnues() => table.Where(t => !Enum.TryParse<MaterialIconKind>(t.mdi, out _)).Select(t => t.mdi);
+    /// Pour les tests : les icônes de la table que la bibliothèque ne connaît pas
+    public static IEnumerable<string> Inconnues() => table.Where(t => !Enum.TryParse<Icon>(t.fluent, out _)).Select(t => t.fluent);
 
     /// La couleur de la pastille d'un choix, d'après son symbole (même table que menuTint sur Mac)
     public static Color Teinte(string icone, Color? teinte = null, bool destructif = false)

@@ -129,6 +129,13 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   haut), choix des images dans Home (un fichier à la place), mode d'utilisation.
 - **Graphisme** : l'app Mac fait foi. `windows/` la recopie vue par vue ; une vue reste en place et on change ses propriétés (c'est ce
   qui l'anime), et on n'anime jamais une taille (seulement `RenderTransform` et l'opacité). « Animations réduites » : `Mouvement.Reduit`.
+  Pour comparer : `HOME_APERCU=<dossier> Home.app/Contents/MacOS/Salon` écrit les menus, l'ouverture et l'avancement du Mac en PNG.
+- **Pas de flou ni d'ombre calculés en direct** (`BlurEffect`, `DropShadowEffect`) : Avalonia les refait à chaque image dès que quelque
+  chose bouge, et tout saccade. Un flou est une image réduite à quelques points puis étirée (`U.Flou`) ; derrière un menu, une photo
+  réduite de la bibliothèque (`Ecran.Voiler`). Le zoom lent du fond du Mac n'est pas repris pour la même raison.
+- **Écriture** : Mona Sans (GitHub, licence OFL), embarquée depuis `windows/polices/` ; sa version large très grasse remplace SF Pro
+  Expanded Black, qu'Apple ne laisse pas redistribuer. **Icônes** : Fluent System Icons (Microsoft, MIT, paquet `FluentIcons.Avalonia`),
+  en version pleine ; `Icones` traduit les noms de symboles du Mac, `U.Icone` les dessine comme des tracés (la police impose du noir).
 
 | Fichier | Contenu |
 |---|---|

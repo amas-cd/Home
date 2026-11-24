@@ -60,7 +60,7 @@ sealed class VueMenu : Panel
         var m = Menu; var n = m.Elements.Count; const double Grand = 96, Petit = 76, Espace = 14;
         Children.Add(new Border { IsHitTestVisible = false, Background = U.Degrade(0.5, 0.25, 0.5, 1, (Colors.Transparent, 0), (U.NoirA(0.55), 0.5), (U.NoirA(0.88), 1)) });   // l'ombre qui porte le texte
         var colonne = new StackPanel { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(96, 0, 96, 44) };
-        if (m.Logo != null) colonne.Children.Add(new Image { Source = m.Logo, MaxWidth = 480, MaxHeight = 150, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left, Effect = U.Ombre(12) });
+        if (m.Logo != null) colonne.Children.Add(new Image { Source = m.Logo, MaxWidth = 480, MaxHeight = 150, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left });
         else
         {
             if (m.SousTitre != null) colonne.Children.Add(new TextBlock { Text = m.SousTitre.ToUpper(), FontSize = 15, FontWeight = FontWeight.ExtraBold, FontFamily = U.Police, LetterSpacing = 2, Foreground = Brushes.White, Opacity = 0.6 });
@@ -138,7 +138,7 @@ sealed class VueMenu : Panel
         {
             var it = e[i]; var k = i; var (nom, etat) = NomEtat(it);
             var taille = nom.Length <= 22 ? 50 : Math.Max(30, 50.0 * 22 / nom.Length);   // un nom long rétrécit pour tenir à gauche du disque
-            var texte = new TextBlock { Text = nom, FontSize = taille, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, Foreground = it.Destructif ? Rouge : Brushes.White, MaxWidth = 1000, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            var texte = new TextBlock { Text = nom, FontSize = taille, FontWeight = FontWeight.Bold, FontFamily = U.PoliceLargeGras, LetterSpacing = -0.5, Foreground = it.Destructif ? Rouge : Brushes.White, MaxWidth = 1000, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             contenus[i] = U.Ligne(16, texte);
             if (it.Icone.StartsWith("checkmark.seal")) contenus[i].Children.Add(new Border { Width = 46, Height = 46, CornerRadius = new CornerRadius(23), Background = new SolidColorBrush(Color.FromRgb(33, 184, 92)), Child = U.Icone("checkmark", 24), VerticalAlignment = VerticalAlignment.Center });
             if (etat != null)

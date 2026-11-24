@@ -14,12 +14,19 @@
     <SatelliteResourceLanguages>fr</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);CA1416</NoWarn>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- Le setup publié est compilé d'avance : sans ça, les premières animations saccadent le temps que .NET compile le code -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.23" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.23" />
-    <PackageReference Include="Material.Icons" Version="2.4.3" />
+    <PackageReference Include="FluentIcons.Avalonia" Version="2.0.316.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- L'écriture de Home sur Windows : Mona Sans (GitHub, licence OFL, voir polices/LICENCE-OFL.txt), à la place de SF Pro
+         qu'Apple ne laisse pas redistribuer. La version large et très grasse sert aux titres. -->
+    <AvaloniaResource Include="polices\*.ttf" />
   </ItemGroup>
   <ItemGroup>
     <!-- Les sons de l'interface sont ceux de la version Mac : une seule copie dans le dépôt -->
