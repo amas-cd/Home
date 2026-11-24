@@ -2070,10 +2070,21 @@ struct AccueilView: View {
     }
 }
 
+// Les menus, dans le style de Home : monochromes (la couleur vient du jeu derrière), presque sans texte.
+//  - Un menu court (7 choix au plus, tous actionnables) est une RANGÉE de pastilles rondes en bas à gauche, à la manière de la PS5 :
+//    seul le choix visé a son nom, et sa précision s'il en a une. Gauche / droite pour choisir.
+//  - Un menu long (bibliothèque, mods, réglages) est une LISTE nue à gauche : du texte, un fond clair discret sous la ligne visée,
+//    dont la précision est la seule affichée. Les mods avec aperçu gardent leur grille.
+struct Pilule: View {
+    let k: Key; let t: String
+    var body: some View { Hint(k: k, t: t).font(.system(size: 17, weight: .semibold, design: .rounded)).padding(.horizontal, 18).padding(.vertical, 11).background(.black.opacity(0.45), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)) }
+}
 struct MenuView: View {
     @ObservedObject var lib: Library; let menu: SalonMenu
+    var apercu: Int? = nil   // pour l'aperçu en image : le choix visé, sans attendre onAppear
     @State private var index = 0
     @State private var pop = false
+    private var vise: Int { apercu ?? index }
     private func press() { pop = true; DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { pop = false } }
     /// Le choix suivant dans un sens, en sautant les lignes d'information
     private func next(_ from: Int, _ d: Int) -> Int {
@@ -2081,122 +2092,144 @@ struct MenuView: View {
         while menu.items.indices.contains(n) { if !menu.items[n].info { return n }; n += d }
         return from
     }
-    private var heroColor: Color { menuTint(menu.hero ?? "") }
     private static let cols = 3
+    private static let rouge = Color(red: 1, green: 0.45, blue: 0.42)
+    /// Un menu court devient une rangée de pastilles
+    private var rangee: Bool { !menu.grid && menu.step == nil && menu.items.count <= 7 && !menu.items.isEmpty && menu.items.allSatisfy { !$0.info && $0.image == nil } }
+    private func choisir(_ i: Int) { guard menu.items.indices.contains(i), !menu.items[i].info else { return }; index = i; Sounds.shared.play("valider"); press(); menu.items[i].action() }
+
     /// Une carte de la grille (mods) : l'aperçu en grand, le nom dessous
     @ViewBuilder private func card(_ i: Int, _ it: SalonMenuItem) -> some View {
-        let sel = i == index && !it.info
-        let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
+        let sel = i == vise && !it.info
         VStack(alignment: .leading, spacing: 8) {
             ZStack {
-                LinearGradient(colors: [c.opacity(0.85), c.opacity(0.35)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                Color.white.opacity(0.08)
                 if let u = it.image {
                     AsyncImage(url: u) { phase in
                         if let img = phase.image { img.resizable().scaledToFill() }
-                        else if phase.error != nil { Image(systemName: it.icon).font(.system(size: 44, weight: .semibold)).foregroundStyle(.white) }
+                        else if phase.error != nil { Image(systemName: it.icon).font(.system(size: 40, weight: .regular)).foregroundStyle(.white.opacity(0.7)) }
                         else { ProgressView().controlSize(.small).tint(.white) }
                     }
-                } else { Image(systemName: it.icon).font(.system(size: 44, weight: .semibold)).foregroundStyle(.white) }
+                } else { Image(systemName: it.icon).font(.system(size: 40, weight: .regular)).foregroundStyle(.white.opacity(0.7)) }
             }
             .frame(width: 330, height: 186).clipped()
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(sel ? 0.95 : 0.08), lineWidth: sel ? 4 : 1))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.white.opacity(sel ? 0.95 : 0.10), lineWidth: sel ? 3.5 : 1))
             .shadow(color: .black.opacity(sel ? 0.6 : 0.3), radius: sel ? 20 : 8, y: 8)
-            Text(it.label).font(.system(size: 19, weight: .semibold, design: .rounded)).foregroundStyle(it.destructive ? Color(red: 1, green: 0.52, blue: 0.47) : .white).lineLimit(2).frame(width: 330, alignment: .leading)
-            if let d = it.detail { Text(d).font(.system(size: 14, weight: .regular, design: .rounded)).opacity(0.62).lineLimit(1).frame(width: 330, alignment: .leading) }
+            Text(it.label).font(.system(size: 19, weight: .semibold)).foregroundStyle(it.destructive ? MenuView.rouge : .white).lineLimit(1).frame(width: 330, alignment: .leading)
+            if sel, let d = it.detail { Text(d).font(.system(size: 14)).opacity(0.6).lineLimit(1).frame(width: 330, alignment: .leading) }
         }
-        .scaleEffect(sel ? 1.03 : 0.97).opacity(sel || it.info ? 1 : 0.82)
+        .scaleEffect(sel ? 1.03 : 0.97).opacity(sel || it.info ? 1 : 0.8)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: index)
-        .contentShape(Rectangle()).onTapGesture { guard !it.info else { return }; index = i; Sounds.shared.play("valider"); press(); it.action() }
+        .contentShape(Rectangle()).onTapGesture { choisir(i) }
     }
+    /// Une ligne de la liste : un petit symbole, le nom ; visée, un fond clair et sa précision
     @ViewBuilder private func row(_ i: Int, _ it: SalonMenuItem) -> some View {
-        let sel = i == index && !it.info
-        let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
+        let sel = i == vise && !it.info
         HStack(spacing: 18) {
-            ZStack {
-                if it.info { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.white.opacity(0.08)) }
-                else { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) }
-                Image(systemName: it.icon).font(.system(size: 24, weight: .semibold)).foregroundStyle(it.info ? c : Color.white)
-            }.frame(width: 54, height: 54).shadow(color: it.info ? .clear : c.opacity(sel ? 0.55 : 0.25), radius: sel ? 12 : 6, y: 4)
+            Image(systemName: it.icon).font(.system(size: 20, weight: .regular)).frame(width: 30).opacity(it.info ? 0.5 : 0.9)
             VStack(alignment: .leading, spacing: 3) {
-                Text(it.label).font(.system(size: it.info ? 20 : 24, weight: .semibold, design: .rounded)).foregroundStyle(it.destructive ? Color(red: 1, green: 0.52, blue: 0.47) : .white).lineLimit(2)
-                if let d = it.detail { Text(d).font(.system(size: 16, weight: .regular, design: .rounded)).opacity(0.65).lineLimit(3) }
+                Text(it.label).font(.system(size: it.info ? 19 : 23, weight: sel ? .semibold : .regular)).lineLimit(1).truncationMode(.tail)
+                if sel || it.info, let d = it.detail { Text(d).font(.system(size: 15)).opacity(0.6).lineLimit(2) }
             }
             Spacer(minLength: 0)
-            if sel { Image(systemName: "chevron.right").font(.system(size: 18, weight: .bold)).opacity(0.75) }
         }
-        .padding(.vertical, 12).padding(.horizontal, 16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(.white.opacity(sel ? 0.17 : 0)))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(sel ? 0.4 : 0), lineWidth: 2))
-        .scaleEffect(sel ? 1.0 : 0.985)
-        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: index)
-        .contentShape(Rectangle()).onTapGesture { guard !it.info else { return }; index = i; Sounds.shared.play("valider"); press(); it.action() }
+        .foregroundStyle(it.destructive ? MenuView.rouge : .white).opacity(sel ? 1 : it.info ? 0.6 : 0.78)
+        .padding(.vertical, sel && it.detail != nil ? 11 : 14).padding(.horizontal, 18).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(sel ? 0.14 : 0)))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(.white.opacity(sel ? 0.55 : 0), lineWidth: 1.5))
+        .animation(.easeOut(duration: 0.16), value: index)
+        .contentShape(Rectangle()).onTapGesture { choisir(i) }
+    }
+    /// Les lignes (ou la grille) du menu long
+    @ViewBuilder private var contenu: some View {
+        if menu.grid {
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(330), spacing: 24, alignment: .top), count: MenuView.cols), alignment: .leading, spacing: 26) {
+                ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in card(i, it).id(i) }
+            }.padding(.vertical, 14).padding(.horizontal, 6)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in
+                    if let sec = it.section, !sec.trimmingCharacters(in: .whitespaces).isEmpty { Text(sec.uppercased()).font(.system(size: 13, weight: .heavy, design: .rounded)).tracking(2).opacity(0.42).padding(.top, i == 0 ? 2 : 20).padding(.bottom, 4).padding(.horizontal, 18) }
+                    row(i, it).id(i)
+                }
+            }.padding(.vertical, 6)
+        }
+    }
+    /// L'en-tête commun : l'étape d'un assistant, le sous-titre en petites capitales, le titre fin
+    @ViewBuilder private var entete: some View {
+        if let st = menu.step, let n = menu.steps, n > 0 {
+            HStack(spacing: 8) { ForEach(1...n, id: \.self) { k in Capsule().fill(.white.opacity(k == st ? 0.95 : 0.25)).frame(width: k == st ? 34 : 10, height: 10) } }.padding(.bottom, 16)
+        }
+        if let st = menu.subtitle { Text(st.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.6).lineLimit(1) }
+        Text(menu.title).font(.system(size: rangee ? 60 : 54, weight: .thin)).tracking(-1).lineLimit(1).minimumScaleFactor(0.6).padding(.top, 2)
+    }
+    private var aides: some View {
+        HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Choisir"); Pilule(k: lib.hints.back, t: menu.back == nil ? "Fermer" : "Retour") }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 24) {
-                if let u = menu.heroURL {
-                    AsyncImage(url: u) { phase in
-                        if let img = phase.image { img.resizable().scaledToFill() } else { ZStack { heroColor.opacity(0.4); ProgressView().tint(.white) } }
-                    }.frame(width: 220, height: 124).clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                     .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1)).shadow(color: .black.opacity(0.5), radius: 16, y: 8)
-                } else if let img = menu.art {
-                    Image(nsImage: img).resizable().scaledToFill().frame(width: 124, height: 124).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 1)).shadow(color: .black.opacity(0.5), radius: 16, y: 8)
-                } else if let h = menu.hero {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 30, style: .continuous).fill(LinearGradient(colors: [heroColor, heroColor.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                        Image(systemName: h).font(.system(size: 56, weight: .semibold)).foregroundStyle(.white)
-                    }.frame(width: 124, height: 124).shadow(color: heroColor.opacity(0.45), radius: 24, y: 10)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    if let st = menu.step, let n = menu.steps, n > 0 {
-                        HStack(spacing: 8) {
-                            Text("ÉTAPE \(st) SUR \(n)").font(.system(size: 13, weight: .heavy, design: .rounded)).tracking(1.4).opacity(0.6)
-                            ForEach(1...n, id: \.self) { k in Capsule().fill(.white.opacity(k <= st ? 0.9 : 0.22)).frame(width: k == st ? 26 : 10, height: 6) }
+        ZStack(alignment: rangee ? .bottomLeading : .topLeading) {
+            // l'ombre qui porte le texte : en bas pour la rangée, à gauche pour la liste (la grille, plus large, assombrit tout)
+            if rangee { LinearGradient(colors: [.clear, .black.opacity(0.55), .black.opacity(0.88)], startPoint: .init(x: 0.5, y: 0.25), endPoint: .bottom) }
+            else if menu.grid { Color.black.opacity(0.62) }
+            else { LinearGradient(colors: [.black.opacity(0.90), .black.opacity(0.72), .black.opacity(0.10)], startPoint: .leading, endPoint: .init(x: 0.72, y: 0.5)) }
+            if rangee {
+                VStack(alignment: .leading, spacing: 0) {
+                    entete
+                    HStack(spacing: 14) {
+                        ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in
+                            let sel = i == vise
+                            Image(systemName: it.icon).font(.system(size: sel ? 31 : 26, weight: .medium)).frame(width: sel ? 94 : 76, height: sel ? 94 : 76)
+                                .background(Circle().fill(sel ? AnyShapeStyle(.white) : AnyShapeStyle(.black.opacity(0.5))))
+                                .overlay(Circle().stroke(it.destructive && !sel ? MenuView.rouge.opacity(0.8) : .white.opacity(sel ? 0 : 0.24), lineWidth: 1.5))
+                                .foregroundStyle(sel ? (it.destructive ? Color(red: 0.8, green: 0.15, blue: 0.15) : .black) : (it.destructive ? MenuView.rouge : .white))
+                                .shadow(color: .black.opacity(sel ? 0.45 : 0), radius: 18, y: 8)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.75), value: index)
+                                .contentShape(Circle()).onTapGesture { choisir(i) }
+                                .onHover { dedans in if dedans, index != i { index = i } }
+                        }
+                    }.padding(.top, 34)
+                    // le nom du choix visé, et sa précision : la seule ligne de texte du menu
+                    if menu.items.indices.contains(vise) {
+                        let it = menu.items[vise]
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(it.label).font(.system(size: 27, weight: .semibold)).lineLimit(1)
+                            Text(it.detail ?? menu.text ?? " ").font(.system(size: 17)).opacity(0.62).lineLimit(2).frame(maxWidth: 900, alignment: .leading)
+                        }.padding(.top, 20).padding(.leading, 6).id(vise).transition(.opacity).frame(height: 96, alignment: .topLeading)
+                    }
+                }.padding(.leading, 96).padding(.bottom, 84)
+                aides.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, 52)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    entete
+                    if let t = menu.text { Text(t).font(.system(size: 17)).opacity(0.62).lineLimit(3).fixedSize(horizontal: false, vertical: true).padding(.top, 10) }
+                    if apercu != nil { contenu.padding(.top, 26); Spacer(minLength: 0) }   // l'aperçu en image ne dessine pas les zones qui défilent
+                    else {
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical, showsIndicators: false) { contenu }
+                                .padding(.top, 26)
+                                .onChange(of: index) { _, _ in withAnimation { proxy.scrollTo(index) } }
                         }
                     }
-                    Text(menu.title).font(.system(size: 38, weight: .bold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.7)
-                    if let st = menu.subtitle { Text(st).font(.system(size: 18, weight: .medium, design: .rounded)).opacity(0.65).lineLimit(2) }
+                    aides.padding(.top, 18)
                 }
-                Spacer(minLength: 0)
+                .frame(width: menu.grid ? 1070 : 720, alignment: .leading)
+                .padding(.leading, 96).padding(.top, 76).padding(.bottom, 52)
             }
-            if let t = menu.text { Text(t).font(.system(size: 18, weight: .regular, design: .rounded)).opacity(0.82).fixedSize(horizontal: false, vertical: true).padding(.top, 20) }
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    if menu.grid {
-                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(330), spacing: 24, alignment: .top), count: MenuView.cols), alignment: .leading, spacing: 26) {
-                            ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in card(i, it).id(i) }
-                        }.padding(.vertical, 14).padding(.horizontal, 6)
-                    } else {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(menu.items.enumerated()), id: \.offset) { i, it in
-                                if let sec = it.section { Text(sec.uppercased()).font(.system(size: 13, weight: .heavy, design: .rounded)).tracking(1.3).opacity(0.45).padding(.top, i == 0 ? 4 : 18).padding(.bottom, 2).padding(.horizontal, 16) }
-                                row(i, it).id(i)
-                            }
-                        }.padding(.vertical, 6)
-                    }
-                }
-                .padding(.top, 16)
-                .onChange(of: index) { _, _ in withAnimation { proxy.scrollTo(index) } }
-            }
-            HStack(spacing: 22) { Hint(k: lib.hints.ok, t: "Choisir"); Hint(k: lib.hints.back, t: menu.back == nil ? "Fermer" : "Retour") }.padding(.top, 18).opacity(0.75)
         }
-        .padding(36).frame(width: menu.grid ? 1160 : 860).frame(maxHeight: 940)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 36, style: .continuous))
-        .background(RoundedRectangle(cornerRadius: 36, style: .continuous).fill(Color.black.opacity(0.38)))
-        .overlay(RoundedRectangle(cornerRadius: 36, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
-        .shadow(color: .black.opacity(0.55), radius: 50, y: 24).foregroundStyle(.white)
-        .scaleEffect(pop ? 0.99 : 1.0).animation(.spring(response: 0.18, dampingFraction: 0.7), value: pop)
-        .transition(.asymmetric(insertion: .scale(scale: 0.9).combined(with: .opacity), removal: .scale(scale: 1.04).combined(with: .opacity)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white).ignoresSafeArea()
+        .scaleEffect(pop ? 0.995 : 1.0).animation(.spring(response: 0.18, dampingFraction: 0.7), value: pop)
+        .transition(.opacity)
         .onAppear { let f = next(-1, 1); index = f < 0 ? 0 : f }
         .onReceive(NotificationCenter.default.publisher(for: .salonNav)) { n in
             guard let k = n.object as? String else { return }
             let step = menu.grid ? MenuView.cols : 1
-            if k == "down" { let n = menu.grid ? min(index + step, menu.items.count - 1) : next(index, 1); if n != index, !menu.items[n].info { index = n; Sounds.shared.play("deplacer") } }
-            else if k == "up" { let n = menu.grid ? max(index - step, 0) : next(index, -1); if n != index, !menu.items[n].info { index = n; Sounds.shared.play("deplacer") } }
-            else if k == "right", menu.grid { let n = next(index, 1); if n != index { index = n; Sounds.shared.play("deplacer") } }
-            else if k == "left", menu.grid { let n = next(index, -1); if n != index { index = n; Sounds.shared.play("deplacer") } }
+            // la rangée se parcourt de gauche à droite ; la liste de haut en bas ; les deux sens marchent partout hors grille
+            let avant = menu.grid ? k == "right" : (k == "right" || k == "down"), arriere = menu.grid ? k == "left" : (k == "left" || k == "up")
+            if k == "down", menu.grid { let n = min(index + step, menu.items.count - 1); if n != index, !menu.items[n].info { index = n; Sounds.shared.play("deplacer") } }
+            else if k == "up", menu.grid { let n = max(index - step, 0); if n != index, !menu.items[n].info { index = n; Sounds.shared.play("deplacer") } }
+            else if avant { let n = next(index, 1); if n != index { index = n; Sounds.shared.play("deplacer") } }
+            else if arriere { let n = next(index, -1); if n != index { index = n; Sounds.shared.play("deplacer") } }
             else if k == "ok", menu.items.indices.contains(index), !menu.items[index].info { Sounds.shared.play("valider"); press(); menu.items[index].action() }
         }
     }
@@ -2624,7 +2657,7 @@ struct Screen: View {
                     .padding(.horizontal, 64).padding(.bottom, 34).foregroundStyle(.white)
             }
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
-            if let m = lib.menu { Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
+            if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { Color.black.opacity(0.6).ignoresSafeArea(); PickerView(lib: lib) }
             if let e = lib.accueil { AccueilView(lib: lib, etat: e).transition(.opacity).zIndex(5) }
             if lib.ouverture { OuvertureView(lib: lib).transition(.opacity).zIndex(20) }
@@ -2953,6 +2986,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let img = r.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                     try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("accueil-\(i + 1).png")) }
             }
+            func rendre<V: View>(_ v: V, _ nom: String) {
+                let r = ImageRenderer(content: ZStack { LinearGradient(colors: [Color(red: 0.10, green: 0.30, blue: 0.55), Color(red: 0.04, green: 0.08, blue: 0.20)], startPoint: .topTrailing, endPoint: .bottomLeading); v }.frame(width: 1920, height: 1080)); r.scale = 1
+                if let img = r.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent(nom)) }
+            }
+            let court = SalonMenu(title: "Super Mario Odyssey", subtitle: "Switch", items: [
+                SalonMenuItem(label: "Jouer", icon: "play.fill", action: {}), SalonMenuItem(label: "Réglages du jeu", detail: "60 images par seconde", icon: "slider.horizontal.3", action: {}),
+                SalonMenuItem(label: "Mods", detail: "3 installés, 2 activés", icon: "puzzlepiece.extension.fill", action: {}), SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: {}),
+                SalonMenuItem(label: "Apparence", icon: "paintpalette.fill", action: {}), SalonMenuItem(label: "Plus", icon: "ellipsis", action: {})])
+            rendre(MenuView(lib: lib, menu: court, apercu: 1), "menu-rangee.png")
+            let long = SalonMenu(title: "Bibliothèque Epic Games", subtitle: "32 jeux", items: ["Celeste", "Fall Guys", "Fortnite", "Hades", "Rocket League", "Sifu", "Subnautica", "Control", "Alan Wake", "Death Stranding", "Dishonored", "Prey"].enumerated().map { i, n in
+                SalonMenuItem(label: n, detail: n == "Fortnite" ? "Incompatible — anti-triche" : n == "Fall Guys" ? "Vérifié sur Mac" : "Pas encore testé", icon: n == "Fortnite" ? "xmark.shield.fill" : n == "Fall Guys" ? "checkmark.seal.fill" : "arrow.down.circle", destructive: n == "Fortnite", action: {}) })
+            rendre(MenuView(lib: lib, menu: long, apercu: 1), "menu-liste.png")
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
