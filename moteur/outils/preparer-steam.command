@@ -63,4 +63,7 @@ E="$SRC/packaging/steam-host.entitlements"
 /usr/bin/codesign --force --sign - --options runtime --identifier fr.anas.home.steam-sdk-x86_64 --entitlements "$E" "$T/obelisk-steam-sdk-x86_64" 2>/dev/null
 rm -rf "$D" && mv "$T" "$D" || { echo "ÉCHEC : installation de l'hôte Steam dans $D"; exit 1; }
 cp "$S/target/release/home-steam" "$MOT/bin/home-steam" && printf '%s\n' "$EMP" > "$MOT/bin/.home-steam.sha"
+# Les programmes sont dans $MOT/bin : ce qui a servi à les compiler (2 Go : les objets de cargo et le compilateur Rust de Home) ne sert
+# plus jusqu'à la prochaine version, où il sera retéléchargé et refait. HOME_GARDER_COMPILATION=1 le garde.
+if [ -z "$HOME_GARDER_COMPILATION" ]; then rm -rf "$S/target" "$MOT/.rustup" "$MOT/.cargo"; echo "Fichiers de compilation retirés (2 Go rendus)"; fi
 echo "done in : Steam prêt"

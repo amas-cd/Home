@@ -932,6 +932,8 @@ final class Library: ObservableObject {
         menu = SalonMenu(title: "Capture", items: [
             SalonMenuItem(label: "Capture : \(oui ? "oui" : "non")", detail: oui && !CGPreflightScreenCaptureAccess() ? "Autorisation macOS manquante" : "Garde les derniers instants du jeu", icon: oui ? "record.circle.fill" : "record.circle", tint: .red, action: {
                 self.config.capture = !oui; self.saveConfig(); self.openCapture() }),
+            SalonMenuItem(label: "Qualité : \(Recorder.legere ? "légère" : "haute")", detail: Recorder.legere ? "720p : pèse moins sur le jeu" : "1080p : pèse plus sur le jeu", icon: "sparkles.tv", tint: .blue, action: {
+                UserDefaults.standard.set(!Recorder.legere, forKey: "captureLegere"); self.openCapture() }),
             SalonMenuItem(label: "Durée : \(Recorder.duree)", detail: "Le temps en arrière qui est enregistré", icon: "timer", tint: .orange, action: {
                 let suite = [15, 30, 60, 120]; UserDefaults.standard.set(suite[((suite.firstIndex(of: n) ?? 0) + 1) % suite.count], forKey: "captureSecondes"); self.openCapture() }),
         ], hero: "record.circle", back: { self.menu = self.plusMenu() })
@@ -1213,7 +1215,8 @@ final class Library: ObservableObject {
                 self.watch?.invalidate()
                 self.watch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                     guard let self, self.running != nil else { self?.watch?.invalidate(); return }
-                    if Int(Date().timeIntervalSince1970) % 2 == 0, self.volumeSource == .bgm {   // toutes les 2 s : un processus du jeu apparu (dmhost) reçoit le volume du jeu,
+                    let rythme = (self.startedAt.map { Date().timeIntervalSince($0) } ?? 0) < 90 ? 2 : 10   // un jeu lance ses processus dans la première minute ; après, on vérifie de loin
+                    if Int(Date().timeIntervalSince1970) % rythme == 0, self.volumeSource == .bgm {   // toutes les 2 s : un processus du jeu apparu (dmhost) reçoit le volume du jeu,
                         // et tant que Background Music n'a pas la valeur voulue on la réécrit : le jeu n'ouvre son son que plusieurs secondes après son lancement,
                         // l'écriture faite avant est refusée (il fallait bouger le curseur pour que le volume s'applique)
                         let p = Set(self.gamePids()); let voulu = Int32(((self.gameMuted ? 0 : self.volume) * 50).rounded())
@@ -1543,6 +1546,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private let segLen = 5.0
     /// La durée du clip gardé, en secondes (Menu → Capture → Durée) : 15 par défaut
     static var secondes: Int { let n = UserDefaults.standard.integer(forKey: "captureSecondes"); return [15, 30, 60, 120].contains(n) ? n : 15 }
+    /// Capture légère (720p, par défaut) : elle tourne pendant tout le jeu, autant qu'elle pèse le moins possible. Sinon 1080p.
+    static var legere: Bool { UserDefaults.standard.object(forKey: "captureLegere") as? Bool ?? true }
     static var duree: String { secondes < 60 ? "\(secondes) s" : secondes == 60 ? "1 min" : "\(secondes / 60) min" }
     private var keep: Int { Int((Double(Recorder.secondes) / segLen).rounded(.up)) + 1 }   // un segment de plus : celui en cours n'est pas fini
     private var size = CGSize(width: 1920, height: 1080)
@@ -1558,7 +1563,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
                 let mine = content.applications.filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier }
                 let filter = SCContentFilter(display: display, excludingApplications: mine, exceptingWindows: [])   // le HUD du Salon n'apparaît pas dans les clips
                 let cfg = SCStreamConfiguration()
-                let k = min(1.0, 1920.0 / Double(display.width))
+                let k = min(1.0, (Recorder.legere ? 1280.0 : 1920.0) / Double(display.width))
                 cfg.width = Int(Double(display.width) * k) / 2 * 2; cfg.height = Int(Double(display.height) * k) / 2 * 2
                 cfg.minimumFrameInterval = CMTime(value: 1, timescale: 30); cfg.queueDepth = 6; cfg.showsCursor = false
                 cfg.capturesAudio = true; cfg.excludesCurrentProcessAudio = true; cfg.sampleRate = 48000; cfg.channelCount = 2
@@ -1595,7 +1600,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         let url = tmp.appendingPathComponent("seg-\(Int(Date().timeIntervalSince1970 * 1000)).mp4")
         guard let w = try? AVAssetWriter(outputURL: url, fileType: .mp4) else { return }
         let v = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(size.width), AVVideoHeightKey: Int(size.height),
-                                                                        AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: 14_000_000, AVVideoMaxKeyFrameIntervalKey: 30, AVVideoExpectedSourceFrameRateKey: 30]])
+                                                                        AVVideoCompressionPropertiesKey: [AVVideoAverageBitRateKey: Recorder.legere ? 6_000_000 : 14_000_000, AVVideoMaxKeyFrameIntervalKey: 30, AVVideoExpectedSourceFrameRateKey: 30]])
         v.expectsMediaDataInRealTime = true
         let a = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48000, AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 192_000])
         a.expectsMediaDataInRealTime = true
@@ -2081,7 +2086,94 @@ struct Hint: View {
 
 // MARK: - Ouverture : au lancement de l'app, le logo de Home au centre sur fond noir, avec le jingle (« lancer »), puis un fondu vers
 // la grille des jeux. Environ 1,9 s en tout, courbes douces ; n'importe quelle touche la passe (AppDelegate.nav), un clic aussi.
+// L'écran de démarrage est animé par Core Animation, pas par SwiftUI : ses animations tournent dans le serveur de rendu de macOS, à part.
+// Au démarrage le fil principal est occupé (la bibliothèque se construit, les images arrivent) et une animation SwiftUI saccadait ;
+// celles-ci ne dépendent plus de lui. Les lueurs sont des dégradés, pas un flou recalculé à chaque image.
+final class OuvertureCouches: NSView {
+    private let bloc = CALayer(); private var monte = false
+    private static let douce = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
+    override init(frame: NSRect) { super.init(frame: frame); wantsLayer = true; layer?.backgroundColor = CGColor(red: 0.02, green: 0.02, blue: 0.05, alpha: 1) }
+    required init?(coder: NSCoder) { fatalError() }
+    /// Une animation d'une propriété, qui part après `delai` et laisse la couche sur sa valeur d'arrivée
+    private func anime(_ l: CALayer, _ cle: String, de: Any, a: Any, duree: Double, delai: Double = 0, courbe: CAMediaTimingFunction = OuvertureCouches.douce) {
+        let an = CABasicAnimation(keyPath: cle); an.fromValue = de; an.toValue = a; an.duration = duree; an.timingFunction = courbe
+        an.beginTime = CACurrentMediaTime() + delai; an.fillMode = .backwards
+        l.setValue(a, forKeyPath: cle); l.add(an, forKey: cle)
+    }
+    private func cg(_ c: Color, _ alpha: CGFloat = 1) -> CGColor { (NSColor(c).usingColorSpace(.sRGB) ?? .white).withAlphaComponent(alpha).cgColor }
+    override func layout() {
+        super.layout()
+        guard !monte, bounds.width > 100, let fond = layer else { return }; monte = true
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        let w = bounds.width, h = bounds.height, centre = CGPoint(x: w / 2, y: h / 2 + 60)   // y vers le haut : le bloc est un peu au-dessus du milieu
+        // trois lueurs aux couleurs des cartes : des dégradés ronds qui s'allument en s'écartant
+        for (couleur, taille, dx, dy) in [(Library.violet[0], w * 0.9, -w * 0.04, h * 0.12), (Library.bleu[1], w * 0.72, w * 0.22, -h * 0.10), (Library.orange[1], w * 0.64, -w * 0.24, -h * 0.14)] {
+            let g = CAGradientLayer(); g.type = .radial; g.colors = [cg(couleur, 0.42), cg(couleur, 0.16), cg(couleur, 0)]; g.locations = [0, 0.45, 1]
+            g.startPoint = CGPoint(x: 0.5, y: 0.5); g.endPoint = CGPoint(x: 1, y: 1)
+            g.bounds = CGRect(x: 0, y: 0, width: taille, height: taille); fond.addSublayer(g)
+            anime(g, "position", de: NSValue(point: CGPoint(x: w / 2, y: h / 2)), a: NSValue(point: CGPoint(x: w / 2 + dx, y: h / 2 + dy)), duree: 1.2, courbe: CAMediaTimingFunction(name: .easeOut))
+            anime(g, "opacity", de: 0, a: 1, duree: 1.2, courbe: CAMediaTimingFunction(name: .easeOut))
+        }
+        // les deux anneaux qui partent du centre
+        for (de, a, alpha, trait) in [(0.7, 3.4, 0.5, 2.0), (0.5, 2.4, 0.35, 1.5)] {
+            let o = CAShapeLayer(); o.path = CGPath(ellipseIn: CGRect(x: -150, y: -150, width: 300, height: 300), transform: nil)
+            o.fillColor = nil; o.strokeColor = CGColor(gray: 1, alpha: alpha); o.lineWidth = trait; o.position = centre; fond.addSublayer(o)
+            anime(o, "transform.scale", de: de, a: a, duree: 1.3, delai: 0.8, courbe: CAMediaTimingFunction(name: .easeOut))
+            anime(o, "opacity", de: 1, a: 0, duree: 1.3, delai: 0.8, courbe: CAMediaTimingFunction(name: .easeOut))
+            let avant = CABasicAnimation(keyPath: "opacity"); avant.fromValue = 0; avant.toValue = 0; avant.duration = 0.8; o.add(avant, forKey: "avant")   // invisible jusqu'à son départ
+        }
+        // le bloc : les trois cartes, la manette, le nom ; il avance très lentement du début à la fin, pour que rien ne se fige
+        bloc.bounds = CGRect(x: 0, y: 0, width: w, height: h); bloc.position = CGPoint(x: w / 2, y: h / 2); fond.addSublayer(bloc)
+        anime(bloc, "transform.scale", de: 1, a: 1.06, duree: 3.4, courbe: CAMediaTimingFunction(name: .linear))
+        let pile = CALayer(); pile.bounds = CGRect(x: 0, y: 0, width: 400, height: 320); pile.position = centre; bloc.addSublayer(pile)
+        func carte(_ c: [Color]) -> CAGradientLayer {
+            let g = CAGradientLayer(); g.colors = [cg(c[0]), cg(c[1])]; g.startPoint = CGPoint(x: 0, y: 1); g.endPoint = CGPoint(x: 1, y: 0)
+            g.bounds = CGRect(x: 0, y: 0, width: 190, height: 262); g.cornerRadius = 34; g.cornerCurve = .continuous; g.position = CGPoint(x: 200, y: 160); pile.addSublayer(g); return g
+        }
+        for (c, signe) in [(Library.orange, -1.0), (Library.bleu, 1.0)] {        // les deux cartes de derrière sortent en éventail
+            let g = carte(c)
+            let fin = CATransform3DRotate(CATransform3DMakeTranslation(signe * 92, -14, 0), -signe * 15 * .pi / 180, 0, 0, 1)
+            anime(g, "transform", de: NSValue(caTransform3D: CATransform3DIdentity), a: NSValue(caTransform3D: fin), duree: 0.6, delai: 0.5)
+        }
+        let devant = carte(Library.violet); devant.borderWidth = 2; devant.borderColor = CGColor(gray: 1, alpha: 0.35)
+        devant.shadowColor = .black; devant.shadowOpacity = 0.5; devant.shadowRadius = 30; devant.shadowOffset = CGSize(width: 0, height: -16)
+        if let img = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil)?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 84, weight: .medium).applying(.init(paletteColors: [.white]))) {
+            let m = CALayer(); m.contents = img; m.contentsGravity = .resizeAspect; m.bounds = CGRect(x: 0, y: 0, width: 130, height: 100); m.position = CGPoint(x: 95, y: 131); devant.addSublayer(m)
+            anime(m, "transform.scale", de: 0.5, a: 1, duree: 0.45, delai: 0.8); anime(m, "opacity", de: 0, a: 1, duree: 0.45, delai: 0.8)
+        }
+        anime(pile, "transform.scale", de: 0.72, a: 1, duree: 0.7, delai: 0.1); anime(pile, "opacity", de: 0, a: 1, duree: 0.7, delai: 0.1)
+        let nom = CATextLayer(); nom.contentsScale = window?.backingScaleFactor ?? 2; nom.alignmentMode = .center
+        nom.string = NSAttributedString(string: "HOME", attributes: [.font: NSFont.systemFont(ofSize: 54, weight: .black, width: .expanded), .foregroundColor: NSColor.white, .kern: 14])
+        nom.bounds = CGRect(x: 0, y: 0, width: 700, height: 72); nom.position = CGPoint(x: centre.x + 7, y: centre.y - 131 - 54 - 36); bloc.addSublayer(nom)
+        anime(nom, "transform.scale.x", de: 1.5, a: 1, duree: 0.7, delai: 1.0); anime(nom, "opacity", de: 0, a: 1, duree: 0.7, delai: 1.0)   // les lettres se resserrent
+        CATransaction.commit()
+    }
+    /// La sortie : le bloc grossit et s'efface, puis le fond laisse voir la bibliothèque
+    func partir() {
+        guard monte, let fond = layer, fond.animation(forKey: "sortie") == nil else { return }
+        let ici = (bloc.presentation()?.value(forKeyPath: "transform.scale") as? Double) ?? 1.06
+        bloc.removeAnimation(forKey: "transform.scale")
+        let g = CABasicAnimation(keyPath: "transform.scale"); g.fromValue = ici; g.toValue = ici * 1.12; g.duration = 0.6; g.timingFunction = CAMediaTimingFunction(name: .easeIn); bloc.setValue(ici * 1.12, forKeyPath: "transform.scale"); bloc.add(g, forKey: "sortie")
+        let o = CABasicAnimation(keyPath: "opacity"); o.fromValue = 1; o.toValue = 0; o.duration = 0.6; o.timingFunction = CAMediaTimingFunction(name: .easeIn); bloc.opacity = 0; bloc.add(o, forKey: "fondu")
+        let f = CABasicAnimation(keyPath: "opacity"); f.fromValue = 1; f.toValue = 0; f.duration = 0.9; f.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut); fond.opacity = 0; fond.add(f, forKey: "sortie")
+    }
+}
+struct OuvertureCA: NSViewRepresentable {
+    let part: Bool
+    func makeNSView(context: Context) -> OuvertureCouches { OuvertureCouches(frame: .zero) }
+    func updateNSView(_ v: OuvertureCouches, context: Context) { if part { v.partir() } }
+}
+/// L'écran de démarrage : les couches ci-dessus, un appui pour le passer, et la sortie au bout de 2,15 s
 struct OuvertureView: View {
+    @ObservedObject var lib: Library
+    var body: some View {
+        OuvertureCA(part: lib.ouverturePart).ignoresSafeArea().contentShape(Rectangle())
+            .onTapGesture { lib.passerOuverture() }
+            .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.15) { lib.passerOuverture() } }
+    }
+}
+/// La même image, figée, dessinée par SwiftUI : pour l'aperçu (HOME_APERCU), qui ne sait pas rendre des couches animées
+struct OuvertureApercu: View {
     @ObservedObject var lib: Library
     var fige = false
     @State private var lueurs = false    // le fond s'allume
@@ -2796,7 +2888,8 @@ struct Screen: View {
     var body: some View {
         let g = lib.current; let a = g.flatMap { lib.art[$0.id] }
         ZStack {
-            Group { if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(g?.id ?? "salon-plus")
+            // pendant un jeu, l'écran « en cours » couvre tout : le fond (image qui zoome, vidéo en boucle) n'est pas gardé derrière, il coûterait pour rien
+            Group { if lib.running != nil { Color.black } else if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(lib.running != nil ? "en-jeu" : g?.id ?? "salon-plus")
                 .transition(.opacity).animation(.easeInOut(duration: 0.35), value: g?.id)
             let veiled = lib.menu != nil || lib.picker != nil
             VStack(alignment: .leading, spacing: 0) {
@@ -2956,7 +3049,7 @@ struct NowPlayingView: View {
                 Spacer()
                 HStack(spacing: 12) { Pilule(k: lib.hints.plus, t: "Menu rapide") }.opacity(0.7).padding(.bottom, 44)
             }.foregroundStyle(.white)
-        }.onReceive(clock) { now = $0 }
+        }.onReceive(clock) { t in if NSApp.isActive || t.timeIntervalSince(now) >= 60 { now = t } }   // derrière le jeu : une fois par minute suffit
     }
 }
 
@@ -3050,7 +3143,8 @@ struct HUDView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-        }.onReceive(clock) { now = $0 }.animation(.spring(response: 0.35, dampingFraction: 0.85), value: lib.quick).animation(.spring(response: 0.3, dampingFraction: 0.85), value: lib.quickSlider).animation(.spring(response: 0.3, dampingFraction: 0.85), value: lib.quickJoueurs).preferredColorScheme(.dark)
+        }.onReceive(clock) { t in if lib.quick || t.timeIntervalSince(now) >= 30 { now = t } }   // menu rapide fermé : l'heure seule, toutes les 30 s
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: lib.quick).animation(.spring(response: 0.3, dampingFraction: 0.85), value: lib.quickSlider).animation(.spring(response: 0.3, dampingFraction: 0.85), value: lib.quickJoueurs).preferredColorScheme(.dark)
     }
 }
 
@@ -3207,7 +3301,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let lib = Library(); var window: NSWindow?; var hud: NSPanel?; var gameApp: NSRunningApplication?; var pad: Timer?; var bag = Set<AnyCancellable>(); var holdMenu = 0
     var lastX = 0, lastY = 0, heldX = 0, heldY = 0, prev: [String: Bool] = [:]
     var qLastX = 0, qLastY = 0, qHeldX = 0, qHeldY = 0   // menu rapide en jeu : ses propres compteurs (ceux du Salon sont remis à 0 à chaque tour)
+    /// Home ne laisse pas grossir ce qu'il écrit : un journal de plus de 1 Mo ne garde que sa fin, un journal ou un rapport de plus de
+    /// 30 jours part, les morceaux d'une capture interrompue aussi.
+    static func menage() {
+        let fm = FileManager.default, logs = Dossiers.home.appendingPathComponent("log")
+        for f in (try? fm.contentsOfDirectory(at: logs, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])) ?? [] {
+            guard let v = try? f.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey]), v.isRegularFile == true, ["log", "txt"].contains(f.pathExtension) else { continue }
+            if let d = v.contentModificationDate, Date().timeIntervalSince(d) > 30 * 86400 { try? fm.removeItem(at: f); continue }
+            if let n = v.fileSize, n > 1_000_000, let h = try? FileHandle(forReadingFrom: f) {
+                try? h.seek(toOffset: UInt64(n - 300_000)); let fin = h.readDataToEndOfFile(); try? h.close()
+                try? fin.write(to: f, options: .atomic)
+            }
+        }
+        let tmp = salonRoot.appendingPathComponent("captures/tmp")
+        for f in (try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? [] { try? fm.removeItem(at: f) }
+    }
     func applicationDidFinishLaunching(_ n: Notification) {
+        DispatchQueue.global(qos: .utility).async { AppDelegate.menage() }
         // Aperçu pour le développement : HOME_APERCU=<dossier> dessine les trois étapes de l'écran d'accueil en PNG (1920×1080) et quitte,
         // sans rien charger ni installer
         if let dossier = ProcessInfo.processInfo.environment["HOME_APERCU"] {
@@ -3244,7 +3354,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var t2 = Tache(titre: "Construction du jeu", log: URL(fileURLWithPath: "/tmp/x.log")); t2.fini = true; t2.erreur = "Le jeu de base est introuvable"
             var t3 = Tache(titre: "Mise à jour de Home", log: URL(fileURLWithPath: "/tmp/x.log")); t3.fini = true; t3.etape = "Terminé"
             rendre(ZStack { Color(white: 0.08); VStack(alignment: .trailing, spacing: 40) { TacheView(lib: lib, t: t1); TacheView(lib: lib, t: t2); TacheView(lib: lib, t: t3) } }, "tache.png")
-            let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
+            // l'écran de démarrage réel (couches Core Animation), dans son état d'arrivée
+            let oc = OuvertureCouches(frame: NSRect(x: 0, y: 0, width: 1920, height: 1080)); oc.layout()
+            if let l = oc.layer, let ctx = CGContext(data: nil, width: 1920, height: 1080, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                l.render(in: ctx)
+                if let img = ctx.makeImage(), let png = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture-couches.png")) }
+            }
+            let o = ImageRenderer(content: OuvertureApercu(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
             exit(0)
