@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Home pour Windows : la même interface que app/main.swift (SwiftUI n'existe pas sur Windows), en C# avec Avalonia.
+       Compile aussi sur Mac (dotnet build) pour vérifier l'interface ; ce qui est propre à Windows (registre, XInput, winmm)
+       est gardé par OperatingSystem.IsWindows(). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RollForward>LatestMajor</RollForward>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Home</AssemblyName>
+    <RootNamespace>Home</RootNamespace>
+    <Version>0.0.0</Version>
+    <SatelliteResourceLanguages>fr</SatelliteResourceLanguages>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.23" />
+    <PackageReference Include="Material.Icons" Version="2.4.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Les sons de l'interface sont ceux de la version Mac : une seule copie dans le dépôt -->
+    <Content Include="..\app\sons\*.wav" Link="sons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

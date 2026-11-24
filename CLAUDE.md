@@ -42,6 +42,7 @@ Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
 |---|---|
 | `app/main.swift` | Toute l'app Home |
 | `app/veille.swift` | La petite app invisible qui ouvre Home à la connexion d'une manette |
+| `windows/` | Home pour Windows (C# / Avalonia) : la même interface, pour les jeux Steam, Epic et les recomps. Voir « Home pour Windows » |
 | `app/sons/` | Sons de l'interface (Kenney, CC0) |
 | `app/salon-construire.command` | Compile, signe et installe `/Applications/Home.app`. `HOME_BUILD_ONLY=<dossier>` : compile seulement. `HOME_VERSION=x.y.z` : version de l'app |
 | `moteur/outils/` | Les scripts que Home lance (voir plus bas) |
@@ -106,6 +107,48 @@ Les sections sont marquées `// MARK:`. Cherche-les par nom, les numéros de lig
   - le moteur d'un jeu (`moteurDe`, `scriptDedie`).
 
 Style du code : lignes denses, commentaires en français qui expliquent **pourquoi**. Garde ce style.
+
+## Home pour Windows (`windows/`)
+
+SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec Avalonia 11, qui recopie l'interface de
+`app/main.swift` (mêmes tailles, marges, couleurs, mêmes noms de symboles dans les menus, traduits par `Icones`).
+
+- **Ce qu'elle lance** : les jeux Steam et Epic Games installés (détectés seuls), les apps ajoutées à la main, et les **recomps**.
+- **Recomps** : sur Windows, nxnative et MacNativeGames n'existent pas (Apple et Metal seulement). À leur place, Home installe les
+  recomps PC de leurs auteurs (TotK Recomp = `valentderah/totk-pc-recomp`, Zelda 64…). Source 1 : le catalogue public de
+  RecompLauncher (`https://recomplauncher.com/pc-catalog.json`, relu au plus une fois par jour). Source 2 : une recherche GitHub
+  pour ce qui n'y est pas, signalée « hors catalogue ». Home ne télécharge que depuis `github.com/<dépôt>/releases/download/`,
+  vérifie le SHA-256 quand il est publié, et refuse un fichier que le catalogue marque `red`. Aucun recomp ne contient de jeu.
+- **Pas sur Windows** : construction des jeux Switch, mods, TOTK / SMO Online, HUD en jeu, capture, volume par jeu.
+
+| Fichier | Contenu |
+|---|---|
+| `Modele.cs` | `Jeu`, `Config`, `Menu` / `ElementMenu`, `Dossiers`, `Icones` (SF Symbols → Material, teintes) |
+| `Bibliotheque.cs` | L'équivalent de `Library` : état, navigation, lancement, fin de partie, tous les menus |
+| `Sources.cs` | `Steam`, `Epic`, `SteamGridDB`, `Images` |
+| `Recomps.cs` | `Catalogue`, `GitHub`, `Installation`, `MenusRecomps` |
+| `Vues.cs` | `Ecran`, `Tuile`, `FondVue`, le panneau des menus, « en cours de jeu », tâche, saisie |
+| `Manette.cs` | `Manette` (XInput), `Sons` (les .wav de `app/sons`), `Systeme` (processus d'un dossier, Corbeille) |
+| `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |
+
+Données sur le PC : `%LOCALAPPDATA%\Home` (`jeux.json`, `statistiques.json`, `recomps.json`, `media/`, `cache/`, `recomps/<id>/`,
+`log/home.log`, `steamgriddb-api-key` = **secret**).
+
+**Règle de parité** : un changement de l'interface ou d'un menu dans `app/main.swift` se reporte dans `windows/` dans le même
+commit quand il a un sens sur Windows (et inversement). Si ce n'est pas reporté, dis-le à Anas.
+
+**Vérifier sur le Mac** (personne n'a de PC sous la main ; un ami d'Anas teste les releases) :
+```bash
+dotnet build windows/Home.csproj
+HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=recomps HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
+```
+`HOME_DEMO=1` remplit la bibliothèque avec les recomps en vedette du catalogue. `HOME_SCENARIO` enchaîne des écrans ou des touches
+(`options`, `plus`, `ajout`, `recomps`, `fiche`, `saisie`, `tache`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
+la fenêtre puis quitte : lis le PNG. Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille)
+ne se teste pas sur Mac.
+
+Le workflow compile `windows/` sur `windows-latest` (job `windows`) et la release contient `Home.zip` et `Home-Windows.zip` ;
+elle ne sort que si les deux compilent.
 
 ## Les scripts (`moteur/outils/`)
 
