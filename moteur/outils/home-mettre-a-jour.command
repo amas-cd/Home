@@ -5,7 +5,7 @@
 HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 trap '' PIPE
 S="$HR/moteur/salon"
-neuf="$(cat "$S/main.swift" "$S/veille.swift" "$S/salon-construire.command" 2>/dev/null | shasum -a 256 | cut -c1-64)"
+neuf="$(cat "$S/main.swift" "$S/veille.swift" "$S/salon-construire.command" "$S/icone.swift" 2>/dev/null | shasum -a 256 | cut -c1-64)"
 if [ -z "$HOME_FORCER" ] && [ "$neuf" = "$(cat /Applications/Home.app/Contents/Resources/source.sha 2>/dev/null)" ]; then
   echo "Home est déjà à jour"; exit 0
 fi

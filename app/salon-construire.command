@@ -33,27 +33,14 @@ cat > "$B/Salon.app/Contents/Info.plist" <<'PLIST'
 PLIST
 # Version affichée par Home et comparée aux releases GitHub (GitHub Actions la donne : le tag sans le « v », ex. 0.1.0)
 [ -n "$HOME_VERSION" ] && /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $HOME_VERSION" "$B/Salon.app/Contents/Info.plist"
-# icône : une manette blanche sur fond sombre, dessinée par le système (pas de fichier externe)
-swift - <<'SW' "$B/AppIcon.png" 2>/dev/null || true
-import AppKit
-let out = CommandLine.arguments[1]; let s: CGFloat = 1024
-let img = NSImage(size: NSSize(width: s, height: s)); img.lockFocus()
-let r = NSRect(x: 0, y: 0, width: s, height: s); let p = NSBezierPath(roundedRect: r.insetBy(dx: 60, dy: 60), xRadius: 220, yRadius: 220)
-NSGradient(colors: [NSColor(calibratedRed: 0.08, green: 0.12, blue: 0.30, alpha: 1), NSColor(calibratedRed: 0.02, green: 0.03, blue: 0.10, alpha: 1)])!.draw(in: p, angle: -70)
-let cfg = NSImage.SymbolConfiguration(pointSize: 520, weight: .medium)
-if let sym = NSImage(systemSymbolName: "gamecontroller.fill", accessibilityDescription: nil)?.withSymbolConfiguration(cfg) {
-    let t = sym.copy() as! NSImage; t.lockFocus(); NSColor.white.set(); NSRect(origin: .zero, size: t.size).fill(using: .sourceAtop); t.unlockFocus()
-    t.draw(in: NSRect(x: (s - t.size.width) / 2, y: (s - t.size.height) / 2, width: t.size.width, height: t.size.height))
-}
-img.unlockFocus()
-if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: out)) }
-SW
+# icône : trois cartes en éventail et une manette, dessinées en code par icone.swift (pas d'image externe)
+swift "$D/icone.swift" "$B/AppIcon.png" 2>/dev/null || true
 if [ -f "$B/AppIcon.png" ]; then mkdir -p "$B/AppIcon.iconset"; for sz in 16 32 128 256 512; do sips -z $sz $sz "$B/AppIcon.png" --out "$B/AppIcon.iconset/icon_${sz}x${sz}.png" >/dev/null; sips -z $((sz*2)) $((sz*2)) "$B/AppIcon.png" --out "$B/AppIcon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null; done
   iconutil -c icns "$B/AppIcon.iconset" -o "$B/Salon.app/Contents/Resources/AppIcon.icns" 2>/dev/null; fi
 [ -f "$B/Salon.app/Contents/Resources/AppIcon.icns" ] && [ -d "$V" ] && { mkdir -p "$V/Resources"; cp "$B/Salon.app/Contents/Resources/AppIcon.icns" "$V/Resources/"; }
 # Sons : banque CC0 (Kenney « Interface Sounds ») copiée dans l'app, avec les six sons choisis à la racine
 # l'empreinte de la source : « Mettre à jour Home » ne recompile que si elle a changé
-cat "$D/main.swift" "$D/veille.swift" "$0" 2>/dev/null | shasum -a 256 | cut -c1-64 > "$B/Salon.app/Contents/Resources/source.sha"
+cat "$D/main.swift" "$D/veille.swift" "$0" "$D/icone.swift" 2>/dev/null | shasum -a 256 | cut -c1-64 > "$B/Salon.app/Contents/Resources/source.sha"
 if [ -d "$D/sons" ]; then mkdir -p "$B/Salon.app/Contents/Resources/sons"; cp -R "$D/sons/." "$B/Salon.app/Contents/Resources/sons/"; fi
 # Le moteur embarqué : les scripts, les outils, la version figée des moteurs et la source de Home. L'app les installe dans
 # <Home>/moteur à son premier lancement et après une mise à jour (moteur/outils/installer-embarque.sh) : c'est ce qui la rend autonome.

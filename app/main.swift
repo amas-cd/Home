@@ -61,7 +61,7 @@ struct Game: Identifiable, Equatable {
 struct Art { var cover: NSImage?; var background: NSImage?; var logo: NSImage? }
 struct Stat: Codable { var lastPlayed: Date?; var minutes: Int }
 struct Entry: Codable { var chemin: String; var nom: String?; var categorie: String?; var masque: Bool? }
-struct Config: Codable { var jeux: [Entry]; var categories: [String]?; var sons: Bool?; var capture: Bool?; var espacePleinEcran: Bool?; var volumes: [String: Float]?; var volume: Float?; var ecranJeu: UInt32?; var ecranJeuChoisi: Bool?; var gamebanana: [String: Int]?; var reglages: [String: [String: String]]?; var cles: String?; var discret: Bool?; var garderCaches: Bool?; var nomsArt: [String: String]? }
+struct Config: Codable { var jeux: [Entry]; var categories: [String]?; var sons: Bool?; var capture: Bool?; var espacePleinEcran: Bool?; var volumes: [String: Float]?; var volume: Float?; var ecranJeu: UInt32?; var ecranJeuChoisi: Bool?; var gamebanana: [String: Int]?; var reglages: [String: [String: String]]?; var cles: String?; var discret: Bool?; var garderCaches: Bool?; var nomsArt: [String: String]?; var mode: String?; var moteurs: String? }   // mode : "tout" | "nintendo" | "pc" (nil = pas encore choisi) ; moteurs : "tout" | "mng" | "nxnative"
 struct Candidate: Identifiable {
     let id: String; let thumb: URL?; let full: URL?; let author: String; var game: String = ""; var source: String = "SteamGridDB"; var width = 0, height = 0
     /// Le même format pour toutes les propositions d'un emplacement : jaquette carrée (la tuile l'est), fond large (≥ 3:2) ; les logos sont filtrés par leur nom (fichiers « logo »)
@@ -370,6 +370,7 @@ final class Library: ObservableObject {
     @Published var running: Game? = nil
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
+    var apresTache: (() -> Void)? = nil   // ce que l'assistant fait une fois la tâche en cours réussie (se connecter, ajouter un jeu…)
     @Published var tache: Tache? = nil { didSet { majDock() } }   // la construction / mise à jour en cours, avec sa barre de progression
     /// Ferme la notification d'une tâche terminée (bouton Fermer, B / Échap) : fondu flouté ; une tâche en cours reste affichée
     @discardableResult func fermerTache() -> Bool {
@@ -798,6 +799,7 @@ final class Library: ObservableObject {
         return SalonMenu(title: "Home", subtitle: "\(games.count) jeux · \(categories.count - 1) catégories", items: [
             SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", tint: .blue, action: { self.openMisesAJour() }),
             SalonMenuItem(label: "Ajouter un jeu", icon: "plus.app.fill", action: { self.openAddMenu(back: { self.menu = self.plusMenu() }) }),
+            SalonMenuItem(label: "Mode d'utilisation", detail: modeResume, icon: "square.grid.2x2.fill", tint: .purple, action: { self.openModeUtilisation() }),
             SalonMenuItem(label: "Catégories", icon: "tag.fill", action: { self.openCategoriesSettings() }),
             SalonMenuItem(label: "Écrans", icon: "display.2", action: { self.openScreensSettings() }),
             SalonMenuItem(label: "Son", detail: "Général \(Int((macVolume * 100).rounded())) %\(macMuted ? " (muet)" : "") · sons de Home \((config.sons ?? true) ? "activés" : "coupés")", icon: "speaker.wave.2.fill", action: { self.openSoundSettings() }),
@@ -2784,7 +2786,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         Atelier.installerEmbarque()
         lib.load()
-        if !Atelier.nxnativePret && !Atelier.mngPret { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil { self.lib.openBienvenue() } } }   // un Mac neuf : préparer les moteurs, connecter les comptes
+        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -3481,7 +3483,7 @@ extension Library {
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         guard let fh = try? FileHandle(forWritingTo: logURL) else { toast = "Journal impossible : \(logURL.path)"; return false }
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [s.path] + args
-        var e = ProcessInfo.processInfo.environment; for (k, v) in Dossiers.env { e[k] = v }; for (k, v) in env { e[k] = v }; e["HOME_TACHE"] = "1"
+        var e = ProcessInfo.processInfo.environment; for (k, v) in Dossiers.env { e[k] = v }; e["HOME_MOTEURS"] = moteursVoulus; for (k, v) in env { e[k] = v }; e["HOME_TACHE"] = "1"
         if config.discret ?? true { e["HOME_DISCRET"] = "1" }        // construction silencieuse : cœurs économes, Mac frais
         if config.garderCaches ?? true { e["GARDER_CACHES"] = "1" }  // caches de shaders gardés (par défaut) : reconstructions courtes et froides
         p.environment = e
@@ -3532,12 +3534,14 @@ extension Library {
         if code == 0 {
             t.fraction = 1; if !t.etape.contains("déjà à jour") { t.etape = "Terminé" }; tache = t; Sounds.shared.play("valider"); load()
             if let c = tacheScript, !t.etape.contains("déjà à jour") { Library.noterDuree(c, Date().timeIntervalSince(t.debut)) }
+            if let a = apresTache { apresTache = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { a() } }
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { if self.tache?.log == t.log { withAnimation(.easeInOut(duration: 0.6)) { self.tache = nil } } }
         } else {
             let lignes = ((try? String(contentsOf: t.log, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             let motif = lignes.last { $0.contains("ÉCHEC") || $0.contains("ERROR") || $0.contains("Error") || $0.contains("introuvable") || $0.contains("[RED]") } ?? lignes.last ?? "Erreur"
             var court = motif.trimmingCharacters(in: .whitespaces)
             if court.hasPrefix("{"), let d = court.data(using: .utf8), let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any], let m = j["msg"] as? String { court = m }
+            apresTache = nil
             t.erreur = "Échec : " + String(court.replacingOccurrences(of: "[RED] ", with: "").prefix(70))
             tache = t; Sounds.shared.play("retour")
             log("Tâche échouée (\(code)) : \(t.titre) — \(t.log.path)")
@@ -3688,15 +3692,62 @@ extension Library {
                              step: i + 1, steps: n, back: prec)
         }
     }
-    /// Premier lancement sur un Mac neuf : ce que Home peut préparer, chaque partie au choix — les moteurs des jeux Switch (outils d'Apple,
-    /// nxnative, MacNativeGames) et les jeux PC (moteur Windows, compte Epic Games). Le compte est redemandé à l'installation d'un jeu s'il manque.
-    func openBienvenue() {
-        let ici: () -> Void = { self.openBienvenue() }
-        menu = SalonMenu(title: "Bienvenue dans Home", subtitle: "Que veux-tu préparer sur ce Mac ?", items: [
-            SalonMenuItem(label: "Jeux Switch", detail: "Xcode, Homebrew, nxnative et MacNativeGames — pour construire tes jeux à partir de tes dumps", icon: "gamecontroller.fill", action: { self.openPreparation(back: ici) }),
-            SalonMenuItem(label: "Jeux PC", detail: "Le moteur Windows, ton compte Epic Games (connexion dans une fenêtre) et ton compte Steam (QR code)", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
-            SalonMenuItem(label: "Plus tard", detail: "Tout se retrouve dans la case + et dans Menu → Mises à jour → Moteurs", icon: "arrow.right.circle", tint: .gray, action: { self.menu = nil }),
-        ], hero: "house.fill")
+    // MARK: Mode d'utilisation : ce que Home sert à faire sur ce Mac (jeux Nintendo, jeux PC, les deux) et quels moteurs il installe
+    var modeNintendo: Bool { config.mode != "pc" }
+    var modePC: Bool { config.mode != "nintendo" }
+    /// Ce que le script de préparation doit installer pour les jeux Nintendo (HOME_MOTEURS)
+    var moteursVoulus: String { modeNintendo ? (config.moteurs ?? "tout") : "aucun" }
+    var modeResume: String {
+        let m = config.mode == "pc" ? "Jeux PC" : config.mode == "nintendo" ? "Jeux Nintendo" : config.mode == nil ? "Pas encore choisi" : "Jeux Nintendo et jeux PC"
+        let e = !modeNintendo || config.mode == nil ? "" : config.moteurs == "mng" ? " · MacNativeGames seul" : config.moteurs == "nxnative" ? " · nxnative seul" : ""
+        return m + e
+    }
+    /// L'assistant du premier lancement, qu'on retrouve dans Menu → Mode d'utilisation : 1. à quoi sert Home ici, 2. les moteurs Nintendo
+    /// (tout, recommandé ; ou un seul, avancé), 3. par où commencer côté PC. À la fin, Home télécharge ce qui manque pour ce mode.
+    func openModeUtilisation(premier: Bool = false) {
+        let retour: (() -> Void)? = premier ? nil : { self.menu = self.plusMenu() }
+        func choix(_ label: String, _ detail: String, _ icone: String, _ mode: String, recommande: Bool = false) -> SalonMenuItem {
+            SalonMenuItem(label: label, detail: (recommande ? "Recommandé — " : "") + detail + (!premier && (config.mode ?? "") == mode ? " (actuel)" : ""), icon: icone, tint: recommande ? .green : nil, action: {
+                if mode == "pc" { self.etapePC(mode: mode, moteurs: "tout", premier: premier) } else { self.etapeMoteurs(mode: mode, premier: premier) } })
+        }
+        menu = SalonMenu(title: premier ? "Bienvenue dans Home" : "Mode d'utilisation", subtitle: "À quoi Home va-t-il servir sur ce Mac ?", items: [
+            choix("Jeux Nintendo et jeux PC", "Home installe tout ce qu'il faut pour les deux", "square.grid.2x2.fill", "tout", recommande: true),
+            choix("Jeux Nintendo", "Tes jeux Switch et Switch 2, construits à partir de tes propres dumps", "gamecontroller.fill", "nintendo"),
+            choix("Jeux PC", "Epic Games, Steam, ou des jeux Windows que tu as déjà", "desktopcomputer", "pc"),
+        ] + (premier ? [SalonMenuItem(label: "Plus tard", detail: "Rien n'est installé ; à retrouver dans Menu → Mode d'utilisation", icon: "arrow.right.circle", tint: .gray, action: { self.config.mode = "tout"; self.saveConfig(); self.menu = nil })] : []),
+        hero: "house.fill", text: "Tu pourras changer d'avis dans le menu : Home téléchargera alors ce qui manque.", step: 1, steps: 3, back: retour)
+    }
+    private func etapeMoteurs(mode: String, premier: Bool) {
+        let suite: (String) -> Void = { m in if mode == "tout" { self.etapePC(mode: mode, moteurs: m, premier: premier) } else { self.appliquerMode(mode: mode, moteurs: m, ensuite: nil) } }
+        menu = SalonMenu(title: "Jeux Nintendo", subtitle: "Quels moteurs installer ?", items: [
+            SalonMenuItem(label: "Tout installer", detail: "Recommandé — Home choisit le bon moteur pour chaque jeu", icon: "checkmark.seal.fill", tint: .green, action: { suite("tout") }),
+            SalonMenuItem(label: "MacNativeGames seulement", detail: "Avancé — Zelda Tears of the Kingdom, Breath of the Wild, Ocarina of Time", icon: "leaf.fill", section: "Avancé", tint: .gray, action: { suite("mng") }),
+            SalonMenuItem(label: "nxnative seulement", detail: "Avancé — les autres jeux Switch et Switch 2 ; demande Xcode entier", icon: "cpu", section: "Avancé", tint: .gray, action: { suite("nxnative") }),
+        ], hero: "gamecontroller.fill", text: "Les moteurs transforment tes jeux en apps Mac. Il faut les outils d'Apple et Homebrew : Home te dit quoi faire s'ils manquent.", step: 2, steps: 3, back: { self.openModeUtilisation(premier: premier) })
+    }
+    private func etapePC(mode: String, moteurs: String, premier: Bool) {
+        let fin: ((() -> Void)?) -> Void = { e in self.appliquerMode(mode: mode, moteurs: moteurs, ensuite: e) }
+        menu = SalonMenu(title: "Jeux PC", subtitle: "Par où veux-tu commencer ?", items: [
+            SalonMenuItem(label: "Me connecter à Epic Games", detail: "Ta bibliothèque Epic ; connexion sur le site d'Epic, dans une fenêtre", icon: "person.crop.circle.badge.plus", action: { fin({ self.connexionEpic(retour: { self.openPC() }) }) }),
+            SalonMenuItem(label: "Me connecter à Steam", detail: "Un QR code à scanner avec l'app Steam du téléphone", icon: "qrcode", action: { fin({ self.apresTache = { self.connexionSteam(retour: { self.openPC() }) }; if PCHome.steamPret { let a = self.apresTache; self.apresTache = nil; a?() } else { self.lancer("preparer-steam.command", titre: "Préparation de Steam") } }) }),
+            SalonMenuItem(label: "Installer un jeu que j'ai déjà", detail: "Un .exe dans son dossier, ou un installateur (setup)", icon: "shippingbox.fill", action: { fin({ self.openAddMenu() }) }),
+            SalonMenuItem(label: "Plus tard", detail: "Seul le moteur Windows est installé ; le reste est dans la case +", icon: "arrow.right.circle", tint: .gray, action: { fin(nil) }),
+        ], hero: "desktopcomputer", text: "Home installe d'abord le moteur Windows (Voile, 500 Mo à télécharger), puis fait ce que tu choisis ici.", step: 3, steps: 3,
+        back: { if mode == "pc" { self.openModeUtilisation(premier: premier) } else { self.etapeMoteurs(mode: mode, premier: premier) } })
+    }
+    /// Enregistre le mode et télécharge ce qui lui manque ; « ensuite » se fait quand tout est installé
+    private func appliquerMode(mode: String, moteurs: String, ensuite: (() -> Void)?) {
+        config.mode = mode; config.moteurs = moteurs; saveConfig(); menu = nil
+        let nintendoPret = !modeNintendo || ((moteurs == "nxnative" || Atelier.mngPret) && (moteurs == "mng" || Atelier.nxnativePret))
+        DispatchQueue.global().async {
+            let e = self.modePC ? (PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]) : [:]
+            let pcPret = !self.modePC || (e["voile"] as? String != nil && e["legendary"] as? Bool == true)
+            DispatchQueue.main.async {
+                if nintendoPret && pcPret { self.toast = "Mode d'utilisation : \(self.modeResume) — tout est déjà installé"; ensuite?(); return }
+                self.apresTache = ensuite
+                if !self.lancer("preparer-moteurs.command", env: self.modePC ? ["HOME_AUSSI_PC": "1"] : [:], titre: "Installation pour : \(self.modeResume)") { self.apresTache = nil }
+            }
+        }
     }
     /// « Préparer ce Mac » : ce qu'il faut pour construire les jeux Switch (outils d'Apple, Homebrew, les deux moteurs), ce qui est déjà
     /// là, et le script qui installe le reste (preparer-moteurs.command). L'état est lu par le même script (--etat), hors du fil principal.
@@ -3704,6 +3755,7 @@ extension Library {
         let titre = bienvenue ? "Bienvenue dans Home" : "Préparer ce Mac"
         menu = SalonMenu(title: titre, subtitle: "Vérification des outils…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "wrench.and.screwdriver.fill", back: back)
         DispatchQueue.global().async {
+            setenv("HOME_MOTEURS", self.moteursVoulus, 1)   // l'état de ce que le mode d'utilisation demande
             let brut = ObeliskDirect.run("/bin/bash", [Atelier.outils.appendingPathComponent("preparer-moteurs.command").path, "--etat"], timeout: 60)
             var e: [String: String] = [:]
             for l in brut.split(separator: "\n") { let p = l.split(separator: "=", maxSplits: 1).map(String.init); if p.count == 2 { e[p[0]] = p[1] } }
@@ -3723,7 +3775,9 @@ extension Library {
                     ligne("nxnative", "nxnative", "cpu", manque: "Téléchargé par « Préparer »"),
                     ligne("MacNativeGames", "mng", "leaf.fill", manque: "Téléchargé par « Préparer »"),
                 ]
-                let pret = ["xcode", "metal", "brew", "formules", "dotnet", "python", "nxnative", "mng"].allSatisfy { e[$0] == "ok" }
+                let cles = ["xcode", "metal", "brew", "formules", "dotnet", "python", "nxnative", "mng"]
+                items = zip(cles, items).filter { e[$0.0] != "ignore" }.map { $0.1 }   // ce que le mode d'utilisation ne demande pas n'est pas montré
+                let pret = cles.allSatisfy { e[$0] == "ok" || e[$0] == "ignore" }
                 if e["brew"] != "ok" { items.append(SalonMenuItem(label: "Ouvrir brew.sh", detail: "Homebrew s'installe dans le Terminal, avec ton mot de passe", icon: "safari.fill", section: " ", action: { NSWorkspace.shared.open(URL(string: "https://brew.sh")!) })) }
                 items.append(SalonMenuItem(label: pret ? "Tout est prêt" : "Préparer maintenant", detail: pret ? "Ajoute un jeu Switch avec la case +" : "Télécharge et installe ce qui manque (10 à 20 min)", icon: pret ? "checkmark.seal.fill" : "arrow.down.circle.fill", section: " ", tint: .green, action: {
                     self.menu = nil; if !pret { self.lancer("preparer-moteurs.command", titre: "Préparation des moteurs") } }))
@@ -3925,7 +3979,8 @@ extension Library {
             SalonMenuItem(label: "Jeu PC — déjà installé", detail: "Choisis son .exe dans son dossier", icon: "folder.fill", action: { self.ajouterExe() }),
             SalonMenuItem(label: "Jeu PC — depuis son installateur", detail: "setup.exe ou .msi, 32 ou 64 bits", icon: "shippingbox.fill", action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "App Mac", icon: "macwindow", action: { self.menu = nil; self.addGame() }),
-        ], hero: "plus.app.fill", back: back)
+        ].filter { i in (self.modeNintendo || i.label != "Jeu Switch") && (self.modePC || !i.label.hasPrefix("Jeu PC")) },   // seulement ce que le mode d'utilisation comprend
+        hero: "plus.app.fill", back: back)
     }
     func ouvrirObelisk() {
         let app = ["/Applications/Obelisk.app", "/Applications/Jeux/Obelisk.app"].first { FileManager.default.fileExists(atPath: $0) }

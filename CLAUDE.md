@@ -230,7 +230,11 @@ Décidé avec Anas pour Home autonome (pour lui et ses amis) :
      liste de compatibilité.
    - Fait aussi : un .exe déjà installé devient une tuile (`pc.py ajouter-exe`), installation depuis un setup (`pc.py setup`, moteur Rosetta
      de Voile, 32 bits et .NET), connexion Epic dans une fenêtre de Home sans code à copier (`ConnexionEpic`), accueil au premier lancement.
-   - Reste : Steam et GOG sans Obelisk, désinstaller un jeu PC depuis Home, serveurs en ligne. Les jeux Epic qui démarrent par un
+   - Fait aussi : mode d'utilisation choisi au premier lancement et dans Menu → Mode d'utilisation (`Config.mode` : tout / nintendo / pc ;
+     `Config.moteurs` : tout / mng / nxnative ; les scripts reçoivent `HOME_MOTEURS` et `HOME_AUSSI_PC`). Icône dessinée par `app/icone.swift`.
+   - Steam, première étape faite : `moteur/steam` (outil Rust `home-steam` au-dessus du code Steam d'Obelisk), `preparer-steam.command`,
+     connexion par QR code, bibliothèque. Pas encore : installer et lancer un jeu Steam (il faut l'hôte `obelisk-steam-host`).
+   - Reste : fin de Steam, GOG, désinstaller un jeu PC depuis Home, serveurs en ligne. Les jeux Epic qui démarrent par un
      programme 32 bits ou .NET sont encore refusés (le moteur Rosetta ne sert qu'aux setups et aux .exe ajoutés à la main).
    - Steam sans Obelisk (étudié, pas fait) : Obelisk fait tourner la vraie bibliothèque `steamclient.dylib` de Valve dans un petit programme
      Rust (`obelisk-steam-host`, interfaces privées figées sur une version) et télécharge avec son propre code Rust (`steam-kit`). Le reprendre
