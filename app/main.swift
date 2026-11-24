@@ -496,6 +496,7 @@ final class Library: ObservableObject {
         for d in ["media", "jeux", "cache"] { try? fm.createDirectory(at: salonRoot.appendingPathComponent(d), withIntermediateDirectories: true) }
         let cfgURL = salonRoot.appendingPathComponent("jeux.json")
         if let d = try? Data(contentsOf: cfgURL), let c = try? JSONDecoder().decode(Config.self, from: d) { config = c }
+        if running == nil { volume = config.volume ?? 1; Sounds.shared.gain = volume }   // le volume de Home et de ses jeux, tel qu'il a été laissé
         if config.ecranJeuChoisi != true, config.ecranJeu != nil { config.ecranJeu = nil; saveConfig(); log("Écran des jeux remis par défaut (écran externe) — réglage hérité effacé") }   // une fois : l'ancien réglage avait pu basculer sans le vouloir
         Sounds.shared.enabled = config.sons ?? true
         let deplacements = (try? Data(contentsOf: Atelier.home.appendingPathComponent("deplacements.json"))).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
@@ -922,7 +923,7 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Composants", detail: modeResume, icon: "square.grid.2x2.fill", tint: .purple, action: { self.openModeUtilisation() }),
             SalonMenuItem(label: "Catégories", icon: "tag.fill", action: { self.openCategoriesSettings() }),
             SalonMenuItem(label: "Écrans", icon: "display.2", action: { self.openScreensSettings() }),
-            SalonMenuItem(label: "Son", detail: "Général \(Int((macVolume * 100).rounded())) %\(macMuted ? " (muet)" : "") · sons de Home \((config.sons ?? true) ? "activés" : "coupés")", icon: "speaker.wave.2.fill", action: { self.openSoundSettings() }),
+            SalonMenuItem(label: "Son", detail: "Home et jeux \(Int((volume * 100).rounded())) %\(gameMuted ? " (muet)" : "") · sons de Home \((config.sons ?? true) ? "activés" : "coupés")", icon: "speaker.wave.2.fill", action: { self.openSoundSettings() }),
             SalonMenuItem(label: "Capture", detail: capture + " · " + Recorder.duree, icon: "record.circle", action: { self.openCapture() }),
             SalonMenuItem(label: "Avancé", icon: "ellipsis.circle.fill", tint: .gray, action: { self.openAdvancedSettings() }),
             SalonMenuItem(label: "Redémarrer", icon: "arrow.clockwise", tint: .cyan, action: {   // Home se ferme et se rouvre : la liste, les images et les réglages sont relus
@@ -993,7 +994,7 @@ final class Library: ObservableObject {
     }
     func openSoundSettings() {
         menu = SalonMenu(title: "Son", subtitle: nil, items: [
-            SalonMenuItem(label: "Volume", detail: "Général \(Int((macVolume * 100).rounded())) %\(macMuted ? " (muet)" : "") — stick droit ◀▶, \(hints.tri.text) : muet · Jeux \(Int((volume * 100).rounded())) %", icon: "speaker.wave.2.fill", action: { self.menu = nil; self.flashGeneral = true; self.volumeFlash = Date() }),
+            SalonMenuItem(label: "Volume : \(Int((volume * 100).rounded())) %\(gameMuted ? " (muet)" : "")", detail: "Home et ses jeux seulement — stick droit ◀▶, \(hints.tri.text) : muet. Le volume du Mac n'est pas touché", icon: "speaker.wave.2.fill", action: { self.menu = nil; self.volumeFlash = Date() }),
             SalonMenuItem(label: "Sons de Home", detail: (config.sons ?? true) ? "Activés" : "Coupés", icon: (config.sons ?? true) ? "speaker.wave.2" : "speaker.slash", tint: .purple, action: { self.toggleSounds(); self.openSoundSettings() }),
         ], hero: "speaker.wave.2.fill", back: { self.menu = self.plusMenu() })
     }
@@ -1374,21 +1375,21 @@ final class Library: ObservableObject {
         }
     }
     // Menu rapide en jeu (Home, ou ⌥ Espace) : liste courte, navigation à la manette
-    @Published var volume: Float = SystemVolume.get() ?? 0.5
-    @Published var macVolume: Float = SystemVolume.get() ?? 0.5   // volume général (sortie du Mac), séparé du volume des jeux
-    @Published var macMuted = false
+    // Un seul volume dans Home : celui de Home (ses sons) et des jeux qu'il lance. Le volume du Mac n'est jamais touché : il reste
+    // l'affaire de macOS (touches du clavier, barre des menus).
+    @Published var volume: Float = 1.0
+    var macVolume: Float { volume }     // (anciens noms du « volume général », gardés pour les vues : c'est le même volume)
+    var macMuted: Bool { gameMuted }
     @Published var gameMuted = false
     @Published var flashGeneral = false                            // la barre de volume affichée concerne le général (sinon les jeux)
     private var macPrev: Float = 0.5, gamePrev: Float = 1
     /// barre: false = réglé depuis le curseur du haut de l'écran, qui montre déjà le niveau : la barre de volume ne s'affiche pas en plus
+    /// Le curseur du haut et le stick droit : le volume de Home et de ses jeux
     func macStep(_ d: Float, quiet: Bool = false, barre: Bool = true) {
-        let n = min(1, max(0, quiet ? macVolume + d : ((macVolume + d) * 20).rounded() / 20))
-        SystemVolume.set(n); macVolume = n; macMuted = false; lastInput = Date(); if barre { flashGeneral = true; volumeFlash = Date() }
+        writeVolume(min(1, max(0, quiet ? volume + d : ((volume + d) * 20).rounded() / 20)))
+        if !barre { volumeFlash = .distantPast }   // réglé au curseur de la barre du haut : pas besoin d'afficher une seconde barre
     }
-    func toggleMacMute() {
-        if macMuted { macMuted = false; SystemVolume.set(macPrev); macVolume = macPrev } else { macPrev = macVolume > 0 ? macVolume : 0.5; macMuted = true; SystemVolume.set(0); macVolume = 0 }
-        flashGeneral = true; lastInput = Date(); volumeFlash = Date(); Sounds.shared.play(macMuted ? "retour" : "valider")
-    }
+    func toggleMacMute() { toggleGameMute(); volumeFlash = Date() }
     func toggleGameMute() {
         if gameMuted { gameMuted = false; writeVolume(gamePrev, save: false) } else { gamePrev = volume > 0 ? volume : (config.volume ?? 1); gameMuted = true; writeVolume(0, save: false) }
         Sounds.shared.play(gameMuted ? "retour" : "valider")
@@ -1413,7 +1414,7 @@ final class Library: ObservableObject {
     /// Au lancement : le volume mémorisé du jeu est appliqué (moteur tout de suite ; Background Music dès que ses processus existent) et les sons du Salon le suivent
     func applySavedVolume(_ g: Game) { volume = savedVolume(g); Sounds.shared.gain = volume; writeVolume(volume, save: false) }
     var usesGameVolume: Bool { volumeSource != .mac }
-    var volumeLabel: String { switch volumeSource { case .engine: return "Volume du jeu"; case .bgm: return "Volume du jeu (BGM)"; case .mac: return "Volume (Mac)" } }
+    var volumeLabel: String { switch volumeSource { case .engine: return "Volume du jeu"; case .bgm: return "Volume du jeu (BGM)"; case .mac: return "Volume de Home" } }
     /// Les processus qui jouent le son du jeu en cours : l'app surveillée, le lanceur d'un jeu PC et ses processus (wine)
     func gamePids() -> [pid_t] {
         var p: [pid_t] = []
@@ -1437,13 +1438,13 @@ final class Library: ObservableObject {
         switch volumeSource {
         case .engine: try? FileManager.default.createDirectory(at: gameVolumeFile.deletingLastPathComponent(), withIntermediateDirectories: true); try? String(Int((c * 100).rounded())).write(to: gameVolumeFile, atomically: true, encoding: .utf8)
         case .bgm: if running != nil { BGM.set(Int32((c * 50).rounded()), pids: cachedPids(), bundleID: watchedApp?.bundleIdentifier) }
-        case .mac: if running != nil { SystemVolume.set(c) }
+        case .mac: break   // ni le moteur du jeu ni Background Music ne règlent ce jeu : seuls les sons de Home suivent, le volume du Mac n'est pas touché
         }
         volume = c; Sounds.shared.gain = c; lastInput = Date(); volumeFlash = Date(); flashGeneral = false; if c > 0 { gameMuted = false }
     }
     var quickItems: [(String, String)] { [("Enregistrer : \(Recorder.duree)", Recorder.shared.active ? "record.circle" : "record.circle.fill"), ("Fermer le jeu", "xmark.circle"), ("Retour à Home", "house"),
                                           (volumeLabel, volume == 0 ? "speaker.slash" : volume < 0.5 ? "speaker.wave.1" : "speaker.wave.3"),
-                                          ("Volume du Mac", macVolume == 0 ? "speaker.slash" : macVolume < 0.5 ? "speaker.wave.1" : "speaker.wave.3")]
+]
                                           + (enLigne() != nil ? [("Joueurs", "person.2.fill")] : []) }
     /// Le jeu en cours joue-t-il en ligne : TOTK Online (serveur Kirbymimi, port 10014) ou un jeu nxnative avec le serveur Super Mario Odyssey: Online (port 1027)
     func enLigne() -> (nom: String, journal: URL, port: UInt16, smo: Bool)? {
@@ -1544,7 +1545,7 @@ final class Library: ObservableObject {
             NotificationCenter.default.post(name: .salonShow, object: nil); NSApp.activate(ignoringOtherApps: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { if let d, d.isRunning { d.terminate() } else { app?.terminate() } }
         case 2: closeQuick(); backToSalon(); NSApp.activate(ignoringOtherApps: true)
-        case 5: quickJoueurs.toggle(); Sounds.shared.play(quickJoueurs ? "ouvrir" : "retour")
+        case 4: quickJoueurs.toggle(); Sounds.shared.play(quickJoueurs ? "ouvrir" : "retour")
         default: quickSlider.toggle(); Sounds.shared.play(quickSlider ? "ouvrir" : "retour")
         }
     }
@@ -3145,7 +3146,7 @@ struct Screen: View {
                         Image(systemName: v == 0 ? "speaker.slash.fill" : v < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill").font(.system(size: 18, weight: .semibold))
                         ZStack(alignment: .leading) { Capsule().fill(.white.opacity(0.22)).frame(width: 220, height: 6); Capsule().fill(.white).frame(width: max(6, 220 * CGFloat(v)), height: 6) }
                         Text(muted ? "Muet" : "\(Int((v * 100).rounded())) %").font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit()).frame(width: 52, alignment: .trailing)
-                        Text(lib.flashGeneral ? "Volume général" : lib.volumeLabel).font(.system(size: 13, weight: .medium, design: .rounded)).opacity(0.6)
+                        Text(lib.volumeLabel).font(.system(size: 13, weight: .medium, design: .rounded)).opacity(0.6)
                     }.padding(.horizontal, 18).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.top, 90); Spacer() }
                 .opacity(barreVolume ? 1 : 0).offset(y: barreVolume ? 0 : -16).animation(.easeInOut(duration: 0.5), value: barreVolume).allowsHitTesting(false)
                 .zIndex(30)   // par-dessus tous les menus : sans rang, certains la recouvraient
@@ -3243,7 +3244,7 @@ struct HUDView: View {
                     }
                     if lib.quickSlider {
                         // grand curseur de volume (jeu ou général selon la carte) : stick gauche / flèches pour régler, △ muet, ○ pour revenir aux cartes
-                        let general = lib.quickIndex == 4, v = general ? lib.macVolume : lib.volume, muted = general ? lib.macMuted : lib.gameMuted
+                        let general = false, v = lib.volume, muted = lib.gameMuted
                         HStack(spacing: 18) {
                             VStack(spacing: 4) {
                                 Image(systemName: v == 0 ? "speaker.slash.fill" : v < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.3.fill").font(.system(size: 26, weight: .medium))
@@ -3266,7 +3267,7 @@ struct HUDView: View {
                         // le nom du choix visé, seul texte du menu ; pour un volume, son niveau
                         if lib.quickItems.indices.contains(lib.quickIndex) {
                             let it = lib.quickItems[lib.quickIndex]; let i = lib.quickIndex
-                            let v = i == 4 ? lib.macVolume : lib.volume, muted = i == 4 ? lib.macMuted : lib.gameMuted
+                            let v = lib.volume, muted = lib.gameMuted
                             Text(it.0.hasPrefix("Volume") ? "\(it.0) · \(muted ? "muet" : "\(Int((v * 100).rounded())) %")" : it.0)
                                 .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit()).padding(.horizontal, 18).padding(.vertical, 8)
                                 .background(Capsule().fill(.white)).foregroundStyle(.black).opacity(lib.quickSlider ? 0.5 : 1).id(lib.quickIndex).transition(.opacity)
@@ -3279,11 +3280,11 @@ struct HUDView: View {
                             }
                             ForEach(Array(lib.quickItems.enumerated()), id: \.offset) { i, it in
                                 let on = i == lib.quickIndex
-                                let estVolume = it.0.hasPrefix("Volume"), niveau = i == 4 ? lib.macVolume : lib.volume, muet = i == 4 ? lib.macMuted : lib.gameMuted
-                                Image(systemName: estVolume ? (i == 4 ? "laptopcomputer" : "gamecontroller.fill") : it.1).font(.system(size: on ? 29 : 23, weight: .medium)).frame(width: on ? 82 : 62, height: on ? 82 : 62)
+                                let estVolume = it.0.hasPrefix("Volume"), niveau = lib.volume, muet = lib.gameMuted
+                                Image(systemName: estVolume ? "gamecontroller.fill" : it.1).font(.system(size: on ? 29 : 23, weight: .medium)).frame(width: on ? 82 : 62, height: on ? 82 : 62)
                                     .background(Circle().fill(on ? AnyShapeStyle(.white) : AnyShapeStyle(.white.opacity(0.12))))
                                     .overlay(Circle().stroke(.white.opacity(on ? 0 : 0.16), lineWidth: 1))
-                                    .overlay { if estVolume { Circle().trim(from: 0, to: muet ? 0 : CGFloat(max(0.02, niveau))).stroke(i == 4 ? Library.bleu[0] : Library.orange[0], style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90)).padding(-5).animation(.linear(duration: 0.08), value: niveau) } }
+                                    .overlay { if estVolume { Circle().trim(from: 0, to: muet ? 0 : CGFloat(max(0.02, niveau))).stroke(Library.orange[0], style: StrokeStyle(lineWidth: 4, lineCap: .round)).rotationEffect(.degrees(-90)).padding(-5).animation(.linear(duration: 0.08), value: niveau) } }
                                     .overlay(alignment: .bottomTrailing) { if estVolume { Image(systemName: muet || niveau == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(.white).frame(width: 24, height: 24).background(Circle().fill(i == 4 ? Library.bleu[1] : Library.orange[1])).offset(x: 4, y: 4) } }
                                     .foregroundStyle(on ? .black : .white).opacity(lib.quickSlider && !on ? 0.45 : 1)
                                     .animation(glisse, value: lib.quickIndex)
@@ -3744,7 +3745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let x = s.dx != 0 ? s.dx : (abs(s.lx) >= abs(s.ly) && abs(s.lx) > seuilQX ? (s.lx < 0 ? -1 : 1) : 0)
                 let stickQ = s.dx == 0 && x != 0
                 if x != 0 { qHeldX += 1 } else { qHeldX = 0 }
-                let general = lib.quickIndex == 4   // carte « Volume général » : le stick droit, le curseur et △ agissent sur le général, sinon sur les jeux
+                let general = false   // un seul volume : celui de Home et de ses jeux
                 func adjust(_ d: Float, quiet: Bool) { if general { lib.macStep(d, quiet: quiet) } else { lib.volumeStep(d, quiet: quiet) } }
                 if s.tri, prev["tri"] != true { if general { lib.toggleMacMute() } else { lib.toggleGameMute() }; lib.lastInput = Date() }
                 if lib.quickJoueurs {
