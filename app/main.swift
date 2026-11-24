@@ -391,6 +391,8 @@ final class Library: ObservableObject {
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
     @Published var ouverturePart = false   // l'ouverture est en train de s'effacer
+    @Published var bienvenue = false       // l'accueil du premier lancement est affiché
+    @Published var bienvenueIndex = 0      // la carte visée : tout, Nintendo, PC
     /// Finir (ou passer) l'ouverture : elle s'efface d'elle-même, puis on la retire une fois invisible
     func passerOuverture() {
         guard ouverture, !ouverturePart else { return }
@@ -570,6 +572,7 @@ final class Library: ObservableObject {
         if categoryIndex >= categories.count { categoryIndex = 0 }
         if selected > visible.count { selected = max(0, visible.count - 1) }
         for g in list { resolveArt(g) }
+        log("Bibliothèque : " + list.map { g in "\(g.name) [\(art[g.id]?.cover != nil ? "jaquette" : "-") \(art[g.id]?.background != nil ? "fond" : "-") \(art[g.id]?.logo != nil ? "logo" : "-")]" }.joined(separator: ", "))
     }
     func saveConfig() { if let d = try? JSONEncoder().encode(config) { try? d.write(to: salonRoot.appendingPathComponent("jeux.json")) } }
     func saveStats() { if let d = try? JSONEncoder().encode(stats) { try? d.write(to: salonRoot.appendingPathComponent("statistiques.json")) } }
@@ -592,7 +595,7 @@ final class Library: ObservableObject {
         // Un fond automatique trop petit (bannière eShop 1280 px, ancien cache) est flou en 1080p : on le laisse se remplacer par un fond SteamGridDB
         if let b = a.background, b.representations.first.map({ $0.pixelsWide }) ?? 0 < 1500, firstFile(media, ["fond.jpg", "fond.png", "background.jpg", "background.png"]) == nil, SteamGridDB.key() != nil { a.background = nil }
         a.logo = find(["logo.png", "logo.jpg"]).map(trimTransparent)
-        art[g.id] = a
+        art[g.id] = a; donnerIcone(g)
         guard online, a.cover == nil || a.background == nil || a.logo == nil, !loading.contains(g.id) else { return }
         loading.insert(g.id)
         let nomPerso = config.nomsArt?[g.id]   // Apparence → Nom de recherche
@@ -621,11 +624,41 @@ final class Library: ObservableObject {
             await MainActor.run {
                 var cur = self.art[g.id] ?? Art()
                 if cur.cover == nil { cur.cover = got.cover }; if cur.background == nil { cur.background = got.background }; if cur.logo == nil { cur.logo = got.logo }
-                self.art[g.id] = cur; self.loading.remove(g.id)
+                self.art[g.id] = cur; self.loading.remove(g.id); self.donnerIcone(g)
             }
         }
     }
-    func cover(_ g: Game) -> NSImage { art[g.id]?.cover ?? g.icon }
+    func cover(_ g: Game) -> NSImage { art[g.id]?.cover ?? vignette(g) }
+    /// La tuile d'un jeu qui n'a pas (encore) de jaquette : ses initiales sur un dégradé de Home, jamais l'icône de l'app Mac ni un dossier
+    private var vignettes: [String: NSImage] = [:]
+    func vignette(_ g: Game) -> NSImage {
+        if let v = vignettes[g.id] { return v }
+        let teintes = [Library.violet, Library.bleu, Library.orange, [Color(red: 0.20, green: 0.78, blue: 0.52), Color(red: 0.05, green: 0.45, blue: 0.42)], [Color(red: 0.98, green: 0.36, blue: 0.55), Color(red: 0.62, green: 0.14, blue: 0.48)]]
+        let c = teintes[abs(g.name.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 9973 }) % teintes.count].map { NSColor($0) }
+        let mots = g.name.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { !["the", "of", "la", "le", "les", "de", "du", "and", "et"].contains($0.lowercased()) }
+        let sigle = String(mots.prefix(3).compactMap { $0.first }).uppercased()
+        let img = NSImage(size: NSSize(width: 512, height: 512), flipped: false) { r in
+            NSGradient(starting: c[0], ending: c[1])?.draw(in: r, angle: -55)
+            let t = NSAttributedString(string: sigle.isEmpty ? "?" : sigle, attributes: [.font: NSFont.systemFont(ofSize: sigle.count > 2 ? 150 : 190, weight: .black, width: .expanded), .foregroundColor: NSColor.white.withAlphaComponent(0.92), .kern: 4])
+            let s = t.size(); t.draw(at: NSPoint(x: (r.width - s.width) / 2, y: (r.height - s.height) / 2)); return true
+        }
+        vignettes[g.id] = img; return img
+    }
+    /// Une app construite par Home (nxnative, MacNativeGames) sans icône reçoit sa jaquette comme icône, arrondie comme une app Mac :
+    /// dans le Finder et le Dock elle n'est plus une app anonyme. Fait une fois, dès que la jaquette est là.
+    func donnerIcone(_ g: Game) {
+        guard !g.pc, g.url.pathExtension == "app", g.titleID != nil || (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames."),
+              let cover = art[g.id]?.cover, let b = Bundle(url: g.url) else { return }
+        let fm = FileManager.default
+        if b.object(forInfoDictionaryKey: "CFBundleIconFile") != nil || b.object(forInfoDictionaryKey: "CFBundleIconName") != nil || fm.fileExists(atPath: g.url.appendingPathComponent("Icon\r").path) { return }
+        let icone = NSImage(size: NSSize(width: 1024, height: 1024), flipped: false) { _ in
+            let cadre = NSRect(x: 100, y: 100, width: 824, height: 824)
+            NSBezierPath(roundedRect: cadre, xRadius: 185, yRadius: 185).addClip()
+            let s = cover.size, k = max(cadre.width / max(s.width, 1), cadre.height / max(s.height, 1))
+            cover.draw(in: NSRect(x: cadre.midX - s.width * k / 2, y: cadre.midY - s.height * k / 2, width: s.width * k, height: s.height * k)); return true
+        }
+        if NSWorkspace.shared.setIcon(icone, forFile: g.url.path) { log("Icône : \(g.name) reçoit sa jaquette comme icône") }
+    }
 
     // Navigation
     func move(_ delta: Int) { guard running == nil, !showOptions, picker == nil else { return }; let n = min(max(selected + delta, 0), visible.count); if n != selected { selected = n; Sounds.shared.play("deplacer") } }
@@ -667,7 +700,7 @@ final class Library: ObservableObject {
         }
         items.append(SalonMenuItem(label: "Catégorie", detail: g.category, icon: "tag.fill", action: { self.openCategoryMenu(g) }))
         items.append(SalonMenuItem(label: "Plus", icon: "ellipsis.circle.fill", action: { self.openMoreOptions(g) }))
-        return SalonMenu(title: g.name, subtitle: "\(g.category) · \(played)", items: items, art: a?.cover ?? g.icon)
+        return SalonMenu(title: g.name, subtitle: "\(g.category) · \(played)", items: items, art: cover(g))
     }
     // MARK: Réglages d'un jeu (ce que faisaient les anciens scripts de réglages)
     func reglagesResume(_ g: Game) -> String {
@@ -2057,7 +2090,7 @@ struct RangeeJeux: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .bottom, spacing: 22) {
                     ForEach(Array(jeux.enumerated()), id: \.element.id) { i, game in
-                        Tile(image: lib.cover(game), selected: active && i == lib.selected, isIcon: lib.art[game.id]?.cover == nil)
+                        Tile(image: lib.cover(game), selected: active && i == lib.selected)
                             .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: active && i == lib.selected) } }
                             .overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }
                             .id(game.id).onTapGesture { guard active else { return }; if lib.selected == i { lib.launch() } else { lib.selected = i } }
@@ -2163,6 +2196,73 @@ struct OuvertureCA: NSViewRepresentable {
     func makeNSView(context: Context) -> OuvertureCouches { OuvertureCouches(frame: .zero) }
     func updateNSView(_ v: OuvertureCouches, context: Context) { if part { v.partir() } }
 }
+/// L'accueil du premier lancement. Il ne ressemble pas aux menus : l'ambiance de l'écran de démarrage, trois grandes cartes, un seul
+/// grand bouton. On comprend qu'il faut choisir ; « Ignorer » est petit, dans un coin.
+struct BienvenueView: View {
+    @ObservedObject var lib: Library
+    var apercu = false
+    @State private var paru = false
+    private let cartes: [(titre: String, ligne: String, symbole: String, teinte: [Color])] = [
+        ("Tout", "Jeux Nintendo et jeux PC", "sparkles", Library.violet),
+        ("Nintendo", "Switch et Switch 2", "logo:switch", Library.orange),
+        ("PC", "Epic Games, Steam, Windows", "logo:windows", Library.bleu)]
+    var body: some View {
+        let la = paru || apercu
+        ZStack {
+            Color(red: 0.02, green: 0.02, blue: 0.05)
+            GeometryReader { g in   // les lueurs de l'écran de démarrage, celle de la carte visée plus forte
+                let w = g.size.width, h = g.size.height
+                ZStack {
+                    ForEach(0..<3, id: \.self) { i in
+                        let c = cartes[i].teinte[i == 0 ? 0 : 1]
+                        Circle().fill(RadialGradient(colors: [c.opacity(i == lib.bienvenueIndex ? 0.55 : 0.22), c.opacity(0)], center: .center, startRadius: 0, endRadius: w * 0.34))
+                            .frame(width: w * 0.68, height: w * 0.68).position(x: w * (0.5 + CGFloat(i - 1) * 0.27), y: h * (i == 0 ? 0.40 : 0.62))
+                    }
+                }.animation(.easeInOut(duration: 0.5), value: lib.bienvenueIndex)
+            }
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Text("BIENVENUE").font(.system(size: 84, weight: .black).width(.expanded)).tracking(la ? 6 : 30)
+                    .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.78)], startPoint: .top, endPoint: .bottom)).opacity(la ? 1 : 0)
+                Text("À quoi vas-tu jouer ? Home installe ce qu'il faut.").font(.system(size: 24, weight: .medium)).opacity(la ? 0.72 : 0).padding(.top, 14)
+                HStack(spacing: 34) {
+                    ForEach(0..<3, id: \.self) { i in
+                        let c = cartes[i], sel = i == lib.bienvenueIndex
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            Symbole(nom: c.symbole, taille: c.symbole.hasPrefix("logo:") ? 96 : 104, clair: true).foregroundStyle(.white).frame(height: 170).shadow(color: .black.opacity(0.25), radius: 14, y: 8)
+                            Spacer(minLength: 0)
+                            Text(c.titre.uppercased()).font(.system(size: 30, weight: .black).width(.expanded)).tracking(1)
+                            Text(c.ligne).font(.system(size: 17, weight: .medium)).opacity(0.85).padding(.top, 8)
+                            Text("Recommandé").font(.system(size: 13, weight: .bold)).padding(.horizontal, 12).padding(.vertical, 5).background(Capsule().fill(.black.opacity(0.28))).padding(.top, 14).opacity(i == 0 ? 1 : 0)
+                        }
+                        .padding(.vertical, 30).frame(width: 330, height: 420).foregroundStyle(.white)
+                        .background(RoundedRectangle(cornerRadius: 44, style: .continuous).fill(LinearGradient(colors: c.teinte, startPoint: .topLeading, endPoint: .bottomTrailing)))
+                        .overlay(RoundedRectangle(cornerRadius: 44, style: .continuous).strokeBorder(.white.opacity(sel ? 0.95 : 0.14), lineWidth: sel ? 4 : 1.5))
+                        .shadow(color: c.teinte[1].opacity(sel ? 0.7 : 0), radius: 46, y: 18)
+                        .saturation(sel ? 1 : 0.55).brightness(sel ? 0 : -0.22).scaleEffect(sel ? 1.07 : 0.94)
+                        .animation(coule, value: lib.bienvenueIndex)
+                        .offset(y: la ? 0 : 60).opacity(la ? 1 : 0).animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.6).delay(0.25 + Double(i) * 0.09), value: paru)
+                        .contentShape(Rectangle()).onTapGesture { if sel { lib.bienvenueValider() } else { lib.bienvenueIndex = i; Sounds.shared.play("deplacer") } }
+                    }
+                }.padding(.top, 54)
+                HStack(spacing: 12) {
+                    if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 26)) }
+                    Text("Commencer").font(.system(size: 24, weight: .bold))
+                }
+                .foregroundStyle(.black).padding(.horizontal, 54).frame(height: 68).background(Capsule().fill(.white)).shadow(color: .white.opacity(0.25), radius: 24)
+                .padding(.top, 56).opacity(la ? 1 : 0).animation(.easeOut(duration: 0.5).delay(0.7), value: paru)
+                .onTapGesture { lib.bienvenueValider() }
+                Spacer(minLength: 0)
+            }.foregroundStyle(.white).animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.8), value: paru)
+            // « Ignorer » : là pour qui le cherche, pas pour qui hésite
+            HStack(spacing: 6) { if let sym = lib.hints.options.symbol { Image(systemName: sym).font(.system(size: 12)) }; Text("Ignorer").font(.system(size: 13, weight: .medium)) }
+                .foregroundStyle(.white).opacity(0.26).padding(.trailing, 44).padding(.bottom, 30).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .contentShape(Rectangle()).onTapGesture { lib.bienvenueIgnorer() }
+        }
+        .ignoresSafeArea().onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { paru = true } }
+    }
+}
 /// L'écran de démarrage : les couches ci-dessus, un appui pour le passer, et la sortie au bout de 2,15 s
 struct OuvertureView: View {
     @ObservedObject var lib: Library
@@ -2237,6 +2337,7 @@ struct OuvertureApercu: View {
 /// Le symbole d'un choix : un symbole système, ou le logo d'un service (« logo:epic », « logo:steam » : les images de app/logos)
 struct Symbole: View {
     let nom: String; let taille: CGFloat
+    var clair = false   // le logo de Windows en blanc, pour une carte de couleur
     static var logos: [String: NSImage] = [:]
     /// Le disque derrière un logo : le rouge de la Switch, sombre pour les autres
     static func fond(_ nom: String) -> Color { nom == "logo:switch" ? Color(red: 0.90, green: 0.0, blue: 0.07) : nom == "logo:steam" ? Color(red: 0.03, green: 0.08, blue: 0.20) : Color(white: 0.12) }
@@ -2247,7 +2348,7 @@ struct Symbole: View {
     }
     var body: some View {
         if nom == "logo:windows" {
-            let c = taille * 0.56, e = taille * 0.07, bleu = Color(red: 0.0, green: 0.55, blue: 0.95)
+            let c = taille * 0.56, e = taille * 0.07, bleu = clair ? Color.white : Color(red: 0.0, green: 0.55, blue: 0.95)
             VStack(spacing: e) { HStack(spacing: e) { bleu.frame(width: c, height: c); bleu.frame(width: c, height: c) }; HStack(spacing: e) { bleu.frame(width: c, height: c); bleu.frame(width: c, height: c) } }
         }
         else if nom.hasPrefix("logo:"), let i = Symbole.logo(String(nom.dropFirst(5))) { Image(nsImage: i).resizable().interpolation(.high).scaledToFit().frame(width: taille * 1.5, height: taille * 1.5) }
@@ -2889,7 +2990,7 @@ struct Screen: View {
         let g = lib.current; let a = g.flatMap { lib.art[$0.id] }
         ZStack {
             // pendant un jeu, l'écran « en cours » couvre tout : le fond (image qui zoome, vidéo en boucle) n'est pas gardé derrière, il coûterait pour rien
-            Group { if lib.running != nil { Color.black } else if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(lib.running != nil ? "en-jeu" : g?.id ?? "salon-plus")
+            Group { if lib.running != nil { Color.black } else if g == nil { AddBackground() } else { Background(image: a?.background ?? g.map { lib.cover($0) }, video: g?.video, blurred: a?.background == nil) } }.id(lib.running != nil ? "en-jeu" : g?.id ?? "salon-plus")
                 .transition(.opacity).animation(.easeInOut(duration: 0.35), value: g?.id)
             let veiled = lib.menu != nil || lib.picker != nil
             VStack(alignment: .leading, spacing: 0) {
@@ -2989,6 +3090,7 @@ struct Screen: View {
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { PickerView(lib: lib) }
+            if lib.bienvenue { BienvenueView(lib: lib).transition(.opacity).zIndex(18) }
             if lib.ouverture { OuvertureView(lib: lib).zIndex(20) }
             if let t = lib.tache {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, 30)   // sur la ligne des aides, à la marge de l'écran
@@ -3118,7 +3220,7 @@ struct HUDView: View {
                         }
                         HStack(spacing: 16) {
                             if let g {
-                                Image(nsImage: a?.cover ?? g.icon).resizable().scaledToFill().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                Image(nsImage: lib.cover(g)).resizable().scaledToFill().frame(width: 56, height: 56).clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                                 Text(String(format: "%d:%02d", elapsed / 3600, elapsed % 3600 / 60)).font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit()).opacity(0.8)
                                 Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 44).padding(.horizontal, 4)
                             }
@@ -3354,6 +3456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var t2 = Tache(titre: "Construction du jeu", log: URL(fileURLWithPath: "/tmp/x.log")); t2.fini = true; t2.erreur = "Le jeu de base est introuvable"
             var t3 = Tache(titre: "Mise à jour de Home", log: URL(fileURLWithPath: "/tmp/x.log")); t3.fini = true; t3.etape = "Terminé"
             rendre(ZStack { Color(white: 0.08); VStack(alignment: .trailing, spacing: 40) { TacheView(lib: lib, t: t1); TacheView(lib: lib, t: t2); TacheView(lib: lib, t: t3) } }, "tache.png")
+            rendre(BienvenueView(lib: lib, apercu: true), "bienvenue.png")
             // l'écran de démarrage réel (couches Core Animation), dans son état d'arrivée
             let oc = OuvertureCouches(frame: NSRect(x: 0, y: 0, width: 1920, height: 1080)); oc.layout()
             if let l = oc.layer, let ctx = CGContext(data: nil, width: 1920, height: 1080, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
@@ -3370,7 +3473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // l'ouverture : le logo et le jingle, sauf si le réglage la coupe ; l'écran du premier lancement attend qu'elle soit passée
         let ouvre = lib.config.ouverture ?? true
         if ouvre { lib.ouverture = true; Sounds.shared.play("lancer") }
-        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + (ouvre ? 3.2 : 1.2)) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
+        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + (ouvre ? 3.2 : 1.2)) { if self.lib.menu == nil, self.lib.running == nil { withAnimation(.easeInOut(duration: 0.5)) { self.lib.bienvenue = true } } } }   // premier lancement : choisir le mode d'utilisation
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -3487,6 +3590,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // lançait le premier jeu de la liste sans qu'on le veuille
         if Date().timeIntervalSince(demarrage) < 1.5 { return }   // les appuis parasites du démarrage ne lancent rien, et ne coupent pas l'écran de démarrage
         if lib.ouverture { lib.passerOuverture(); return }   // n'importe quelle touche ou bouton passe l'ouverture
+        if lib.bienvenue {   // l'accueil : gauche / droite pour choisir, valider pour commencer ; « Ignorer » est sur Options seulement
+            switch k { case "left": lib.bienvenueBouger(-1); case "right": lib.bienvenueBouger(1); case "ok": lib.bienvenueValider(); case "options": lib.bienvenueIgnorer(); default: break }
+            return
+        }
         if let p = lib.picker {
             _ = p
             if lib.pickerSaisie { if k == "up" || k == "back" { lib.pickerSaisie = false; Sounds.shared.play("deplacer") }; return }
@@ -4372,6 +4479,15 @@ extension Library {
     /// L'assistant du premier lancement, qu'on retrouve dans Menu → Mode d'utilisation : un écran à lui (AccueilView), en trois temps —
     /// 1. à quoi sert Home ici, 2. les moteurs Nintendo (tout, recommandé ; ou un seul, avancé), 3. par où commencer côté PC.
     /// À la fin, Home télécharge ce qui manque pour ce mode.
+    // L'accueil du premier lancement : un écran à part (BienvenueView), pas un menu. Trois cartes, un grand bouton ; « Ignorer » existe
+    // mais se fait discret, parce que sans ce choix Home ne sait pas quoi installer.
+    static let modesAccueil = ["tout", "nintendo", "pc"]
+    func bienvenueBouger(_ d: Int) { let n = max(0, min(2, bienvenueIndex + d)); if n != bienvenueIndex { bienvenueIndex = n; Sounds.shared.play("deplacer") } }
+    func bienvenueValider() {
+        Sounds.shared.play("valider"); withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false }
+        appliquerMode(mode: Library.modesAccueil[bienvenueIndex], moteurs: "tout", ensuite: nil)
+    }
+    func bienvenueIgnorer() { config.mode = "tout"; config.moteurs = "tout"; saveConfig(); Sounds.shared.play("retour"); withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false } }
     func openModeUtilisation(premier: Bool = false) {
         if menu == nil { Sounds.shared.play("ouvrir") }
         let mode = config.mode ?? "tout"
