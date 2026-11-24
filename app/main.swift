@@ -439,7 +439,7 @@ final class Library: ObservableObject {
     @Published var pickerLoading = false
     @Published var pickerNote: String? = nil
     @Published var pickCharges: Set<String> = []   // les images du sélecteur déjà chargées : seules celles-là se montrent (et se parcourent)
-    @Published var pickerSaisie = 0                // augmenté pour donner le clavier à la barre de recherche du sélecteur
+    @Published var pickerSaisie = false            // la barre de recherche du sélecteur a le clavier (sinon c'est la rangée d'images)
     /// Une image du sélecteur vient de finir de charger : elle apparaît ; si rien de visible n'était visé, c'est elle
     func pickCharge(_ id: String) {
         guard !pickCharges.contains(id) else { return }
@@ -460,7 +460,7 @@ final class Library: ObservableObject {
         if config.nomsArt == nil { config.nomsArt = [:] }
         config.nomsArt?[p.game.id] = (n.isEmpty || n == p.game.name) ? nil : n; saveConfig()
         log("Nom de recherche \(p.game.name) : \(config.nomsArt?[p.game.id] ?? "(nom du jeu)")")
-        Sounds.shared.play("valider"); openPicker(p.game, p.slot)
+        pickerSaisie = false; Sounds.shared.play("valider"); openPicker(p.game, p.slot)
     }
     let online = ProcessInfo.processInfo.environment["SALON_HORS_LIGNE"] == nil
 
@@ -981,7 +981,7 @@ final class Library: ObservableObject {
     }
     // Galerie SteamGridDB + une dernière case « Depuis un fichier… »
     func openPicker(_ g: Game, _ slot: Slot) {
-        menu = nil; pickCharges = []
+        menu = nil; pickCharges = []; pickerSaisie = false
         let fileItem = Candidate(id: "file", thumb: nil, full: nil, author: "")
         guard let key = SteamGridDB.key() else { log("Jaquette \(g.name) : pas de clé SteamGridDB"); picker = (slot, [fileItem], 0, g); pickIndex = 0; toast = "Pas de clé SteamGridDB (X → Clé SteamGridDB) : choisis un fichier"; return }
         let nomPerso = config.nomsArt?[g.id]   // le nom de recherche tapé dans Apparence, s'il y en a un
@@ -995,6 +995,11 @@ final class Library: ObservableObject {
             else { found = found.filter { matchesGame($0.1, nom) } }
             found = found.filter { memesNumeros($0.1, nom) }   // pas d'un autre épisode (FC 24 pour FC 27)
             var items: [Candidate] = []; var seen = Set<String>()
+            // ce qui est déjà trouvé est montré tout de suite : chaque source complète la rangée quand elle répond
+            func publier(_ liste: [Candidate]) async {
+                let vus = liste.filter { $0.fits(slot) }
+                await MainActor.run { guard self.picker?.game.id == g.id, self.picker?.slot == slot else { return }; self.picker = (slot, vus + [fileItem], 0, g) }
+            }
             if let t = g.storeID {   // sources officielles d'abord
                 func add(_ c: Candidate) { if !seen.contains(c.id) { seen.insert(c.id); items.append(c) } }
                 let info = await EShop.info(titleID: t)
@@ -1007,19 +1012,22 @@ final class Library: ObservableObject {
                 case .logo: break
                 }
             }
+            await publier(items)
             for c in await PSStore.candidates(slot, name: nom) where !seen.contains(c.id) { seen.insert(c.id); items.append(c) }   // PlayStation Store : visuels officiels
+            await publier(items)
             for (gid, gname) in found {
                 var list = await SteamGridDB.candidates(slot, gameID: gid, key: key)
                 if !found.isEmpty, gname.lowercased() != g.name.lowercased() { list = list.map { var c = $0; c.game = gname; return c } }
                 for c in list where !seen.contains(c.id) { seen.insert(c.id); items.append(c) }
+                await publier(items)
                 if items.count >= 24 { break }
             }
             items = items.filter { $0.fits(slot) }
             for c in await Wiki.candidates(slot, name: nomPerso ?? g.name) where !seen.contains(c.id) { seen.insert(c.id); items.append(c) }   // wikis : souvent la jaquette ou le logo exacts
             log("\(slot.rawValue) \(g.name) : \(found.count) jeux proches \(found.map { $0.1 }), \(items.count) propositions (SteamGridDB + wikis)")
-            let note = found.isEmpty ? "Rien de proche sur SteamGridDB pour « \(nom) » — Apparence → Nom de recherche pour essayer un autre nom, ou choisis un fichier"
+            let note = found.isEmpty ? "Rien trouvé pour « \(nom) » : essaie un autre nom"
                 : (found.first?.1.lowercased() == nom.lowercased() || found.first?.1.lowercased() == g.name.lowercased() ? nil : "Pas de correspondance exacte : propositions pour \(found.map { "« \($0.1) »" }.joined(separator: ", "))")
-            await MainActor.run { guard self.picker?.game.id == g.id else { return }; self.picker = (slot, items + [fileItem], 0, g); self.pickIndex = 0; self.pickerLoading = false; self.pickerNote = note }
+            await MainActor.run { guard self.picker?.game.id == g.id else { return }; self.picker = (slot, items + [fileItem], 0, g); if !(self.picker?.items.indices.contains(self.pickIndex) ?? false) { self.pickIndex = 0 }; self.pickerLoading = false; self.pickerNote = note }
         }
     }
     func pickCandidate() {
@@ -2678,24 +2686,27 @@ struct PickerView: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .bottom, spacing: 22) {
                                 ForEach(Array(p.items.enumerated()), id: \.element.id) { i, c in
-                                    let sel = i == lib.pickIndex, la = lib.pickVisible(c)
+                                    let sel = i == lib.pickIndex && !lib.pickerSaisie, la = lib.pickVisible(c)
                                     Group {
                                         // une image ne prend sa place qu'une fois entièrement chargée : pas de case vide en attendant
                                         if let t = c.thumb { AsyncImage(url: t) { ph in if let img = ph.image { img.resizable().scaledToFit().onAppear { lib.pickCharge(c.id) } } else { Color.clear } } }
                                         else { Image(systemName: "folder.fill").font(.system(size: 54, weight: .light)).frame(width: h * 0.9, height: h).background(.white.opacity(0.10)) }
                                     }
-                                    .frame(height: h).frame(minWidth: la ? 150 : 0).frame(width: la ? nil : 0).clipped()
+                                    .frame(height: h).frame(minWidth: la ? 150 : 0).frame(width: la ? nil : 0)
+                                    .background(LinearGradient(colors: [Color(white: 0.30), Color(white: 0.16)], startPoint: .top, endPoint: .bottom))   // un fond gris derrière les images transparentes (logos) : on voit ce qui s'affiche
+                                    .clipped()
                                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                                     .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(sel && la ? 1 : 0), lineWidth: 4))
                                     .shadow(color: .black.opacity(sel ? 0.6 : 0.3), radius: sel ? 22 : 10, y: sel ? 14 : 6)
                                     .scaleEffect(sel ? 1.06 : 1, anchor: .bottom).brightness(sel ? 0 : -0.15).animation(.easeOut(duration: 0.14), value: lib.pickIndex)
+                                    .animation(.easeOut(duration: 0.22), value: lib.pickerSaisie)
                                     .opacity(la ? 1 : 0).padding(.trailing, la ? 0 : -22)
                                     .id(c.id).onTapGesture { lib.pickIndex = i; lib.pickCandidate() }
                                 }
                             }.padding(.horizontal, 96).padding(.top, 30).padding(.bottom, 8)
                         }.scrollClipDisabled()
                          .onChange(of: lib.pickIndex) { _, _ in if p.items.indices.contains(lib.pickIndex) { withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(p.items[lib.pickIndex].id, anchor: .center) } } }
-                    }.padding(.horizontal, -96)
+                    }.padding(.horizontal, -96).opacity(lib.pickerSaisie ? 0.55 : 1).animation(.easeOut(duration: 0.22), value: lib.pickerSaisie)
                     // l'image visée : d'où elle vient et sa taille, en une ligne
                     Text(p.items.indices.contains(lib.pickIndex) ? { let c = p.items[lib.pickIndex]; return c.thumb == nil ? "Depuis un fichier" : c.source + (c.width > 0 ? "  ·  \(c.width) × \(c.height)" : "") }() : " ")
                         .font(.system(size: 20, weight: .semibold)).padding(.top, 20).padding(.leading, 6)
@@ -2704,16 +2715,20 @@ struct PickerView: View {
                         Image(systemName: "magnifyingglass").font(.system(size: 19, weight: .semibold)).opacity(0.7)
                         TextField("", text: $recherche, prompt: Text(lib.config.nomsArt?[p.game.id] ?? p.game.name).foregroundColor(.white.opacity(0.45)))
                             .textFieldStyle(.plain).font(.system(size: 21, weight: .medium)).focused($saisie)
-                            .onSubmit { saisie = false; lib.chercherArt(recherche); recherche = "" }
+                            .onSubmit { lib.chercherArt(recherche); recherche = "" }
+                            .onExitCommand { lib.pickerSaisie = false }
+                            .onKeyPress(.upArrow) { lib.pickerSaisie = false; return .handled }
                     }
                     .padding(.horizontal, 22).frame(width: 620, height: 56)
-                    .background(Capsule().fill(.black.opacity(0.5))).overlay(Capsule().stroke(.white.opacity(saisie ? 0.9 : 0.2), lineWidth: saisie ? 2.5 : 1))
-                    .padding(.top, 20).contentShape(Capsule()).onTapGesture { saisie = true }
+                    .background(Capsule().fill(.black.opacity(lib.pickerSaisie ? 0.7 : 0.5))).overlay(Capsule().stroke(.white.opacity(lib.pickerSaisie ? 0.95 : 0.2), lineWidth: lib.pickerSaisie ? 3 : 1))
+                    .scaleEffect(lib.pickerSaisie ? 1.02 : 1, anchor: .leading).animation(.easeOut(duration: 0.22), value: lib.pickerSaisie)
+                    .padding(.top, 20).contentShape(Capsule()).onTapGesture { lib.pickerSaisie = true }
                     HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Utiliser"); Pilule(k: lib.hints.options, t: "Chercher"); Pilule(k: lib.hints.back, t: "Annuler") }.padding(.top, 18)
                 }.padding(.horizontal, 96).padding(.top, 70).padding(.bottom, 44)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white).ignoresSafeArea().transition(.opacity)
-            .onChange(of: lib.pickerSaisie) { _, _ in saisie = true }
+            .onChange(of: lib.pickerSaisie) { _, v in saisie = v }            // la manette ou un clic donne (ou reprend) le clavier
+            .onChange(of: saisie) { _, v in if lib.pickerSaisie != v { lib.pickerSaisie = v } }
         }
     }
 }
@@ -3303,7 +3318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lib.accueil != nil { lib.accueilNav(k); return }
         if let p = lib.picker {
             _ = p
-            switch k { case "left": lib.pickSuivant(-1); case "right": lib.pickSuivant(1); case "options", "down": lib.pickerSaisie += 1  case "ok": Sounds.shared.play("valider"); lib.pickCandidate(); case "back", "options": lib.closeMenu(); default: break }
+            if lib.pickerSaisie { if k == "up" || k == "back" { lib.pickerSaisie = false; Sounds.shared.play("deplacer") }; return }
+            switch k { case "left": lib.pickSuivant(-1); case "right": lib.pickSuivant(1); case "options", "down": lib.pickerSaisie = true; Sounds.shared.play("deplacer"); case "ok": Sounds.shared.play("valider"); lib.pickCandidate(); case "back", "options": lib.closeMenu(); default: break }
             return
         }
         if lib.menu != nil { if k == "back" || k == "options" { lib.closeMenu() } else { NotificationCenter.default.post(name: .salonNav, object: k) }; return }
