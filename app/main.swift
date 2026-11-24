@@ -1032,6 +1032,48 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Images", detail: "Jaquettes, fonds et logos", icon: "photo.fill", tint: .blue, action: { self.openAvanceImages() }),
         ], hero: "gearshape.fill", back: { self.openAdvancedSettings() })
     }
+    /// Avancé → Construction → Libérer de la place. Construire un jeu laisse un dossier de travail (les fichiers du jeu extraits : 5 à
+    /// 30 Go). Il sert à reconstruire le jeu sans son fichier de base ; mais celui d'une construction arrêtée, ou d'un jeu supprimé, ne
+    /// sert plus à rien et reste là. Home les montre tous, avec leur taille et à quoi ils servent, et envoie à la Corbeille celui qu'on choisit.
+    func openLibererPlace() {
+        let titre = "Libérer de la place"
+        menu = SalonMenu(title: titre, items: [SalonMenuItem(label: "Calcul…", icon: "hourglass", info: true, action: {})], back: { self.openAvanceSwitch() }, roue: true)
+        let jeux = games, enCours = tache.map { !$0.fini && $0.erreur == nil } ?? false
+        DispatchQueue.global(qos: .userInitiated).async {
+            let fm = FileManager.default, racine = Atelier.home.appendingPathComponent("constructions")
+            let connus = Set(Atelier.registre().values.compactMap { $0.travail }.map { URL(fileURLWithPath: $0).standardizedFileURL.path })
+            func mots(_ x: String) -> Set<String> { Set(x.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init).filter { $0.count > 2 && !["the", "legend"].contains($0) }) }
+            let taille = ByteCountFormatter(); taille.countStyle = .file
+            var lignes: [(URL, Int64, String?)] = []      // dossier, taille, le jeu installé qui s'en sert
+            for d in (try? fm.contentsOfDirectory(at: racine, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? [] where d.hasDirectoryPath {
+                let ko = Int64(Commande.run("/usr/bin/du", ["-sk", d.path], timeout: 120).split(separator: "\t").first.flatMap { Int64($0) } ?? 0) * 1024
+                let m = mots(d.lastPathComponent)
+                let jeu = jeux.first { g in !g.pc && (connus.contains(d.standardizedFileURL.path) && Atelier.registre()[g.url.path]?.travail.map { URL(fileURLWithPath: $0).standardizedFileURL.path } == d.standardizedFileURL.path || (m.count >= 2 && m.isSubset(of: mots(g.name)))) }
+                lignes.append((d, ko, jeu?.name))
+            }
+            lignes.sort { ($0.2 == nil ? 0 : 1, -$0.1) < ($1.2 == nil ? 0 : 1, -$1.1) }   // d'abord ceux qui ne servent plus, les plus gros en tête
+            DispatchQueue.main.async {
+                guard self.menu?.title == titre else { return }
+                var items: [SalonMenuItem] = lignes.map { d, octets, jeu in
+                    let t = taille.string(fromByteCount: octets)
+                    return SalonMenuItem(label: "\(d.lastPathComponent) : \(t)", detail: jeu.map { "Sert à reconstruire \($0) sans son fichier de base" } ?? "Aucun jeu installé ne s'en sert", icon: jeu == nil ? "trash.fill" : "shippingbox.fill", tint: jeu == nil ? .red : .gray, action: {
+                        if enCours { self.toast = "Une construction est en cours : attends qu'elle finisse"; return }
+                        self.menu = SalonMenu(title: "Mettre à la Corbeille ?", subtitle: d.lastPathComponent, items: [
+                            SalonMenuItem(label: "Oui, \(t) à la Corbeille", detail: jeu.map { "\($0) ne pourra plus être reconstruit sans son fichier de base" } ?? "Rien ne s'en sert", icon: "trash.fill", destructive: true, action: {
+                                do { try FileManager.default.trashItem(at: d, resultingItemURL: nil); self.toast = "\(t) à la Corbeille : vide-la pour récupérer la place" } catch { self.toast = "Impossible : \(error.localizedDescription)" }
+                                self.openLibererPlace() }),
+                            SalonMenuItem(label: "Non", icon: "arrow.uturn.left", tint: .gray, action: { self.openLibererPlace() }),
+                        ], back: { self.openLibererPlace() })
+                    })
+                }
+                if lignes.contains(where: { $0.2 != nil }) {
+                    items.append(SalonMenuItem(label: "Alléger ceux qui servent", detail: "Retire ce qui se refait tout seul, garde de quoi reconstruire", icon: "wand.and.stars", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }))
+                }
+                if items.isEmpty { items = [SalonMenuItem(label: "Rien à libérer", icon: "checkmark.circle.fill", tint: .green, action: { self.openAvanceSwitch() })] }
+                self.menu = SalonMenu(title: titre, items: items, back: { self.openAvanceSwitch() }, roue: true)
+            }
+        }
+    }
     func openAvanceImages() {
         menu = SalonMenu(title: "Images", items: [
             SalonMenuItem(label: "Clé SteamGridDB", detail: SteamGridDB.key() == nil ? "Absente : pas de jaquettes" : "Enregistrée", icon: "key.fill", tint: .blue, action: { self.menu = nil; self.askKey() }),
@@ -1054,7 +1096,7 @@ final class Library: ObservableObject {
                 self.config.discret = !(self.config.discret ?? false); self.saveConfig(); ici() }),
             SalonMenuItem(label: "Garder les caches : \((self.config.garderCaches ?? true) ? "oui" : "non")", detail: (self.config.garderCaches ?? true) ? "Reconstructions courtes" : "Moins de place, reconstructions longues", icon: "externaldrive.fill", tint: .orange, action: {
                 self.config.garderCaches = !(self.config.garderCaches ?? true); self.saveConfig(); ici() }),
-            SalonMenuItem(label: "Libérer de la place", detail: "Allège les dossiers de construction", icon: "externaldrive.badge.minus", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }),
+            SalonMenuItem(label: "Libérer de la place", detail: "Les dossiers de construction, et ceux qui ne servent plus", icon: "externaldrive.badge.minus", tint: .orange, action: { self.openLibererPlace() }),
         ], hero: "hammer.fill", back: { self.openAdvancedSettings() })
     }
     func openCategoryMenu(_ g: Game) {
@@ -4428,6 +4470,7 @@ extension Library {
             t.erreur = "Échec : " + String(court.replacingOccurrences(of: "[RED] ", with: "").prefix(70))
             tache = t; Sounds.shared.play("retour")
             log("Tâche échouée (\(code)) : \(t.titre) — \(t.log.path)")
+            if t.titre.hasPrefix("Construction") { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.toast = "La construction a laissé un dossier de travail : Menu → Avancé → Construction → Libérer de la place" } }
             if running == nil, menu == nil { openTacheMenu() }
         }
     }
