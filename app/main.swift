@@ -79,7 +79,7 @@ struct PadHints {
 }
 struct SalonMenuItem { let label: String; var detail: String? = nil; let icon: String; var section: String? = nil; var destructive = false; var tint: Color? = nil; var info = false; var image: URL? = nil; let action: () -> Void }
 /// Un menu : titre, illustration (jaquette du jeu ou grand symbole), texte d'explication, étape d'un assistant, et où revenir avec B
-struct SalonMenu { let title: String; var subtitle: String? = nil; let items: [SalonMenuItem]; var hero: String? = nil; var art: NSImage? = nil; var text: String? = nil; var step: Int? = nil; var steps: Int? = nil; var back: (() -> Void)? = nil; var heroURL: URL? = nil; var grid = false }
+struct SalonMenu { let title: String; var subtitle: String? = nil; let items: [SalonMenuItem]; var hero: String? = nil; var art: NSImage? = nil; var text: String? = nil; var step: Int? = nil; var steps: Int? = nil; var back: (() -> Void)? = nil; var roue = false; var heroURL: URL? = nil; var grid = false }
 /// La couleur de la pastille d'un choix, d'après son symbole
 func menuTint(_ icon: String, tint: Color? = nil, destructive: Bool = false) -> Color {
     if let tint { return tint }
@@ -2083,26 +2083,59 @@ struct Hint: View {
 struct OuvertureView: View {
     @ObservedObject var lib: Library
     var fige = false
-    @State private var la = false      // le logo est arrivé
-    @State private var part = false    // il s'en va
+    @State private var lueurs = false    // le fond s'allume
+    @State private var carte = false     // la carte centrale arrive
+    @State private var eventail = false  // les deux autres sortent de derrière elle
+    @State private var manette = false   // la manette se pose
+    @State private var nom = false       // HOME apparaît
+    @State private var onde = false      // les anneaux partent
+    @State private var part = false      // tout s'en va
+    private func carteDe(_ c: [Color]) -> some View { RoundedRectangle(cornerRadius: 34, style: .continuous).fill(LinearGradient(colors: c, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 190, height: 262) }
     var body: some View {
+        let l = lueurs || fige, ca = carte || fige, ev = eventail || fige, ma = manette || fige, no = nom || fige
         ZStack {
-            Color.black
-            RadialGradient(colors: [Color(red: 0.16, green: 0.14, blue: 0.30).opacity(la || fige ? 0.55 : 0), .clear], center: .center, startRadius: 0, endRadius: 620)
-            VStack(spacing: 22) {
-                Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 132, height: 132).shadow(color: .black.opacity(0.5), radius: 24, y: 12)
-                Text("Home").font(.system(size: 46, weight: .semibold)).tracking(0.5).foregroundStyle(.white)
+            Color(red: 0.02, green: 0.02, blue: 0.05)
+            // trois lueurs, aux couleurs des cartes
+            GeometryReader { g in
+                let w = g.size.width, h = g.size.height
+                ZStack {
+                    Circle().fill(Library.violet[0]).frame(width: w * 0.46).offset(x: l ? -w * 0.04 : 0, y: l ? -h * 0.12 : 0)
+                    Circle().fill(Library.bleu[1]).frame(width: w * 0.36).offset(x: l ? w * 0.22 : 0, y: l ? h * 0.10 : 0)
+                    Circle().fill(Library.orange[1]).frame(width: w * 0.32).offset(x: l ? -w * 0.24 : 0, y: l ? h * 0.14 : 0)
+                }.frame(width: w, height: h).blur(radius: 170).opacity(l ? 0.50 : 0)
             }
-            .scaleEffect(fige ? 1 : part ? 1.05 : la ? 1 : 0.93).opacity(fige ? 1 : part ? 0 : la ? 1 : 0).blur(radius: part ? 6 : 0)
+            // les anneaux qui partent du centre
+            ZStack {
+                Circle().stroke(.white.opacity(onde || fige ? (fige ? 0.10 : 0) : 0.5), lineWidth: 2).frame(width: 300, height: 300).scaleEffect(onde ? 3.4 : (fige ? 1.9 : 0.7))
+                Circle().stroke(.white.opacity(onde || fige ? (fige ? 0.06 : 0) : 0.35), lineWidth: 1.5).frame(width: 300, height: 300).scaleEffect(onde ? 2.4 : (fige ? 2.6 : 0.5))
+            }.offset(y: -60)
+            VStack(spacing: 54) {
+                ZStack {
+                    carteDe(Library.orange).rotationEffect(.degrees(ev ? -15 : 0)).offset(x: ev ? -92 : 0, y: ev ? 14 : 0).opacity(ca ? 1 : 0)
+                    carteDe(Library.bleu).rotationEffect(.degrees(ev ? 15 : 0)).offset(x: ev ? 92 : 0, y: ev ? 14 : 0).opacity(ca ? 1 : 0)
+                    carteDe(Library.violet).overlay(RoundedRectangle(cornerRadius: 34, style: .continuous).strokeBorder(.white.opacity(0.35), lineWidth: 2))
+                        .shadow(color: .black.opacity(0.5), radius: 30, y: 16)
+                        .overlay(Image(systemName: "gamecontroller.fill").font(.system(size: 84, weight: .medium)).foregroundStyle(.white).scaleEffect(ma ? 1 : 0.5).opacity(ma ? 1 : 0))
+                }
+                .scaleEffect(ca ? 1 : 0.72).opacity(ca ? 1 : 0)
+                Text("HOME").font(.system(size: 54, weight: .black).width(.expanded)).tracking(no ? 14 : 44).foregroundStyle(.white).opacity(no ? 1 : 0).padding(.leading, no ? 14 : 44)
+            }
+            .scaleEffect(part ? 1.10 : 1).opacity(part ? 0 : 1).blur(radius: part ? 10 : 0)
         }
         .ignoresSafeArea().contentShape(Rectangle())
         .onTapGesture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false } }
         .onAppear {
             guard !fige else { return }
-            withAnimation(.timingCurve(0.22, 0.8, 0.25, 1, duration: 0.75).delay(0.12)) { la = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.25) {
+            let douce = Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7)
+            withAnimation(.easeOut(duration: 1.2)) { lueurs = true }
+            withAnimation(douce.delay(0.10)) { carte = true }
+            withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.6).delay(0.50)) { eventail = true }
+            withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.45).delay(0.80)) { manette = true }
+            withAnimation(.easeOut(duration: 1.3).delay(0.80)) { onde = true }
+            withAnimation(Animation.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7).delay(1.00)) { nom = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.15) {
                 withAnimation(.easeInOut(duration: 0.55)) { part = true }
-                withAnimation(.easeInOut(duration: 0.65)) { lib.ouverture = false }   // le fond noir s'efface pendant que la grille apparaît
+                withAnimation(.easeInOut(duration: 0.7)) { lib.ouverture = false }   // le fond s'efface pendant que la bibliothèque apparaît
             }
         }
     }
@@ -2227,7 +2260,7 @@ struct MenuView: View {
     }
     private static let rouge = Color(red: 1, green: 0.45, blue: 0.42)
     /// Un menu court (les options d'un jeu) est une rangée de pastilles ; tous les autres sont une grille de tuiles
-    private var rangee: Bool { !menu.grid && menu.step == nil && menu.items.count <= 7 && !menu.items.isEmpty && menu.items.allSatisfy { !$0.info && $0.image == nil } }
+    private var rangee: Bool { !menu.grid && !menu.roue && menu.step == nil && menu.items.count <= 7 && !menu.items.isEmpty && menu.items.allSatisfy { !$0.info && $0.image == nil } }
     private func choisir(_ i: Int) { guard menu.items.indices.contains(i), !menu.items[i].info else { return }; index = i; Sounds.shared.play("valider"); press(); menu.items[i].action() }
     /// Le nom d'un choix sans son état : « Construction silencieuse : activée » → (« Construction silencieuse », « Activée »)
     private func nomEtat(_ it: SalonMenuItem) -> (String, String?) {
@@ -2933,9 +2966,10 @@ struct Screen: View {
                         Text(lib.flashGeneral ? "Volume général" : lib.volumeLabel).font(.system(size: 13, weight: .medium, design: .rounded)).opacity(0.6)
                     }.padding(.horizontal, 18).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.top, 90); Spacer() }
                 .opacity(barreVolume ? 1 : 0).offset(y: barreVolume ? 0 : -16).animation(.easeInOut(duration: 0.5), value: barreVolume).allowsHitTesting(false)
+                .zIndex(30)   // par-dessus tous les menus : sans rang, certains la recouvraient
             if let t = lib.toast {
                 VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.bottom, 130) }
-                    .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }
+                    .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }.zIndex(31)
             }
         }
         // chaque réglage la montre (ou la garde) ; 2 s après le dernier, elle repart vers le haut en fondu, comme elle est venue
@@ -3255,6 +3289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Serveur en ligne : Azure", icon: "globe", section: "En ligne", action: {}), SalonMenuItem(label: "Joueurs", detail: "3 connectés", icon: "person.2.fill", info: true, action: {}),
                 SalonMenuItem(label: "Volume du jeu : 65 %", icon: "speaker.wave.2.fill", section: "Son", action: {})])
             rendre(MenuView(lib: lib, menu: sous, apercu: 1), "menu-sous.png")
+            lib.openModeUtilisation(premier: true); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 0), "mode.png") }; lib.menu = nil
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
@@ -3265,7 +3300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // l'ouverture : le logo et le jingle, sauf si le réglage la coupe ; l'écran du premier lancement attend qu'elle soit passée
         let ouvre = lib.config.ouverture ?? true
         if ouvre { lib.ouverture = true; Sounds.shared.play("lancer") }
-        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + (ouvre ? 2.4 : 1.2)) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
+        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + (ouvre ? 3.2 : 1.2)) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -4214,10 +4249,38 @@ extension Library {
     /// 1. à quoi sert Home ici, 2. les moteurs Nintendo (tout, recommandé ; ou un seul, avancé), 3. par où commencer côté PC.
     /// À la fin, Home télécharge ce qui manque pour ce mode.
     func openModeUtilisation(premier: Bool = false) {
-        menu = nil; Sounds.shared.play("ouvrir")
-        var e = AccueilEtat(); e.premier = premier
-        if !premier { e.mode = config.mode ?? "tout"; e.moteurs = config.moteurs ?? "tout"; e.index = ["tout", "nintendo", "pc"].firstIndex(of: e.mode) ?? 0 }
-        withAnimation(.easeInOut(duration: 0.45)) { accueil = e }
+        if menu == nil { Sounds.shared.play("ouvrir") }
+        let mode = config.mode ?? "tout"
+        func choix(_ nom: String, _ precision: String, _ symbole: String, _ teinte: Color, _ cle: String) -> SalonMenuItem {
+            SalonMenuItem(label: nom + (!premier && cle == mode ? " : actuel" : ""), detail: precision, icon: symbole, tint: teinte, action: {
+                if cle == "pc" { self.etapePC(mode: cle, moteurs: "tout", premier: premier) } else { self.etapeMoteurs(mode: cle, premier: premier) } })
+        }
+        var items = [
+            choix("Tout", "Jeux Nintendo et jeux PC", "square.grid.2x2.fill", .purple, "tout"),
+            choix("Nintendo", "Switch et Switch 2, à partir de tes dumps", "gamecontroller.fill", .orange, "nintendo"),
+            choix("PC", "Epic Games, Steam, jeux Windows", "desktopcomputer", .blue, "pc"),
+        ]
+        if premier { items.append(SalonMenuItem(label: "Plus tard", icon: "moon.zzz.fill", tint: .gray, action: { self.config.mode = "tout"; self.saveConfig(); self.menu = nil })) }
+        menu = SalonMenu(title: premier ? "Bienvenue" : "Mode", items: items, step: 1, steps: 3, back: premier ? { self.config.mode = "tout"; self.saveConfig(); self.menu = nil } : { self.menu = self.plusMenu() }, roue: true)
+    }
+    private func etapeMoteurs(mode: String, premier: Bool) {
+        let suite: (String) -> Void = { m in if mode == "tout" { self.etapePC(mode: mode, moteurs: m, premier: premier) } else { self.appliquerMode(mode: mode, moteurs: m, ensuite: nil) } }
+        menu = SalonMenu(title: "Nintendo", items: [
+            SalonMenuItem(label: "Tout", detail: "Le bon moteur pour chaque jeu", icon: "sparkles", tint: .purple, action: { suite("tout") }),
+            SalonMenuItem(label: "MacNativeGames", detail: "Tears of the Kingdom, Breath of the Wild, Ocarina of Time", icon: "leaf.fill", section: "Avancé", tint: .orange, action: { suite("mng") }),
+            SalonMenuItem(label: "nxnative", detail: "Les autres jeux — demande Xcode", icon: "cpu.fill", tint: .blue, action: { suite("nxnative") }),
+        ], step: 2, steps: 3, back: { self.openModeUtilisation(premier: premier) }, roue: true)
+    }
+    private func etapePC(mode: String, moteurs: String, premier: Bool) {
+        let fin: ((() -> Void)?) -> Void = { e in self.appliquerMode(mode: mode, moteurs: moteurs, ensuite: e) }
+        menu = SalonMenu(title: "PC", items: [
+            SalonMenuItem(label: "Epic Games", icon: "person.crop.circle.fill.badge.plus", tint: .purple, action: { fin({ self.connexionEpic(retour: { self.openPC() }) }) }),
+            SalonMenuItem(label: "Steam", icon: "qrcode", tint: .blue, action: { fin({
+                self.apresTache = { self.connexionSteam(retour: { self.openPC() }) }
+                if PCHome.steamPret { let a = self.apresTache; self.apresTache = nil; a?() } else if !self.lancer("preparer-steam.command", titre: "Préparation de Steam") { self.apresTache = nil } }) }),
+            SalonMenuItem(label: "Un jeu installé", detail: "Un .exe ou un installateur", icon: "shippingbox.fill", tint: .orange, action: { fin({ self.openAddMenu() }) }),
+            SalonMenuItem(label: "Plus tard", icon: "moon.zzz.fill", tint: .gray, action: { fin(nil) }),
+        ], step: 3, steps: 3, back: { if mode == "pc" { self.openModeUtilisation(premier: premier) } else { self.etapeMoteurs(mode: mode, premier: premier) } }, roue: true)
     }
     static let orange = [Color(red: 1.0, green: 0.70, blue: 0.23), Color(red: 1.0, green: 0.42, blue: 0.24)]
     static let bleu = [Color(red: 0.19, green: 0.78, blue: 0.80), Color(red: 0.16, green: 0.38, blue: 1.0)]
@@ -4248,54 +4311,12 @@ extension Library {
         default: return ("Jeux PC", "Home installe le moteur Windows. Par où veux-tu commencer ?")
         }
     }
-    /// Manette et clavier sur l'écran d'accueil : gauche / droite, valider, retour
-    func accueilNav(_ k: String) {
-        guard var e = accueil else { return }
-        let n = accueilChoix(e).count
-        switch k {
-        case "left": if e.index > 0 { e.index -= 1; Sounds.shared.play("deplacer"); withAnimation(glisse) { accueil = e } }
-        case "right": if e.index < n - 1 { e.index += 1; Sounds.shared.play("deplacer"); withAnimation(glisse) { accueil = e } }
-        case "ok": accueilValider()
-        case "back":
-            Sounds.shared.play("retour")
-            if e.etape == 0 {
-                if e.premier { config.mode = "tout"; saveConfig() }   // « plus tard » : rien n'est installé, l'écran ne revient pas tout seul
-                withAnimation(.easeInOut(duration: 0.35)) { accueil = nil }
-                if !e.premier { menu = plusMenu() }
-            } else {
-                e.etape = e.etape == 2 && e.mode != "pc" ? 1 : 0
-                e.index = e.etape == 0 ? (["tout", "nintendo", "pc"].firstIndex(of: e.mode) ?? 0) : (["tout", "mng", "nxnative"].firstIndex(of: e.moteurs) ?? 0)
-                withAnimation(.easeInOut(duration: 0.35)) { accueil = e }
-            }
-        default: break
-        }
-    }
-    func accueilValider() {
-        guard var e = accueil else { return }
-        let c = accueilChoix(e); guard c.indices.contains(e.index) else { return }
-        let cle = c[e.index].cle; Sounds.shared.play("valider")
-        func fermer(_ ensuite: (() -> Void)?) { withAnimation(.easeInOut(duration: 0.4)) { accueil = nil }; appliquerMode(mode: e.mode, moteurs: e.moteurs, ensuite: ensuite) }
-        switch e.etape {
-        case 0:
-            e.mode = cle; e.etape = cle == "pc" ? 2 : 1; e.index = 0; if cle == "pc" { e.moteurs = "tout" }
-            withAnimation(.easeInOut(duration: 0.35)) { accueil = e }
-        case 1:
-            e.moteurs = cle
-            if e.mode == "tout" { e.etape = 2; e.index = 0; withAnimation(.easeInOut(duration: 0.35)) { accueil = e } } else { fermer(nil) }
-        default:
-            switch cle {
-            case "epic": fermer({ self.connexionEpic(retour: { self.openPC() }) })
-            case "steam": fermer({
-                self.apresTache = { self.connexionSteam(retour: { self.openPC() }) }
-                if PCHome.steamPret { let a = self.apresTache; self.apresTache = nil; a?() } else if !self.lancer("preparer-steam.command", titre: "Préparation de Steam") { self.apresTache = nil } })
-            case "local": fermer({ self.openAddMenu() })
-            default: fermer(nil)
-            }
-        }
-    }
+    func accueilNav(_ k: String) {}
+    func accueilValider() {}
     /// Enregistre le mode et télécharge ce qui lui manque ; « ensuite » se fait quand tout est installé
     private func appliquerMode(mode: String, moteurs: String, ensuite: (() -> Void)?) {
         config.mode = mode; config.moteurs = moteurs; saveConfig(); menu = nil
+        MenuView.dernier["Bienvenue"] = nil; MenuView.dernier["Mode"] = nil
         let nintendoPret = !modeNintendo || ((moteurs == "nxnative" || Atelier.mngPret) && (moteurs == "mng" || Atelier.nxnativePret))
         DispatchQueue.global().async {
             let e = self.modePC ? (PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]) : [:]
