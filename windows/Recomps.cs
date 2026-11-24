@@ -317,7 +317,8 @@ public static class MenusRecomps
         var m = new Menu { Titre = r.Nom, SousTitre = r.HorsCatalogue ? "GitHub · " + r.Depot : $"{r.Jeu} · {Catalogue.NomOrigine(r.Origine)}", Symbole = "gamecontroller", ImageURL = r.Couverture, Texte = texte, Retour = retour };
         var detail = $"Version {r.Version} · {r.Taille}";
         if (r.Analyse == "red") m.Elements.Add(new() { Libelle = "Installation refusée", Detail = "L'analyse antivirus du catalogue signale ce fichier comme dangereux", Icone = "exclamation", Info = true });
-        else if (installe != null && installe.Version == r.Version) m.Elements.Add(new() { Libelle = "Déjà installé", Detail = detail, Icone = "checkmark", Info = true });
+        // déjà installé : le premier choix est de jouer (avant, la seule chose à choisir ici était la page GitHub)
+        else if (installe != null && installe.Version == r.Version) m.Elements.Add(new("Jouer", "play.fill", () => { lib.FermerMenus(); lib.Recharger(selectionner: "recomp:" + r.Id); lib.Lancer(); }, "Déjà installé · " + detail));
         else m.Elements.Add(new(installe != null ? "Mettre à jour" : "Installer", "arrow.down.circle", () => _ = Installation.Installer(lib, r), installe != null ? $"{installe.Version} → {r.Version} · {r.Taille}" : detail));
         m.Elements.Add(new("Ouvrir la page GitHub", "safari", () => Systeme.Ouvrir("https://github.com/" + r.Depot), r.Depot));
         m.Elements.Add(new() { Libelle = $"Par {r.Auteur} · ★ {r.Etoiles}" + (r.Licence != "" ? $" · licence {r.Licence}" : ""), Icone = "person", Info = true, Section = "Infos" });
