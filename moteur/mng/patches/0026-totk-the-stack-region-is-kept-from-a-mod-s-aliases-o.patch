@@ -1,0 +1,38 @@
+From b59f8e42521dc7ac85c99f64aa0b03393bf5e92a Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 11:32:50 +0000
+Subject: [PATCH 26/44] totk: the stack region is kept from a mod's aliases
+ only
+
+The SDK's CreateThread finds its stacks' places with QueryMemory in that
+region; reported as not free to everyone, it found none and stopped.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/services.c | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index daf79645..3e8daebd 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -518,12 +518,15 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   else if(!addr){base=0;size=ASLR_START;state=0;perm=0;}
+   else if(runtime_module_query(addr,&base,&size,&state,&perm,&attr)){}
+   else {state=3;perm=5;}
+-  /* The guest stack region (thread stacks are carved from it as threads start) and the read-write aliases MapProcessMemory
+-     made are not free, and no free block runs over them: TOTK Online's mod took a free block below the heap for its 45 MiB
++  /* For a mod, the guest stack region (thread stacks are carved from it as threads start) is not free, and for everyone the
++     read-write aliases MapProcessMemory made are not; no free block runs over them: TOTK Online's mod took a free block below the heap for its 45 MiB
+      alias of main, which reached into the stack region; MapProcessMemory replaced those stack pages with main's code, and the
+      stacks of the threads started later wrote over the game's instructions (SIGILL on zero words in main). */
+   if(state==0){
+-   uint64_t blk[1+32][2];unsigned nb=0;blk[nb][0]=STACK_START;blk[nb][1]=STACK_START+STACK_SIZE;nb++;
++   /* the stack region only for a mod's queries: the SDK's own CreateThread looks for its stacks' free places in that region
++      (MapMemory, 0x04), and with the region "not free" it found none and stopped (SDK Break) */
++   extern int runtime_module_is_mod(const char *name);
++   uint64_t blk[1+32][2];unsigned nb=0;if(module&&runtime_module_is_mod(module)){blk[nb][0]=STACK_START;blk[nb][1]=STACK_START+STACK_SIZE;nb++;}
+    for(unsigned k=0;k<32;k++)if(mpm_dst[k]){blk[nb][0]=mpm_dst[k]&~0x3fffULL;blk[nb][1]=(mpm_dst[k]+mpm_size[k]+0x3fff)&~0x3fffULL;nb++;}
+    for(unsigned k=0;k<nb;k++){uint64_t b0=blk[k][0],b1=blk[k][1],e=base+size;
+     if(addr>=b0&&addr<b1){base=b0;size=b1-b0;state=0x10;perm=0;break;}

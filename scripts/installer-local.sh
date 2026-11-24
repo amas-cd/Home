@@ -15,6 +15,8 @@ rsync -a "${EX[@]}" "$R/moteur/outils/" "$M/outils/"
 rsync -a "${EX[@]}" "$R/moteur/tools/" "$M/tools/"
 rsync -a "${EX[@]}" "$R/moteur/patches/" "$M/patches/"
 rsync -a "${EX[@]}" "$R/moteur/obelisk/" "$M/obelisk/"
+for d in pc compat mng; do [ -d "$R/moteur/$d" ] && { mkdir -p "$M/$d"; rsync -a "${EX[@]}" "$R/moteur/$d/" "$M/$d/"; }; done
+[ -f "$M/.upstream-ref" ] || cp "$R/moteur/.upstream-ref" "$M/.upstream-ref"   # la version figée de nxnative : celle de ce Mac est gardée (elle avance avec « Mettre à jour nxnative »)
 cp "$R/moteur/README.md" "$M/README.md"
 chmod +x "$M"/outils/*.command "$M"/outils/*.sh "$M"/salon/*.command 2>/dev/null || true
 echo "Dépôt recopié dans $M ($(git -C "$R" rev-parse --short HEAD 2>/dev/null || echo '?'))"

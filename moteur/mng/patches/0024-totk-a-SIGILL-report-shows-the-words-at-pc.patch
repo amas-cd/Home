@@ -1,0 +1,27 @@
+From 4ed1eccf82cf5aed4e0f6150afa3a1342c8211c2 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 10:43:48 +0000
+Subject: [PATCH 24/44] totk: a SIGILL report shows the words at pc
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/loader.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 30d3e3e9..9a2b2896 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -572,6 +572,11 @@ static void crash(int num,siginfo_t *info,void *context) {
+  signal_hex("[totk] signal=",num);signal_hex("fault=",(uintptr_t)info->si_addr);signal_hex("esr=",u->uc_mcontext->__es.__esr);
+  {mach_vm_address_t ra=(uintptr_t)info->si_addr;mach_vm_size_t rs=0;vm_region_basic_info_data_64_t ri;mach_msg_type_number_t rc=VM_REGION_BASIC_INFO_COUNT_64;mach_port_t ro=0;
+   if(mach_vm_region(mach_task_self(),&ra,&rs,VM_REGION_BASIC_INFO_64,(vm_region_info_t)&ri,&rc,&ro)==KERN_SUCCESS){signal_hex("region=",ra);signal_hex("region size=",rs);signal_hex("region prot=",(uint64_t)ri.protection|((uint64_t)ri.max_protection<<8));}}signal_hex("pc=",pc);signal_hex("lr=",u->uc_mcontext->__ss.__lr);signal_hex("fp=",fp);
++ /* SIGILL: the words at pc as the CPU's data side sees them (a garbage word there, or the instruction the game had: then a stale
++    instruction cache after code written through an alias) */
++ if(num==SIGILL){mach_vm_address_t ra=pc&~3ULL;mach_vm_size_t rs=0;vm_region_basic_info_data_64_t ri;mach_msg_type_number_t rc=VM_REGION_BASIC_INFO_COUNT_64;mach_port_t ro=0;
++  if(mach_vm_region(mach_task_self(),&ra,&rs,VM_REGION_BASIC_INFO_64,(vm_region_info_t)&ri,&rc,&ro)==KERN_SUCCESS&&ra<=(pc&~3ULL)&&(ri.protection&VM_PROT_READ))
++   for(int k=-2;k<4;k++){uint32_t w;memcpy(&w,(const void *)(uintptr_t)((pc&~3ULL)+4*k),4);signal_hex(k?"word=":"word at pc=",w);}}
+ #ifdef GAME_BOTW
+  {Dl_info di;for(int k=0;k<2;k++){uint64_t a=k?u->uc_mcontext->__ss.__lr:pc;if(dladdr((void *)(uintptr_t)a,&di)&&di.dli_sname){write(2,k?"lr host ":"pc host ",8);write(2,di.dli_sname,strlen(di.dli_sname));signal_hex(" +",a-(uintptr_t)di.dli_saddr);}}}   /* a fault in a host function: name it */
+  /* Diagnostics (TOTK_CRASH_THREADS=1): what every other guest thread was doing at the fault (wait states, last SVC chains,

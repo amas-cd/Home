@@ -1,0 +1,148 @@
+From ce2fd460fa230b487d2032214fbd31777048223e Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 11:38:49 +0000
+Subject: [PATCH 27/44] totk 1.2.1: shadow resolution (the 1.4.3 patch ported)
+
+Found with TOTK_SIZE_CHAIN=800x800: 1.2.1's shadow setup multiplies the
+cascade scale by the base size at main+0xa46dd8 / +0xa46df8, the same two
+fmul as 1.4.3's. Each branches to a stub that also multiplies by K from the
+data page (+0x300). The effects page's Shadow resolution row (1x to 4x,
+graphics-shadow.txt) and TOTK_SHADOW_SCALE drive it, at once.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/game_patches.c   | 56 +++++++++++++++++++++++++++++
+ games/totk/runtime/settings_panel.h | 24 ++++++++++++-
+ 2 files changed, 79 insertions(+), 1 deletion(-)
+
+diff --git a/games/totk/runtime/game_patches.c b/games/totk/runtime/game_patches.c
+index 64cccad1..d9ce74bb 100644
+--- a/games/totk/runtime/game_patches.c
++++ b/games/totk/runtime/game_patches.c
+@@ -645,6 +645,61 @@ static void patch_cursor_speed(Module *m) {
+ }
+ #endif
+ 
++#if defined(TOTK_GAME_V121)
++/* Shadow resolution for 1.2.1 (Mac, the settings panel's effects page or TOTK_SHADOW_SCALE=<K>; the 1.4.3 patch of
++   game_patches_v143.c ported, user 2026-11-09). 1.2.1's shadow setup (found with TOTK_SIZE_CHAIN=800x800: the cascade
++   textures are requested at main+0xca6f44 with the sizes at +0x3d8 / +0x3f8 of the cascade object) works each cascade's size
++   out as align8(max(32, s0 x base)) from the settings' base size (+0x198 / +0x19c as ints, 800 x 800) at main+0xa46dd8 and
++   +0xa46df8, the same two multiplies as 1.4.3's (fmul s1, s0, s2 / fmul s0, s0, s1, each followed by fcvtzs w9), and stores
++   them at main+0xa46e10 / +0xa46e1c. Each multiply branches to a stub that also multiplies by K from the data page; s3 is
++   free there (last read at main+0xa46da4, loaded again before its next use). The setup runs as the cascades are made, so a
++   change takes effect at once. K = 1 is the game's own. The stubs sit in the patch area's tail after the benchmark camera's. */
++#define SHADOW121_DATA_SLOT 0x300u
++#if !TARGET_OS_IPHONE
++static _Atomic uint32_t *shadow121_factor;
++static double shadow121_k = 1;
++static void shadow121_store(double k) { float f = (float)k; uint32_t bits; memcpy(&bits, &f, 4); if (shadow121_factor) atomic_store(shadow121_factor, bits); }
++void runtime_shadow_scale_set(double k) {
++    if (!(k >= 0.25 && k <= 8)) return;
++    shadow121_k = k; shadow121_store(k);
++    fprintf(stderr, "[totk] shadowscale: shadow resolution x%g (cascades %gx%g)\n", k, 800 * k, 800 * k);
++}
++double runtime_shadow_scale(void) { return shadow121_k; }
++int runtime_shadow_scale_locked(void) { const char *e = getenv("TOTK_SHADOW_SCALE"); return e && *e; }
++int runtime_shadow_scale_available(void) { return shadow121_factor != NULL; }
++#endif
++static void patch_shadow_res_121(Module *m) {
++#if TARGET_OS_IPHONE
++    (void)m;
++#else
++    if (getenv("TOTK_EXPORT_IOS")) return;
++    const char *e = getenv("TOTK_SHADOW_SCALE");
++    if (e && *e) { double k = atof(e); if (!(k >= 0.25 && k <= 8)) runtime_fail("TOTK_SHADOW_SCALE takes 0.25 to 8"); shadow121_k = k; }
++    static const struct { uint64_t off; uint32_t original, replacement, next; } sites[] = {
++        {0xa46dd8, 0x1e220801, 0x1e230821, 0x1e380029},   /* fmul s1, s0, s2 -> then fmul s1, s1, s3; fcvtzs w9, s1 follows */
++        {0xa46df8, 0x1e210800, 0x1e230800, 0x1e380009},   /* fmul s0, s0, s1 -> then fmul s0, s0, s3; fcvtzs w9, s0 follows */
++    };
++    uint64_t data = (m->file_size + 0x3fff) & ~0x3fffULL, stub = ((m->file_size + 15) & ~15ULL) + 256;   /* after the benchmark camera's stubs */
++    if (stub < m->patch_off || stub + 32 > data || data + SHADOW121_DATA_SLOT + 4 > m->size) { fprintf(stderr, "[totk] 1.2.1 shadow resolution: no room, the game's own\n"); return; }
++    for (unsigned i = 0; i < 32; i++) if (m->base[stub + i]) { fprintf(stderr, "[totk] 1.2.1 shadow resolution: stub area in use, the game's own\n"); return; }
++    for (unsigned i = 0; i < 2; i++) {
++        uint32_t w, n; memcpy(&w, m->base + sites[i].off, 4); memcpy(&n, m->base + sites[i].off + 4, 4);
++        if (w != sites[i].original || n != sites[i].next) { fprintf(stderr, "[totk] 1.2.1 shadow resolution: the shadow setup does not match, the game's own\n"); return; }
++    }
++    for (unsigned i = 0; i < 2; i++) {
++        uint64_t at = stub + i * 16, lit = data + SHADOW121_DATA_SLOT - (at + 4);
++        uint32_t words[4] = {sites[i].original, 0x1c000000u | (((uint32_t)(lit >> 2) & 0x7ffff) << 5) | 3u,   /* ldr s3, <the factor> */
++                             sites[i].replacement, branch_to(at + 12, sites[i].off + 4)};
++        memcpy(m->base + at, words, sizeof words);
++    }
++    shadow121_factor = (_Atomic uint32_t *)(void *)(m->base + data + SHADOW121_DATA_SLOT);
++    shadow121_store(shadow121_k);
++    for (unsigned i = 0; i < 2; i++) { uint32_t j = branch_to(sites[i].off, stub + i * 16); memcpy(m->base + sites[i].off, &j, 4); }
++    fprintf(stderr, "[totk] 1.2.1 shadow resolution x%g (cascades %gx%g), stubs +%#llx\n", shadow121_k, 800 * shadow121_k, 800 * shadow121_k, (unsigned long long)stub);
++#endif
++}
++#endif
++
+ #if defined(TOTK_GAME_V121)
+ /* Benchmark camera for 1.2.1 (survey sessions only; see game_patches_v143.c for the block on the data page at +0x100).
+    1.2.1's look-at camera update stores eye, target and up into the camera in x20 at main+0xcb4390..0xcb4464 and then
+@@ -794,6 +849,7 @@ void runtime_game_patches(Module *m) {
+       aspect_install(m, "1.2.1", sites, 4, 2, (m->text_end + 15) & ~15ULL, 0,   /* no free padding for Vert+ stubs */
+                      (m->file_size + 0x3fff) & ~0x3fffULL); }
+     patch_bench_cam(m);
++    patch_shadow_res_121(m);
+ #else
+     if (aspect_requested()) runtime_fail("TOTK_ASPECT: only 1.2.1 and 1.4.3 so far");
+ #endif
+diff --git a/games/totk/runtime/settings_panel.h b/games/totk/runtime/settings_panel.h
+index 984ec6ba..4b1a2bfe 100644
+--- a/games/totk/runtime/settings_panel.h
++++ b/games/totk/runtime/settings_panel.h
+@@ -153,6 +153,9 @@ int dm_gfx_smaa_quality(void); void dm_gfx_smaa_quality_set(int q);
+ int dm_gfx_aa_method(void); void dm_gfx_aa_method_set(int method);
+ int dm_gfx_fxaa_quality(void); void dm_gfx_fxaa_quality_set(int q);
+ #endif
++#ifdef TOTK_GAME_V121   /* game_patches.c: 1.2.1's shadow resolution (the 1.4.3 patch ported) */
++double runtime_shadow_scale(void); void runtime_shadow_scale_set(double k); int runtime_shadow_scale_locked(void); int runtime_shadow_scale_available(void);
++#endif
+ int nvn_fps_lock(void);
+ 
+ /* Picking a resolution sizes the window to it at once (user 2026-10-25): 720p 1280x720, 1080p and 720p + MetalFX 1920x1080, MetalFX 2560x1440, native its own size (2K), 2K + MetalFX and native 4K 3840x2160, in the window's points as the first window (frontend.m runtime_front_run), the picture's shape kept
+@@ -259,6 +262,10 @@ static void settings_effects_restore(void) {
+ }
+ #elif defined(GAME_BOTW190)
+ static void settings_effects_restore(void);   /* botw_effects.h */
++#elif defined(TOTK_GAME_V121)
++static void settings_effects_restore(void) {
++ double d;if(!runtime_shadow_scale_locked()&&settings_read_number("graphics-shadow.txt",25,800,&d))runtime_shadow_scale_set(d/100);
++}
+ #else
+ static void settings_effects_restore(void) {}
+ #endif
+@@ -745,6 +752,9 @@ static void settings_effects_reset(void) {
+  for(const char *const *f=(const char *const[]){"graphics-fov.txt","graphics-lod.txt","graphics-far.txt","graphics-fxaa.txt","graphics-smaa-quality.txt","graphics-aa-method.txt","graphics-fxaa-quality.txt","graphics-sharpen.txt","graphics-effects.txt","graphics-shadow.txt","graphics-dof.txt",NULL};*f;f++)
+   runtime_setting_remove(*f);
+ #endif
++#ifdef TOTK_GAME_V121
++ if(!runtime_shadow_scale_locked()){runtime_shadow_scale_set(1);runtime_setting_remove("graphics-shadow.txt");}
++#endif
+ #ifdef GAME_BOTW190
+  if(runtime_shadow_res_available()&&!runtime_shadow_res_locked()){runtime_shadow_res_save(0);runtime_setting_remove("shadows.txt");}
+  if(runtime_fov_available()&&!runtime_fov_scale_locked()){runtime_fov_scale_set(1);runtime_setting_remove("graphics-fov.txt");}
+@@ -759,7 +769,19 @@ static void settings_effects_reset(void) {
+ #ifndef TOTK_GAME_V143
+ static TOTKSettingRow *settings_botw_shadow_row(void) {
+  NSString *t=settings_text("阴影分辨率","Shadow resolution");
+-#ifndef GAME_BOTW190
++#if defined(TOTK_GAME_V121)
++ /* 1.2.1: the cascades' size x K (game_patches.c patch_shadow_res_121), at once; graphics-shadow.txt (x100), as 1.4.3's row */
++ NSString *(^text)(int)=^NSString *(int v){
++  if(v==100)return settings_text("1×（游戏原样 800）","1x (as the game has it, 800)");
++  return [NSString stringWithFormat:@"%g× (%d)",v/100.0,v*8];};
++ int (^current)(void)=^int{return (int)lround(runtime_shadow_scale()*100);};
++ if(!runtime_shadow_scale_available())return settings_fixed(t,settings_text("这个版本没有","Not in this version"));
++ if(runtime_shadow_scale_locked())return settings_fixed(t,text(current()));
++ NSMutableArray<NSNumber *> *values=[@[@100,@200,@300,@400] mutableCopy];
++ if(![values containsObject:@(current())])[values addObject:@(current())];
++ NSMutableArray<NSString *> *choices=[NSMutableArray array];for(NSNumber *v in values)[choices addObject:text(v.intValue)];
++ return settings_row(t,choices,values,current,^(int v){runtime_shadow_scale_set(v/100.0);settings_save_int("graphics-shadow.txt",v,"shadow resolution");});
++#elif !defined(GAME_BOTW190)
+  return settings_fixed(t,settings_text("这个版本没有","Not in this version"));
+ #else
+  return settings_botw190_shadow_row(t);   /* botw_effects.h */

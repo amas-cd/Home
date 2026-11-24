@@ -4,7 +4,8 @@
 # Si un patch entre en conflit avec le nouveau nxnative, le moteur reste tel quel (Claude fera la mise à jour à la main) et les jeux sont
 # quand même reconstruits avec lui. Lancé par Home (Options → Mises à jour → Mettre à jour le moteur nxnative). TOTK passe par MacNativeGames.
 # Journal : /Applications/Home/log/mettre-a-jour.log — bilan : rapport sur le Bureau
-GAMES=/Applications/Jeux; MOT="/Applications/Home/moteur"; LOGD="/Applications/Home/log"; CONS="/Applications/Home/constructions"; mkdir -p "$LOGD"
+HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+GAMES=$JX; MOT="$HR/moteur"; LOGD="$HR/log"; CONS="$HR/constructions"; mkdir -p "$LOGD"
 exec > >(tee -a "$LOGD/mettre-a-jour.log") 2>&1
 echo; echo "===== $(date '+%d/%m %H:%M') : moteur + rebuild ====="
 caffeinate -d -i -s -w $$ &

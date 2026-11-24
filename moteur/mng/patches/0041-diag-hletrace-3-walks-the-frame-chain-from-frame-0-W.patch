@@ -1,0 +1,27 @@
+From 2fedb295e1a7c6a76b63fdf3a3fba41606f80c91 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Wed, 11 Nov 2026 12:28:55 +0000
+Subject: [PATCH 41/44] diag: hletrace 3 walks the frame chain from frame 0
+ (-Wframe-address)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/hle_stack.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/games/totk/runtime/hle_stack.c b/games/totk/runtime/hle_stack.c
+index 6846a512..544dced0 100644
+--- a/games/totk/runtime/hle_stack.c
++++ b/games/totk/runtime/hle_stack.c
+@@ -71,8 +71,8 @@ void runtime_hle_describe(unsigned i, char *out, size_t cap) { name_of(i, out, c
+ static _Atomic uint64_t from_mod[HLE_THUNKS];
+ int runtime_module_offset(uint64_t pc, const char **name, uint64_t *off);
+ __attribute__((noinline)) static uint64_t guest_return_address(void) {
+-    uint64_t *f = __builtin_frame_address(1);          /* runtime_hle_note's frame (this one is noinline, one level down) */
+-    if (!f || !(f = (uint64_t *)f[0]) || !(f = (uint64_t *)f[0])) return 0;   /* hle_note_kept's, then the switch's record */
++    uint64_t *f = __builtin_frame_address(0);          /* this frame's record; its saved x29 chain: runtime_hle_note, */
++    for (int k = 0; k < 3; k++) if (!f || !(f = (uint64_t *)f[0])) return 0;   /* hle_note_kept, then the switch's record */
+     return f[1];
+ }
+ void runtime_hle_note(uint64_t i) {

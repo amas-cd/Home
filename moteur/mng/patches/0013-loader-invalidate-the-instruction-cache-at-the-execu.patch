@@ -1,0 +1,59 @@
+From 663526cc27f8bc4a28f435f3b76f9b8bec307882 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 23:41:55 +0000
+Subject: [PATCH 13/44] loader: invalidate the instruction cache at the
+ executable addresses a mod module changed through its RW aliases
+
+The mod's hook sites in the game and its generated trampolines in its own code were run from stale cache lines
+(the mod cleans by the alias addresses): a hook branched into the unpatched trampoline template.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c | 28 +++++++++++++++-------------
+ 1 file changed, 15 insertions(+), 13 deletions(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index ad900278..da605b77 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -629,24 +629,26 @@ uintptr_t runtime_frame_controller_return_pc(void) {
+ }
+ uint64_t runtime_image_bytes(void) { uint64_t total=0;for(unsigned i=0;i<NM;i++)total+=modules[i].key_off;return page_up(total); }
+ static void loader_ready(void) { fprintf(stderr,"[totk] rtld callback: modules linked\n"); }
+-/* TOTK_DEBUG_LOG with a mod module: after the constructors, where did the mod write into the retail modules' code? Each
+-   changed instruction word against the image on disk (the game patches of game_patches.c are applied before, so they are
+-   excluded by comparing with a copy taken right after them), with the first bytes: the mod's hooks, for the log. */
++/* A mod module writes its hooks into the code of the retail modules — and its generated trampolines into its own code —
++   through read-write aliases (MapProcessMemory), then cleans the caches by the alias addresses. The instruction cache of
++   Apple cores is indexed by virtual address: lines fetched through the executable mapping stay stale, and a hook site or
++   trampoline runs its old bytes. After the constructors (where exlaunch-style mods install their hooks), every changed
++   instruction word, against a snapshot taken just before, is invalidated at its executable address; with TOTK_DEBUG_LOG
++   the words are listed (the mod's hooks, for the log). */
+ static uint8_t *code_snapshot[MAX_MODULES];
+ static void hook_survey(int take) {
+-#if !TARGET_OS_IPHONE
+  int mod=0;for(unsigned i=0;i<NM;i++)if(!modules[i].ctor_flag)mod=1;
+- if(!mod||!getenv("TOTK_DEBUG_LOG"))return;
+- for(unsigned i=0;i<NM;i++){Module *m=&modules[i];if(!m->ctor_flag)continue;size_t n=page_up(m->text_end);
++ if(!mod)return;
++ int verbose=getenv("TOTK_DEBUG_LOG")!=NULL;
++ for(unsigned i=0;i<NM;i++){Module *m=&modules[i];size_t n=page_up(m->text_end);
+   if(take){code_snapshot[i]=malloc(n);if(code_snapshot[i])memcpy(code_snapshot[i],m->base,n);continue;}
+-  if(!code_snapshot[i])continue;unsigned shown=0,total=0;
+-  for(size_t k=0;k<n;k+=4)if(memcmp(code_snapshot[i]+k,m->base+k,4)){total++;
+-   if(shown<48){uint32_t was,now;memcpy(&was,code_snapshot[i]+k,4);memcpy(&now,m->base+k,4);fprintf(stderr,"[totk] mod wrote %s+%#zx: %08x -> %08x\n",m->name,k,was,now);shown++;}}
+-  if(total)fprintf(stderr,"[totk] mod wrote %u instruction word(s) in %s\n",total,m->name);
++  if(!code_snapshot[i])continue;unsigned shown=0,total=0;size_t run_start=0,run_end=0;
++  for(size_t k=0;k<=n;k+=4){int changed=k<n&&memcmp(code_snapshot[i]+k,m->base+k,4)!=0;
++   if(changed){total++;if(run_end!=k)run_start=k;run_end=k+4;
++    if(verbose&&shown<64){uint32_t was,now;memcpy(&was,code_snapshot[i]+k,4);memcpy(&now,m->base+k,4);fprintf(stderr,"[totk] mod wrote %s+%#zx: %08x -> %08x\n",m->name,k,was,now);shown++;}}
++   else if(run_end&&run_end<=k){sys_icache_invalidate(m->base+run_start,run_end-run_start);run_end=0;}}
++  if(total)fprintf(stderr,"[totk] mod wrote %u instruction word(s) in %s; instruction cache invalidated at the executable addresses\n",total,m->name);
+   free(code_snapshot[i]);code_snapshot[i]=NULL;}
+-#else
+- (void)take;
+-#endif
+ }
+ static void module_inits(void) {
+  fprintf(stderr,"[totk] SDK startup returned; running module constructors\n");

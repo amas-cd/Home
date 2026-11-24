@@ -1,0 +1,61 @@
+From 832d80f32c1b67bc4e103655b0659ed8289215ab Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 09:41:43 +0000
+Subject: [PATCH 15/44] services: a mod module's MapProcessMemory destinations
+ on 16 KiB boundaries (QueryMemory answers its unaligned free pages as
+ inaccessible); misaligned aliases refused
+
+The previous fix mapped from src - d, which mach_vm_remap truncates to the page below: the hooks then landed 0x2000 short.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/loader.c   |  1 +
+ games/totk/runtime/services.c | 15 +++++++++++----
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 19f5efb7..0bae610d 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -611,6 +611,7 @@ static void probe(void) {
+  for(unsigned i=0;i<NM;i++){Module *m=&modules[i];printf("%s{\"name\":\"%s\",\"relative\":%u,\"symbolic\":%u,\"cross\":%u,\"weak_zero\":%u}",i?",":"",m->name,m->relative,m->symbolic,m->cross,m->weak);}
+  puts("],\"scope\":\"cross-module calls; constructors and game entry not run\"}");
+ }
++int runtime_module_is_mod(const char *name){for(unsigned i=0;i<NM;i++)if(!strcmp(modules[i].name,name))return modules[i].ctor_flag==0;return 0;}   /* scripts/mod_module.py's module (no nnsdk state word) */
+ int runtime_module_offset(uint64_t pc,const char **name,uint64_t *off) {
+  for(unsigned i=0;i<NM;i++)if(pc>=(uintptr_t)modules[i].base&&pc<(uintptr_t)modules[i].base+modules[i].size){*name=modules[i].name;*off=pc-(uintptr_t)modules[i].base;return 1;}
+  return 0;
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index 9f656598..24cf1fdd 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -529,6 +529,12 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+    if(state==0){uint64_t oldEnd=base+size;if(end<=addr&&end>base)base=end;if(m->dst>addr&&m->dst<oldEnd)oldEnd=m->dst;size=oldEnd-base;}
+    else if(state==5){uint64_t oldEnd=base+size;if(send<=addr&&send>base)base=send;if(m->src>addr&&m->src<oldEnd)oldEnd=m->src;size=oldEnd-base;}
+   }pthread_mutex_unlock(&memory_lock);
++  /* A mod module looks for a free place for its read-write aliases by picking random 4 KiB pages and asking QueryMemory whether
++     each is free: off a 16 KiB boundary the answer is "not free" (inaccessible, one 4 KiB page), so the page it keeps is one
++     MapProcessMemory can alias exactly. Only the mod's own queries are answered so: the game's walks of the address space see
++     the free blocks whole. */
++  {extern int runtime_module_is_mod(const char *name);
++   if(state==0&&(addr&0x3fff)&&module&&runtime_module_is_mod(module)){base=addr&~0xfffULL;size=0x1000;state=0x10;perm=0;attr=0;}}
+   struct {uint64_t base,size;uint32_t state,attr,perm,ipc,device,pad;} info={base,size,state,attr,perm,0,0,0};
+   if(r[0])memcpy((void *)(uintptr_t)r[0],&info,sizeof(info));r[0]=0;r[1]=0;return 0;
+  }
+@@ -570,10 +576,11 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   uint64_t dst=r[0],handle=r[1],src=r[2],size=r[3];
+   if(handle!=0xffff8001){r[0]=0xe401;return r[0];}   /* InvalidHandle */
+   if((dst|src|size)&4095||!size){r[0]=0xcc01;return r[0];}
+-  /* Horizon pages are 4 KiB, this kernel's 16 KiB: a destination the guest picked on a 4 KiB boundary is honoured exactly by
+-     mapping from `d` bytes before the source onto the 16 KiB boundary below (the modules' arena keeps guard pages before each
+-     module for that), so that dst + k is src + k as the guest expects. mach_vm_remap would otherwise round the destination
+-     down silently: an exlaunch-style mod then wrote its hooks 0x2000 past the instructions it had read. */
++  /* Horizon pages are 4 KiB, this kernel's 16 KiB: an alias works only when the destination and the source sit at the same
++     offset in their 16 KiB pages (then it maps from the 16 KiB boundary below both). mach_vm_remap otherwise moves one of them
++     silently, and an exlaunch-style mod wrote its hooks 0x2000 away from the instructions it had read. QueryMemory (0x06) keeps
++     a mod module's random destinations on 16 KiB boundaries; any other offset is refused here rather than mapped wrong. */
++  if((dst-src)&0x3fff){fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx: not at the same offset in a 16 KiB page, refused\n",(unsigned long long)src,(unsigned long long)dst);r[0]=0xd401;return r[0];}
+   uint64_t d=dst&0x3fff;mach_vm_address_t target=dst-d;uint64_t len=(size+d+0x3fff)&~0x3fffULL;vm_prot_t cur=0,max=0;
+   kern_return_t kr=mach_vm_remap(mach_task_self(),&target,len,0,VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,mach_task_self(),src-d,FALSE,&cur,&max,VM_INHERIT_NONE);
+   if(kr==KERN_SUCCESS&&target!=dst-d){fprintf(stderr,"[totk] MapProcessMemory: the kernel moved the alias to %#llx\n",(unsigned long long)target);kr=KERN_INVALID_ADDRESS;}

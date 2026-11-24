@@ -1,0 +1,69 @@
+From 9268b756f1d33480d088cf313c54aaa546497328 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Tue, 10 Nov 2026 22:21:48 +0000
+Subject: [PATCH 35/44] totk online: the exchange's rate every 5 s (calls,
+ bytes, empty receives, unread backlog) with TOTK_ONLINE_LOG
+
+Players glide, teleport and appear without their equipment for a while, both on the Mac and in the PC players' games:
+this says whether the mod reads and writes as often as its server sends, or lets a backlog build up.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/online_host.c | 36 ++++++++++++++++++++++++++++++--
+ 1 file changed, 34 insertions(+), 2 deletions(-)
+
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+index 433d7993..cc779222 100644
+--- a/games/totk/runtime/online_host.c
++++ b/games/totk/runtime/online_host.c
+@@ -18,6 +18,8 @@
+ #include <netinet/tcp.h>
+ #include <sys/socket.h>
+ #include <poll.h>
++#include <sys/ioctl.h>
++#include <time.h>
+ 
+ static _Thread_local int online_errno;
+ static int online_log(void) { static int v = -1; if (v < 0) { const char *e = getenv("TOTK_ONLINE_LOG"); v = e && *e && strcmp(e, "0"); } return v; }
+@@ -76,8 +78,38 @@ static int online_connect(int fd, const struct sockaddr *addr, uint32_t len) {
+     if (online_log() && r == 0) fprintf(stderr, "[totk-online] connect(%d): connected\n", fd);
+     return r < 0 ? fail("connect") : r;
+ }
+-static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, (flags & 0xC7) | MSG_NOSIGNAL)); online_trace("send", fd, r); return r < 0 ? fail("send") : r; }
+-static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags & 0xC7)); online_trace("recv", fd, r); return r < 0 ? fail("recv") : r; }
++/* The exchange's rate, every 5 s with TOTK_ONLINE_LOG: calls and bytes each way, the receives that found nothing, and the most
++   bytes the server had sent that the mod had not read yet (FIONREAD). Players that glide, teleport and appear without their
++   equipment for a while on the Mac and in the other players' games: this says whether the mod reads and writes as often as the
++   server sends, or lets a backlog build up. */
++static _Atomic long long st_send_n, st_send_b, st_recv_n, st_recv_b, st_recv_none, st_backlog;
++static _Atomic uint64_t st_last;
++static void online_stats(int fd) {
++    if (!online_log()) return;
++    int q = 0;
++    if (fd >= 0 && ioctl(fd, FIONREAD, &q) == 0) { long long m = atomic_load(&st_backlog); while (q > m && !atomic_compare_exchange_weak(&st_backlog, &m, q)) {} }
++    uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW), last = atomic_load(&st_last);
++    if (!last) { atomic_compare_exchange_strong(&st_last, &last, now); return; }
++    if (now - last < 5000000000ull || !atomic_compare_exchange_strong(&st_last, &last, now)) return;
++    double s = (double)(now - last) / 1e9;
++    long long sn = atomic_exchange(&st_send_n, 0), sb = atomic_exchange(&st_send_b, 0), rn = atomic_exchange(&st_recv_n, 0), rb = atomic_exchange(&st_recv_b, 0);
++    long long none = atomic_exchange(&st_recv_none, 0), back = atomic_exchange(&st_backlog, 0);
++    fprintf(stderr, "[totk-online] rate over %.1f s: send %.0f/s %.1f KB/s, recv %.0f/s %.1f KB/s, recv with no data %.0f/s, most unread %lld B\n",
++            s, sn / s, sb / s / 1024, rn / s, rb / s / 1024, none / s, back);
++}
++static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) {
++    ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, (flags & 0xC7) | MSG_NOSIGNAL)); online_trace("send", fd, r);
++    if (r >= 0) { atomic_fetch_add(&st_send_n, 1); atomic_fetch_add(&st_send_b, r); }
++    int e = errno; online_stats(fd); errno = e;
++    return r < 0 ? fail("send") : r;
++}
++static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) {
++    ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags & 0xC7)); online_trace("recv", fd, r);
++    int e = errno;
++    if (r >= 0) { atomic_fetch_add(&st_recv_n, 1); atomic_fetch_add(&st_recv_b, r); } else if (e == EAGAIN) atomic_fetch_add(&st_recv_none, 1);
++    online_stats(fd); errno = e;
++    return r < 0 ? fail("recv") : r;
++}
+ static int online_close(int fd) { if (online_log()) fprintf(stderr, "[totk-online] close(%d)\n", fd); int r = close(fd); return r < 0 ? fail("close") : r; }
+ /* The guest follows AAPCS64 (its third argument in x2) while Apple's arm64 ABI passes variadic arguments on the stack:
+    a fixed third parameter reads x2, which is where the module put it. */

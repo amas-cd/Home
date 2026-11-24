@@ -37,6 +37,10 @@ struct Game: Identifiable, Equatable {
     let icon: NSImage
     let video: URL?
     var viaObelisk: Bool { id.hasPrefix("obelisk:") }
+    /// Un jeu Windows installé par Home lui-même (Epic Games, sans Obelisk) : id "pc:<identifiant Epic>", url = le dossier du jeu
+    var viaHome: Bool { id.hasPrefix("pc:") }
+    var appPC: String? { viaHome ? String(id.dropFirst(3)) : nil }
+    var pc: Bool { viaObelisk || viaHome }
     /// Title id Switch connu pour la boutique eShop et l'icône officielle : celui des apps nxnative, sinon celui du jeu d'une app MacNativeGames
     var storeID: String? {
         if let t = titleID { return t }
@@ -91,7 +95,17 @@ enum Slot: String, CaseIterable { case cover = "Jaquette", background = "Fond", 
 let appSupport = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
 let salonRoot = appSupport.appendingPathComponent("Salon")
 let nxlib = salonRoot.appendingPathComponent("nx-library")   // les illustrations reprises de NX Library (désinstallé) : artwork-picks/, artwork/
-let logURL = URL(fileURLWithPath: "/Applications/Home/log/salon.log")
+/// Les dossiers de Home : /Applications/Home (moteur, constructions, journaux…) et /Applications/Jeux (les apps des jeux), ou ceux que donne
+/// Application Support/Salon/dossiers.json ({"home": "...", "jeux": "..."}) sur un Mac où ces emplacements ne conviennent pas.
+/// Les scripts les reçoivent par HOME_RACINE et HOME_JEUX.
+enum Dossiers {
+    static let lus: [String: String] = (try? Data(contentsOf: salonRoot.appendingPathComponent("dossiers.json"))).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+    static func dossier(_ cle: String, _ defaut: String) -> URL { URL(fileURLWithPath: (lus[cle].map { ($0 as NSString).expandingTildeInPath }).flatMap { $0.hasPrefix("/") ? $0 : nil } ?? defaut) }
+    static let home = dossier("home", "/Applications/Home")
+    static let jeux = dossier("jeux", "/Applications/Jeux")
+    static var env: [String: String] { ["HOME_RACINE": home.path, "HOME_JEUX": jeux.path] }
+}
+let logURL = Dossiers.home.appendingPathComponent("log/salon.log")
 func log(_ m: String) {
     let line = "\(Date().formatted(date: .abbreviated, time: .standard))  \(m)\n"
     if let h = try? FileHandle(forWritingTo: logURL) { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close() }
@@ -436,7 +450,7 @@ final class Library: ObservableObject {
                 else if let alias = try? URL(resolvingAliasFileAt: u), alias.pathExtension == "app" { urls.append(alias) }
             }
         }
-        addApps(in: URL(fileURLWithPath: "/Applications/Jeux"))
+        addApps(in: Atelier.jeux)
         addApps(in: salonRoot.appendingPathComponent("jeux"))
         // Jeux installés ailleurs dans /Applications : uniquement de vrais jeux (catégorie « jeu » de leur Info.plist, ou nom connu),
         // jamais les launchers, émulateurs et outils (NX Library, Obelisk, Steam, Whisky…) — ceux-là ne sont pas des jeux
@@ -486,6 +500,16 @@ final class Library: ObservableObject {
                 list.append(Game(id: key, name: name, url: obelisk, titleID: nil, category: entry?.categorie ?? "PC", icon: icon, video: firstFile(media, ["fond.mp4", "fond.mov"])))
             }
         }
+        // Jeux Windows installés par Home (Epic Games, moteur/pc/pc.py) : <Home>/pc/jeux.json (identifiant, nom, dossier)
+        for j in PCHome.jeux() {
+            let key = "pc:" + j.app
+            let entry = config.jeux.first { $0.chemin == key }
+            if entry?.masque == true || seen.contains(key) { continue }; seen.insert(key)
+            let name = entry?.nom ?? j.nom
+            let media = salonRoot.appendingPathComponent("media").appendingPathComponent(name)
+            let icon = NSWorkspace.shared.icon(forFile: j.dossier); icon.size = NSSize(width: 1024, height: 1024)
+            list.append(Game(id: key, name: name, url: URL(fileURLWithPath: j.dossier), titleID: nil, category: entry?.categorie ?? "PC", icon: icon, video: firstFile(media, ["fond.mp4", "fond.mov"])))
+        }
         if let d = try? Data(contentsOf: salonRoot.appendingPathComponent("statistiques.json")), let s = try? JSONDecoder().decode([String: Stat].self, from: d) { stats = s }
         if deplacements.contains(where: { stats[$0.key] != nil }) { for (a, b) in deplacements { if let v = stats[a] { stats[b] = v; stats[a] = nil } }; saveStats() }
         list.sort { (stats[$0.id]?.lastPlayed ?? .distantPast) > (stats[$1.id]?.lastPlayed ?? .distantPast) }   // dernière partie en premier ; jamais joués après, dans l'ordre des noms
@@ -501,7 +525,7 @@ final class Library: ObservableObject {
     func saveStats() { if let d = try? JSONEncoder().encode(stats) { try? d.write(to: salonRoot.appendingPathComponent("statistiques.json")) } }
     func entry(for g: Game) -> Int {
         if let i = config.jeux.firstIndex(where: { $0.chemin == g.id || URL(fileURLWithPath: ($0.chemin as NSString).expandingTildeInPath).standardizedFileURL.path == g.id }) { return i }
-        config.jeux.append(Entry(chemin: g.viaObelisk ? g.id : g.url.path, nom: nil, categorie: nil, masque: nil)); return config.jeux.count - 1
+        config.jeux.append(Entry(chemin: g.pc ? g.id : g.url.path, nom: nil, categorie: nil, masque: nil)); return config.jeux.count - 1
     }
 
     // Illustrations : fichiers locaux d'abord, puis en ligne (une fois, mises en cache)
@@ -574,7 +598,7 @@ final class Library: ObservableObject {
         let played = st?.lastPlayed.map { "Dernière partie \($0.formatted(.relative(presentation: .named)))" } ?? "Jamais joué"
         let direct = g.viaObelisk && ObeliskDirect.recipe(for: g) != nil && ObeliskDirect.legendary() != nil
         var items: [SalonMenuItem] = [
-            SalonMenuItem(label: "Jouer", detail: g.viaObelisk ? (direct ? "Lancement direct (Epic Games)" : "Lancé par Obelisk") : nil, icon: "play.fill", action: { self.menu = nil; self.launch() }),
+            SalonMenuItem(label: "Jouer", detail: g.viaHome ? "Epic Games, lancé par Home" : g.viaObelisk ? (direct ? "Lancement direct (Epic Games)" : "Lancé par Obelisk") : nil, icon: "play.fill", action: { self.menu = nil; self.launch() }),
             SalonMenuItem(label: "Apparence", icon: "paintpalette.fill", action: { self.openApparence(g) }),
         ]
         if Atelier.modsPossibles(g) {
@@ -584,6 +608,8 @@ final class Library: ObservableObject {
         switch Atelier.moteurDe(g) {
         case .nxnative, .mng: items.append(SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: { self.openUpdateMenu(g) }))
         case .obelisk: items.append(SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: { self.menu = nil; self.ouvrirObelisk() }))
+        case .pc: items.append(SalonMenuItem(label: "Mises à jour", detail: "Vérifie et télécharge la dernière version", icon: "arrow.down.circle.fill", action: {
+            self.menu = nil; if let a = g.appPC { self.lancer("pc.command", ["installer", a], titre: "Mise à jour de \(g.name)", jeux: [g.id]) } }))
         case .mac: break
         }
         if g.titleID != nil || Atelier.moteurDe(g) == .mng {
@@ -663,9 +689,9 @@ final class Library: ObservableObject {
     func openMoreOptions(_ g: Game) {
         menu = SalonMenu(title: "Plus", subtitle: g.name, items: [
             SalonMenuItem(label: "Renommer", icon: "pencil", action: { self.menu = nil; self.rename(g) }),
-            SalonMenuItem(label: "Afficher dans le Finder", detail: g.viaObelisk ? "Le dossier du jeu dans Obelisk" : g.url.deletingLastPathComponent().path, icon: "folder.fill", action: { self.menu = nil; self.reveal(g) }),
+            SalonMenuItem(label: "Afficher dans le Finder", detail: g.viaObelisk ? "Le dossier du jeu dans Obelisk" : g.viaHome ? g.url.path : g.url.deletingLastPathComponent().path, icon: "folder.fill", action: { self.menu = nil; self.reveal(g) }),
             SalonMenuItem(label: "Masquer ce jeu", icon: "eye.slash", destructive: true, action: { self.menu = nil; self.hide(g) }),
-        ] + (g.viaObelisk ? [SalonMenuItem]() : [
+        ] + (g.pc ? [SalonMenuItem]() : [
             SalonMenuItem(label: "Désinstaller", detail: "Tout ce qui vient du jeu part à la corbeille, sauf ses sauvegardes", icon: "trash.fill", destructive: true, action: { self.openDesinstaller(g) }),
         ]), hero: "ellipsis.circle.fill", back: { self.menu = self.optionsMenu(g) })
     }
@@ -708,7 +734,7 @@ final class Library: ObservableObject {
             }
             for n in ["\(f.journal).log", "\(f.journal).previous.log"] { ajoute(lib.appendingPathComponent("Logs/MacNativeGames/\(n)")) }
         }
-        if m != .obelisk, !bid.isEmpty {
+        if m != .obelisk, m != .pc, !bid.isEmpty {
             for p in ["Caches/\(bid)", "Saved Application State/\(bid).savedState", "HTTPStorages/\(bid)", "HTTPStorages/\(bid).binarycookies", "WebKit/\(bid)"] { ajoute(lib.appendingPathComponent(p)) }
             var buf = [CChar](repeating: 0, count: Int(PATH_MAX))
             if confstr(_CS_DARWIN_USER_CACHE_DIR, &buf, buf.count) > 0 { ajoute(URL(fileURLWithPath: String(cString: buf)).appendingPathComponent(bid)) }   // le cache Metal des shaders
@@ -783,7 +809,7 @@ final class Library: ObservableObject {
     /// Les logiciels qui font tourner les jeux : chacun mis à jour, puis ses jeux reconstruits
     /// Mises à jour : Home, puis les moteurs (chacun sa section)
     func openMisesAJour() {
-        let app = URL(fileURLWithPath: "/Applications/Home.app")
+        let app = Bundle.main.bundleURL
         let date = (try? app.appendingPathComponent("Contents/MacOS/Salon").resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         menu = SalonMenu(title: "Mises à jour", subtitle: nil, items: [
             SalonMenuItem(label: "Mettre à jour Home", detail: date.map { "Version du \($0.formatted(date: .abbreviated, time: .shortened))" }, icon: "house.fill", section: "Home", tint: .blue, action: {
@@ -798,6 +824,7 @@ final class Library: ObservableObject {
         var items: [SalonMenuItem] = [
             SalonMenuItem(label: "Mettre à jour nxnative", detail: nx.isEmpty ? nil : "Version \(nx)", icon: "cpu", section: "nxnative", tint: .purple, action: { self.menu = nil; self.majMoteur() }),
         ]
+        items.insert(SalonMenuItem(label: "Préparer ce Mac", detail: "Outils d'Apple, Homebrew, nxnative, MacNativeGames", icon: "wrench.and.screwdriver.fill", section: "Outils", tint: .teal, action: { self.openPreparation(back: { self.openMoteurs() }) }), at: 0)
         if FileManager.default.fileExists(atPath: Atelier.home.appendingPathComponent("MacNativeGames/build_app.py").path) {
             let v = lire(["/usr/bin/git", "-C", Atelier.home.appendingPathComponent("MacNativeGames").path, "log", "-1", "--format=%h · %cd", "--date=format:%d/%m/%Y"])
             items.append(SalonMenuItem(label: "Mettre à jour MacNativeGames", detail: v.isEmpty ? nil : "Version \(v)", icon: "leaf.fill", section: "MacNativeGames", tint: .green, action: {
@@ -865,6 +892,7 @@ final class Library: ObservableObject {
         menu = SalonMenu(title: "Supprimer", subtitle: "Les jeux retournent dans leur catégorie d'origine", items: custom.map { c in SalonMenuItem(label: c, detail: "\(games.filter { $0.category == c }.count) jeux", icon: "trash", destructive: true, action: { self.menu = nil; self.removeCategory(c) }) }, hero: "trash.fill", back: { self.openCategoriesSettings() })
     }
     func reveal(_ g: Game) {
+        if g.viaHome { NSWorkspace.shared.activateFileViewerSelecting([g.url]); return }
         if g.viaObelisk, let inst = ObeliskDirect.installations().first(where: { $0.folder == String(g.id.dropFirst(8)) }) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: inst.directory)]); return }
         NSWorkspace.shared.activateFileViewerSelecting([g.url])
     }
@@ -985,6 +1013,7 @@ final class Library: ObservableObject {
     func launch() {
         if running == nil, !showOptions, picker == nil, current == nil, selected >= visible.count { openAddMenu(); return }   // la case +
         guard running == nil, !showOptions, picker == nil, let g = current else { return }
+        if g.pc, let b = Compat.bloque(g) { openBloque(g.name, b); return }   // un jeu que son éditeur refuse sur Mac et Linux : pas lancé, la raison affichée
         running = g; startedAt = Date(); Sounds.shared.play("lancer"); overlay = true; lastInput = Date(); applySavedVolume(g)
         if config.capture ?? true {
             if CGPreflightScreenCaptureAccess() { Recorder.shared.start() }
@@ -994,6 +1023,7 @@ final class Library: ObservableObject {
         // au-dessus (même en cliquant sur le fond), le HUD par-dessus, et il remonte à la fin du jeu
         NotificationCenter.default.post(name: .salonHide, object: nil)
         if let tid = g.titleID { ensureFullscreen(tid) }
+        if g.viaHome { launchPC(g); return }
         if g.viaObelisk, !ObeliskDirect.disabledOnce, let r = ObeliskDirect.recipe(for: g), let leg = ObeliskDirect.legendary() { launchDirect(g, r, legendary: leg); return }
         let conf = NSWorkspace.OpenConfiguration(); conf.activates = true
         log("Écran des jeux : \(gameScreen.localizedName) (\(config.ecranJeu == nil ? "externe par défaut" : "choisi dans Réglages"))")
@@ -1172,6 +1202,28 @@ final class Library: ObservableObject {
             catch { log("Direct \(g.name) : échec \(error)"); DispatchQueue.main.async { self?.toast = "Lancement direct impossible — passage par Obelisk"; self?.running = nil; self?.fallbackObelisk(g) } }
         }
     }
+    /// Lancement d'un jeu Epic installé par Home : pc.command lancer <jeu> (moteur/pc/pc.py) demande le code de connexion à Epic,
+    /// prépare le préfixe Windows au premier lancement, puis devient le script launch.sh du moteur Voile. Son journal : log/pc-<jeu>.log
+    private func launchPC(_ g: Game) {
+        guard let app = g.appPC else { running = nil; return }
+        toast = "Connexion à Epic…"
+        DispatchQueue.global().async { [weak self] in
+            let appId = g.name.replacingOccurrences(of: "/", with: "-").unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }.map(String.init).joined()
+            if let a = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.zagrios.obelisk.game.\(appId)" && !$0.isTerminated }) {   // déjà lancé : un anti-triche refuse une 2e instance
+                DispatchQueue.main.async { a.activate(); self?.watchedApp = a; self?.toast = "\(g.name) tourne déjà — je le remets devant" }; return
+            }
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [Atelier.outils.appendingPathComponent("pc.command").path, "lancer", app]
+            p.environment = ProcessInfo.processInfo.environment.merging(Dossiers.env, uniquingKeysWith: { $1 }); p.standardInput = FileHandle.nullDevice
+            let logFile = Atelier.home.appendingPathComponent("log/pc-\(safeName(g.name)).log")
+            FileManager.default.createFile(atPath: logFile.path, contents: nil); if let h = try? FileHandle(forWritingTo: logFile) { p.standardOutput = h; p.standardError = h }
+            p.terminationHandler = { [weak self] proc in DispatchQueue.main.async {
+                log("PC \(g.name) : terminé (code \(proc.terminationStatus))")
+                if proc.terminationStatus != 0, let l = ((try? String(contentsOf: logFile, encoding: .utf8)) ?? "").components(separatedBy: "\n").last(where: { $0.hasPrefix("ÉCHEC : ") }) { self?.toast = String(l.dropFirst(8).prefix(160)) }
+                if self?.running?.id == g.id { self?.gameEnded(g, comeBack: true) } } }
+            do { try p.run(); log("PC \(g.name) : lancé, pid \(p.processIdentifier) (journal \(logFile.path))"); DispatchQueue.main.async { self?.direct = p; self?.toast = "\(g.name) démarre" } }
+            catch { log("PC \(g.name) : échec \(error)"); DispatchQueue.main.async { self?.toast = "Lancement impossible"; self?.running = nil; NotificationCenter.default.post(name: .salonShow, object: nil) } }
+        }
+    }
     private func fallbackObelisk(_ g: Game) { if let i = visible.firstIndex(of: g) { selected = i }; ObeliskDirect.disabledOnce = true; launch(); ObeliskDirect.disabledOnce = false }
     /// Obelisk n'a ni lien direct ni ligne de commande : on clique pour toi, via l'accessibilité, la jaquette du jeu puis « Lancer ».
     /// Demande une autorisation une fois : Réglages Système → Confidentialité et sécurité → Accessibilité → Salon.
@@ -1235,13 +1287,13 @@ final class Library: ObservableObject {
     func gamePids() -> [pid_t] {
         var p: [pid_t] = []
         if let a = watchedApp { p.append(a.processIdentifier) }
-        if let g = running, !g.viaObelisk {   // les processus lancés par l'app (dmhost de nxnative, qui joue le son)
+        if let g = running, !g.pc {   // les processus lancés par l'app (dmhost de nxnative, qui joue le son)
             let out = ObeliskDirect.run("/usr/bin/pgrep", ["-f", g.url.path + "/Contents/"], timeout: 3)
             p += out.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
         }
         if let d = direct, d.isRunning { p.append(d.processIdentifier) }
-        if let g = running, g.viaObelisk {
-            let exe = ObeliskDirect.recipe(for: g).map { ($0.exe as NSString).lastPathComponent } ?? g.name
+        if let g = running, g.pc {
+            let exe = (g.viaObelisk ? ObeliskDirect.recipe(for: g) : nil).map { ($0.exe as NSString).lastPathComponent } ?? g.name
             let out = ObeliskDirect.run("/usr/bin/pgrep", ["-f", "\(exe)|obelisk-apps/.*\(g.name.prefix(6))"], timeout: 3)
             p += out.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
         }
@@ -1547,10 +1599,65 @@ enum BGM {
     }
 }
 
+// Jeux PC installés par Home lui-même (Epic Games, sans Obelisk) : moteur/pc/pc.py fait le travail, lancé par outils/pc.command
+enum PCHome {
+    struct Jeu { let app: String; let nom: String; let dossier: String }
+    /// Les jeux installés : <Home>/pc/jeux.json, écrit par pc.py après un téléchargement ; ceux dont le dossier a disparu sont ignorés
+    static func jeux() -> [Jeu] {
+        guard let d = try? Data(contentsOf: Atelier.home.appendingPathComponent("pc/jeux.json")), let l = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return [] }
+        return l.compactMap { j in
+            guard let a = j["app"] as? String, let n = j["nom"] as? String, let dos = j["dossier"] as? String, FileManager.default.fileExists(atPath: dos) else { return nil }
+            return Jeu(app: a, nom: n.replacingOccurrences(of: "®", with: "").replacingOccurrences(of: "™", with: "").trimmingCharacters(in: .whitespaces), dossier: dos) }
+    }
+    /// pc.command <arguments> : sa sortie (la dernière ligne JSON pour etat et bibliotheque)
+    static func run(_ args: [String], timeout: TimeInterval = 40) -> String {
+        setenv("HOME_RACINE", Dossiers.home.path, 1); setenv("HOME_JEUX", Dossiers.jeux.path, 1)   // ObeliskDirect.run reprend l'environnement de Home
+        return ObeliskDirect.run("/bin/bash", [Atelier.outils.appendingPathComponent("pc.command").path] + args, timeout: timeout)
+    }
+    static func json(_ sortie: String) -> Any? {
+        guard let l = sortie.split(separator: "\n").last(where: { $0.hasPrefix("{") || $0.hasPrefix("[") }), let d = String(l).data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: d)
+    }
+    static func echec(_ sortie: String) -> String? { sortie.split(separator: "\n").last(where: { $0.hasPrefix("ÉCHEC : ") }).map { String($0.dropFirst(8)) } }
+}
+
+// Compatibilité des jeux PC : moteur/compat/pc.json, une liste vérifiée avec ses sources. « bloque » = l'éditeur ou l'anti-triche du jeu
+// refuse Linux et Mac : Home ne l'installe pas et ne le lance pas. Un jeu absent de la liste n'est jamais bloqué, et un anti-triche ne
+// suffit pas à bloquer : Rocket League (Easy Anti-Cheat) fonctionne, la liste le dit « verifie ».
+enum Compat {
+    struct Jeu { let nom: String; let epic: String?; let espace: String?; let steam: String?; let etat: String; let raison: String?; let preuve: String? }
+    static let jeux: [Jeu] = {
+        let ici = [Atelier.moteur.appendingPathComponent("compat/pc.json"), Bundle.main.resourceURL?.appendingPathComponent("moteur/compat/pc.json")].compactMap { $0 }
+        for u in ici {
+            guard let d = try? Data(contentsOf: u), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let l = o["jeux"] as? [[String: Any]] else { continue }
+            return l.compactMap { j in
+                guard let n = j["nom"] as? String, let e = j["etat"] as? String else { return nil }
+                return Jeu(nom: n, epic: j["epic"] as? String, espace: j["epic_namespace"] as? String, steam: (j["steam"] as? Int).map(String.init) ?? (j["steam"] as? String), etat: e, raison: j["raison"] as? String, preuve: j["preuve"] as? String) }
+        }
+        return []
+    }()
+    static func norme(_ s: String) -> String {
+        s.replacingOccurrences(of: "®", with: "").replacingOccurrences(of: "™", with: "").folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+    /// L'entrée d'un jeu : par identifiant de boutique d'abord, sinon par nom exact (jamais par ressemblance : un doute ne bloque pas)
+    static func entree(epic: String? = nil, steam: String? = nil, nom: String) -> Jeu? {
+        if let e = epic?.lowercased(), !e.isEmpty, let j = jeux.first(where: { $0.epic?.lowercased() == e }) { return j }
+        if let s = steam, !s.isEmpty, let j = jeux.first(where: { $0.steam == s }) { return j }
+        let n = norme(nom); return n.isEmpty ? nil : jeux.first { norme($0.nom) == n }
+    }
+    static func entree(_ g: Game) -> Jeu? {
+        if let a = g.appPC { return entree(epic: a, nom: g.name) }
+        if g.viaObelisk, let i = ObeliskDirect.installations().first(where: { $0.folder == String(g.id.dropFirst(8)) }) { return entree(epic: i.store == "Epic" ? i.appName : nil, steam: i.store == "Steam" ? i.appName : nil, nom: i.name) }
+        return nil
+    }
+    static func bloque(_ g: Game) -> Jeu? { entree(g).flatMap { $0.etat == "bloque" ? $0 : nil } }
+}
+
 // Jeux Obelisk : installations, recette de lancement direct, Legendary
 enum ObeliskDirect {
     static var disabledOnce = false
-    static let dir = URL(fileURLWithPath: "/Applications/Home/moteur/obelisk")
+    static let dir = Dossiers.home.appendingPathComponent("moteur/obelisk")
     static let support = appSupport.appendingPathComponent("com.zagrios.obelisk")
     struct Installation { let store: String; let appName: String; let name: String; let directory: String; var folder: String { (directory as NSString).lastPathComponent } }
     struct Recipe: Codable { var appName: String; var namespace: String?; var nom: String; var dossier: String; var launcher: String; var runtime: String; var home: String; var install: String; var cwd: String; var graphics: String; var envs: [String]; var exe: String; var args: [String] }
@@ -2211,6 +2318,7 @@ struct Screen: View {
                             } else { Label("Jamais joué", systemImage: "sparkles") }
                             Label(g.category, systemImage: "tag")
                             if g.viaObelisk { Label("via Obelisk", systemImage: "pc") }
+                            if g.viaHome { Label("Epic Games", systemImage: "pc") }
                         }.font(.system(size: 17, weight: .medium, design: .rounded)).opacity(0.85)
                         HStack(spacing: 16) {
                             HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running == nil ? "Jouer" : "En cours…").font(.system(size: 20, weight: .semibold, design: .rounded)) }
@@ -2580,7 +2688,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastX = 0, lastY = 0, heldX = 0, heldY = 0, prev: [String: Bool] = [:]
     var qLastX = 0, qLastY = 0, qHeldX = 0, qHeldY = 0   // menu rapide en jeu : ses propres compteurs (ceux du Salon sont remis à 0 à chaque tour)
     func applicationDidFinishLaunching(_ n: Notification) {
+        Atelier.installerEmbarque()
         lib.load()
+        if !Atelier.nxnativePret && !Atelier.mngPret { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil { self.lib.openPreparation(bienvenue: true) } } }   // un Mac neuf : préparer les moteurs
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -2819,8 +2929,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 // une fenêtre Terminal, par des scripts de /Applications/Jeux/moteur : le Salon écrit un petit lanceur .command et l'ouvre.
 // Les mods sont rangés dans Salon/mods/<jeu>/<mod>/ ; actifs.json donne ceux qui sont activés (le plus récent en premier).
 enum Atelier {
-    static let jeux = URL(fileURLWithPath: "/Applications/Jeux")
-    static let home = URL(fileURLWithPath: "/Applications/Home")   // Home.app à côté ; ici le moteur, MacNativeGames, les constructions, les journaux
+    static let jeux = Dossiers.jeux
+    static let home = Dossiers.home   // Home.app à côté ; ici le moteur, MacNativeGames, les constructions, les journaux
     /// TOTK Online : l'adresse du serveur (ip:port) que le Salon donne au jeu à la place du joueur (TOTK_SWKBD_FIRST), lue dans
     /// serveurs/totk-adresse.txt (une ligne, ex. 74.152.65.85:10014 pour le serveur Azure) ; sans ce fichier, le serveur local, que le Salon démarre lui-même
     static func totkAdresse() -> String {
@@ -2832,7 +2942,7 @@ enum Atelier {
     static let constructions = home.appendingPathComponent("constructions")
     static let registreURL = home.appendingPathComponent("registre.json")
     static let modsRoot = salonRoot.appendingPathComponent("mods")
-    enum Moteur { case nxnative, mng, obelisk, mac }
+    enum Moteur { case nxnative, mng, obelisk, pc, mac }
     /// Un jeu construit par le Salon (sources/registre.json, écrit par construire-jeu.command) : ce qu'il faut pour le refaire.
     /// travail : son dossier de construction (les fichiers du jeu déjà extraits) ; base / update / dlc : les fichiers donnés la dernière fois
     struct Inscription: Codable { var moteur: String; var base: String; var update: [String]; var dlc: [String]; var modModule: String?; var travail: String?; var titre: String? }
@@ -2840,6 +2950,7 @@ enum Atelier {
 
     static func moteurDe(_ g: Game) -> Moteur {
         if g.viaObelisk { return .obelisk }
+        if g.viaHome { return .pc }
         if g.titleID != nil { return .nxnative }
         if (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.") { return .mng }
         return .mac
@@ -2921,6 +3032,21 @@ enum Atelier {
         return paths.isEmpty ? nil : paths.joined(separator: ":")
     }
     static let outils = moteur.appendingPathComponent("outils")
+    /// Home autonome : le moteur que l'app embarque (Contents/Resources/moteur : scripts, outils, version figée des moteurs) est
+    /// installé dans <Home>/moteur quand son empreinte n'est pas celle déjà installée — au premier lancement, puis après une mise à jour de l'app
+    static func installerEmbarque() {
+        guard let src = Bundle.main.resourceURL?.appendingPathComponent("moteur"), let neuf = try? String(contentsOf: src.appendingPathComponent(".empreinte"), encoding: .utf8) else { return }
+        if neuf == (try? String(contentsOf: moteur.appendingPathComponent(".embarque"), encoding: .utf8)) { return }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [src.appendingPathComponent("outils/installer-embarque.sh").path, src.path]
+        p.environment = ProcessInfo.processInfo.environment.merging(Dossiers.env, uniquingKeysWith: { $1 })
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        guard (try? p.run()) != nil else { log("Moteur embarqué : installation impossible"); return }
+        let sortie = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""; p.waitUntilExit()
+        log("Moteur embarqué (\(neuf.prefix(12))) : " + sortie.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " · "))
+    }
+    /// Les moteurs des jeux Switch sont-ils là ? (nxnative récupéré et patché, MacNativeGames cloné)
+    static var nxnativePret: Bool { FileManager.default.fileExists(atPath: moteur.appendingPathComponent("engine/scripts/build_ipa_from_nsp.py").path) }
+    static var mngPret: Bool { FileManager.default.fileExists(atPath: home.appendingPathComponent("MacNativeGames/build_app.py").path) }
     /// Les jeux que MacNativeGames sait construire : Tears of the Kingdom et Breath of the Wild (title ID)
     static let jeuxMNG = ["0100F2C0115B6000": "Zelda: Tears of the Kingdom", "01007EF00011E000": "Zelda: Breath of the Wild"]
     /// Les title ID qu'un NSP nomme dans sa table de fichiers (tickets, certificats : <title id><génération>.tik), sinon rien
@@ -3003,7 +3129,7 @@ enum Atelier {
         }
         func q(_ x: String) -> String { "'" + x.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         var txt = "#!/bin/bash\n"
-        for (k, v) in env { txt += "export \(k)=\(q(v))\n" }
+        for (k, v) in Dossiers.env.merging(env, uniquingKeysWith: { $1 }) { txt += "export \(k)=\(q(v))\n" }
         txt += "exec /bin/bash " + ([s.path] + args).map(q).joined(separator: " ") + "\n"
         let w = dir.appendingPathComponent("\((script as NSString).deletingPathExtension)-\(Int(Date().timeIntervalSince1970)).command")
         do { try txt.write(to: w, atomically: true, encoding: .utf8); try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: w.path) }
@@ -3156,7 +3282,7 @@ extension Library {
                 if (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.totk") { lancer("mng-mods-appliquer.command", [g.url.path] + romfs, titre: "Mods de \(g.name)", jeux: [g.id]) }
                 toast = nil
             }
-        case .obelisk, .mac:
+        case .obelisk, .pc, .mac:
             toast = "Mod PC : place ses fichiers dans le dossier du jeu (Mods → Dossier du jeu)"
         }
     }
@@ -3260,7 +3386,7 @@ extension Library {
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         guard let fh = try? FileHandle(forWritingTo: logURL) else { toast = "Journal impossible : \(logURL.path)"; return false }
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [s.path] + args
-        var e = ProcessInfo.processInfo.environment; for (k, v) in env { e[k] = v }; e["HOME_TACHE"] = "1"
+        var e = ProcessInfo.processInfo.environment; for (k, v) in Dossiers.env { e[k] = v }; for (k, v) in env { e[k] = v }; e["HOME_TACHE"] = "1"
         if config.discret ?? true { e["HOME_DISCRET"] = "1" }        // construction silencieuse : cœurs économes, Mac frais
         if config.garderCaches ?? true { e["GARDER_CACHES"] = "1" }  // caches de shaders gardés (par défaut) : reconstructions courtes et froides
         p.environment = e
@@ -3467,13 +3593,122 @@ extension Library {
                              step: i + 1, steps: n, back: prec)
         }
     }
+    /// « Préparer ce Mac » : ce qu'il faut pour construire les jeux Switch (outils d'Apple, Homebrew, les deux moteurs), ce qui est déjà
+    /// là, et le script qui installe le reste (preparer-moteurs.command). L'état est lu par le même script (--etat), hors du fil principal.
+    func openPreparation(bienvenue: Bool = false, back: (() -> Void)? = nil) {
+        let titre = bienvenue ? "Bienvenue dans Home" : "Préparer ce Mac"
+        menu = SalonMenu(title: titre, subtitle: "Vérification des outils…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "wrench.and.screwdriver.fill", back: back)
+        DispatchQueue.global().async {
+            let brut = ObeliskDirect.run("/bin/bash", [Atelier.outils.appendingPathComponent("preparer-moteurs.command").path, "--etat"], timeout: 60)
+            var e: [String: String] = [:]
+            for l in brut.split(separator: "\n") { let p = l.split(separator: "=", maxSplits: 1).map(String.init); if p.count == 2 { e[p[0]] = p[1] } }
+            DispatchQueue.main.async {
+                guard self.menu?.title == titre else { return }   // le menu a été quitté entre-temps
+                func ligne(_ nom: String, _ cle: String, _ icone: String, manque: String) -> SalonMenuItem {
+                    let v = e[cle] ?? "manque"; let ok = v == "ok"
+                    return SalonMenuItem(label: nom, detail: ok ? "Prêt" : v == "outils" ? "Outils en ligne de commande seulement — Xcode entier nécessaire pour nxnative" : v.hasPrefix("manque:") ? "Manque :" + v.dropFirst(7) : manque, icon: ok ? "checkmark.circle.fill" : icone, tint: ok ? .green : .orange, info: true, action: {})
+                }
+                var items = [
+                    ligne("Xcode", "xcode", "hammer.fill", manque: "À installer depuis l'App Store"),
+                    ligne("Compilateur Metal", "metal", "cube.fill", manque: "Téléchargé par « Préparer »"),
+                    ligne("Homebrew", "brew", "shippingbox.fill", manque: "À installer : brew.sh"),
+                    ligne("Outils Homebrew", "formules", "shippingbox.fill", manque: "Installés par « Préparer »"),
+                    ligne(".NET", "dotnet", "square.stack.3d.up.fill", manque: "brew install --cask dotnet-sdk"),
+                    ligne("Python de nxnative", "python", "chevron.left.forwardslash.chevron.right", manque: "Installé par « Préparer »"),
+                    ligne("nxnative", "nxnative", "cpu", manque: "Téléchargé par « Préparer »"),
+                    ligne("MacNativeGames", "mng", "leaf.fill", manque: "Téléchargé par « Préparer »"),
+                ]
+                let pret = ["xcode", "metal", "brew", "formules", "dotnet", "python", "nxnative", "mng"].allSatisfy { e[$0] == "ok" }
+                if e["brew"] != "ok" { items.append(SalonMenuItem(label: "Ouvrir brew.sh", detail: "Homebrew s'installe dans le Terminal, avec ton mot de passe", icon: "safari.fill", section: " ", action: { NSWorkspace.shared.open(URL(string: "https://brew.sh")!) })) }
+                items.append(SalonMenuItem(label: pret ? "Tout est prêt" : "Préparer maintenant", detail: pret ? "Ajoute un jeu Switch avec la case +" : "Télécharge et installe ce qui manque (10 à 20 min)", icon: pret ? "checkmark.seal.fill" : "arrow.down.circle.fill", section: " ", tint: .green, action: {
+                    self.menu = nil; if !pret { self.lancer("preparer-moteurs.command", titre: "Préparation des moteurs") } }))
+                self.menu = SalonMenu(title: titre, subtitle: pret ? "Ce Mac peut construire les jeux Switch" : "Ce qu'il faut pour construire les jeux Switch à partir de tes dumps", items: items, hero: "wrench.and.screwdriver.fill", back: back)
+            }
+        }
+    }
+    /// Un jeu PC que la liste de compatibilité dit impossible sur Mac : la raison, et la source pour vérifier
+    func openBloque(_ nom: String, _ b: Compat.Jeu, back: (() -> Void)? = nil) {
+        Sounds.shared.play("retour")
+        var items = [SalonMenuItem(label: b.raison ?? "L'éditeur du jeu refuse Linux et Mac", detail: "Pourquoi", icon: "hand.raised.fill", tint: .red, info: true, action: {})]
+        if let p = b.preuve, let u = URL(string: p) { items.append(SalonMenuItem(label: "Voir la source", detail: u.host, icon: "safari.fill", action: { NSWorkspace.shared.open(u) })) }
+        items.append(SalonMenuItem(label: "Fermer", icon: "xmark.circle.fill", tint: .gray, action: { if let back { back() } else { self.menu = nil } }))
+        menu = SalonMenu(title: "Incompatible avec le Mac", subtitle: nom, items: items, hero: "xmark.shield.fill", text: "Home ne lance pas ce jeu : il ne démarrerait pas, ou ton compte pourrait être sanctionné. Aucune protection n'est contournée.", back: back)
+    }
+    /// Jeux PC sans Obelisk : le moteur Windows (Voile) et Legendary à installer, le compte Epic à connecter, puis la bibliothèque
+    func openPC(back: (() -> Void)? = nil) {
+        let ici: () -> Void = { self.openPC(back: back) }
+        menu = SalonMenu(title: "Jeux PC", subtitle: "Vérification…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "desktopcomputer", back: back)
+        DispatchQueue.global().async {
+            let e = PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]
+            DispatchQueue.main.async {
+                guard self.menu?.title == "Jeux PC" else { return }
+                let voile = e["voile"] as? String, leg = e["legendary"] as? Bool ?? false, compte = e["compte"] as? String
+                var items: [SalonMenuItem] = []
+                if voile == nil || !leg {
+                    items.append(SalonMenuItem(label: "Installer le moteur Windows", detail: voile == nil ? "Voile, le moteur d'Obelisk : 500 Mo à télécharger, 3 Go sur le disque" : "Legendary, pour ton compte Epic Games", icon: "arrow.down.circle.fill", tint: .green, action: {
+                        self.menu = nil; self.lancer("pc.command", ["preparer"], titre: "Installation du moteur Windows") }))
+                } else if compte == nil {
+                    items.append(SalonMenuItem(label: "Se connecter à Epic Games", detail: "Sur le site d'Epic : Home ne voit jamais ton mot de passe", icon: "person.crop.circle.badge.plus", tint: .green, action: { self.connexionEpic(retour: ici) }))
+                } else {
+                    items.append(SalonMenuItem(label: "Ma bibliothèque Epic Games", detail: "Compte \(compte ?? "")", icon: "books.vertical.fill", tint: .green, action: { self.openBibliotheque(back: ici) }))
+                    items.append(SalonMenuItem(label: "Changer de compte", icon: "person.crop.circle.badge.plus", tint: .gray, action: { self.connexionEpic(retour: ici) }))
+                }
+                items.append(SalonMenuItem(label: voile.map { "Moteur Voile \($0)" } ?? "Moteur Voile absent", detail: (e["voile_source"] as? String) == "obelisk" ? "Celui d'Obelisk, déjà sur ce Mac" : nil, icon: voile == nil ? "circle" : "checkmark.circle.fill", section: "État", tint: voile == nil ? .orange : .green, info: true, action: {}))
+                if FileManager.default.fileExists(atPath: "/Applications/Obelisk.app") { items.append(SalonMenuItem(label: "Ouvrir Obelisk", detail: "Pour Steam et GOG, que Home ne gère pas encore", icon: "desktopcomputer", section: "Autres boutiques", tint: .indigo, action: { self.menu = nil; self.ouvrirObelisk() })) }
+                self.menu = SalonMenu(title: "Jeux PC", subtitle: "Epic Games, sans Obelisk", items: items, hero: "desktopcomputer", back: back)
+            }
+        }
+    }
+    /// Connexion Epic : la page de connexion d'Epic s'ouvre dans le navigateur et affiche un code (authorizationCode) à coller ici
+    func connexionEpic(retour: @escaping () -> Void) {
+        NSWorkspace.shared.open(URL(string: "https://legendary.gl/epiclogin")!)
+        let a = NSAlert(); a.messageText = "Connexion à Epic Games"
+        a.informativeText = "Une page d'Epic vient de s'ouvrir dans ton navigateur. Connecte-toi : elle affiche ensuite un texte avec « authorizationCode ». Copie ce code (ou tout le texte) et colle-le ici."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24)); a.accessoryView = f; a.window.initialFirstResponder = f
+        a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let code = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); guard !code.isEmpty else { return }
+        toast = "Connexion à Epic…"
+        DispatchQueue.global().async {
+            let s = PCHome.run(["connexion", code], timeout: 60)
+            DispatchQueue.main.async { self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
+        }
+    }
+    /// La bibliothèque Epic du compte : chaque jeu avec sa compatibilité ; un jeu bloqué montre sa raison, les autres s'installent
+    func openBibliotheque(back: @escaping () -> Void) {
+        menu = SalonMenu(title: "Bibliothèque Epic Games", subtitle: "Lecture de ta bibliothèque…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "books.vertical.fill", back: back)
+        DispatchQueue.global().async {
+            let s = PCHome.run(["bibliotheque"], timeout: 120); let l = PCHome.json(s) as? [[String: Any]]
+            DispatchQueue.main.async {
+                guard self.menu?.title == "Bibliothèque Epic Games" else { return }
+                guard let l else { self.toast = PCHome.echec(s) ?? "Bibliothèque illisible"; back(); return }
+                let ici: () -> Void = { self.openBibliotheque(back: back) }
+                let items: [SalonMenuItem] = l.compactMap { j in
+                    guard let app = j["app"] as? String, let nom = j["nom"] as? String else { return nil }
+                    let etat = j["etat"] as? String ?? "inconnu", installe = j["installe"] as? Bool ?? false
+                    if etat == "bloque" {
+                        let b = Compat.Jeu(nom: nom, epic: app, espace: nil, steam: nil, etat: etat, raison: j["raison"] as? String, preuve: j["preuve"] as? String)
+                        return SalonMenuItem(label: nom, detail: "Incompatible — " + (b.raison ?? ""), icon: "xmark.shield.fill", tint: .red, action: { self.openBloque(nom, b, back: ici) })
+                    }
+                    let detail = installe ? "Installé" : etat == "verifie" ? "Vérifié sur Mac" : etat == "linux" ? "Fonctionne sous Linux — pas encore confirmé sur Mac" : (j["lanceur"] as? String).map { "Passe par le lanceur \($0) — pas testé" } ?? "Pas encore testé"
+                    return SalonMenuItem(label: nom, detail: detail, icon: installe ? "checkmark.circle.fill" : etat == "verifie" ? "checkmark.seal.fill" : "arrow.down.circle", tint: installe || etat == "verifie" ? .green : etat == "linux" ? .teal : .gray, action: {
+                        if installe { self.toast = "\(nom) est déjà installé"; return }
+                        self.menu = SalonMenu(title: "Installer", subtitle: nom, items: [
+                            SalonMenuItem(label: "Télécharger et installer", detail: detail, icon: "arrow.down.circle.fill", tint: .green, action: { self.menu = nil; self.lancer("pc.command", ["installer", app], titre: "Installation de \(nom)") }),
+                        ], hero: "arrow.down.circle.fill", back: ici) })
+                }
+                self.menu = SalonMenu(title: "Bibliothèque Epic Games", subtitle: "\(items.count) jeux", items: items.isEmpty ? [SalonMenuItem(label: "Aucun jeu Windows sur ce compte", icon: "tray", info: true, action: {})] : items, hero: "books.vertical.fill", back: back)
+            }
+        }
+    }
     func openAddMenu(back: (() -> Void)? = nil) {
         if menu == nil { Sounds.shared.play("ouvrir") }
         let ici: () -> Void = { self.openAddMenu(back: back) }
         menu = SalonMenu(title: "Ajouter un jeu", subtitle: "Que veux-tu ajouter ?", items: [
             SalonMenuItem(label: "Jeu Switch", icon: "gamecontroller.fill", action: {
+                if !Atelier.nxnativePret && !Atelier.mngPret { self.openPreparation(back: ici); return }   // aucun moteur : d'abord préparer ce Mac
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
-            SalonMenuItem(label: "Jeu PC — Epic Games ou Steam", icon: "desktopcomputer", action: { self.menu = nil; self.ouvrirObelisk() }),
+            SalonMenuItem(label: "Jeu PC — Epic Games", detail: "Ta bibliothèque, installée et lancée par Home", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
             SalonMenuItem(label: "App Mac", icon: "macwindow", action: { self.menu = nil; self.addGame() }),
         ], hero: "plus.app.fill", back: back)
     }

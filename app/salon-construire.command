@@ -55,6 +55,16 @@ if [ -f "$B/AppIcon.png" ]; then mkdir -p "$B/AppIcon.iconset"; for sz in 16 32 
 # l'empreinte de la source : « Mettre à jour Home » ne recompile que si elle a changé
 cat "$D/main.swift" "$D/veille.swift" "$0" 2>/dev/null | shasum -a 256 | cut -c1-64 > "$B/Salon.app/Contents/Resources/source.sha"
 if [ -d "$D/sons" ]; then mkdir -p "$B/Salon.app/Contents/Resources/sons"; cp -R "$D/sons/." "$B/Salon.app/Contents/Resources/sons/"; fi
+# Le moteur embarqué : les scripts, les outils, la version figée des moteurs et la source de Home. L'app les installe dans
+# <Home>/moteur à son premier lancement et après une mise à jour (moteur/outils/installer-embarque.sh) : c'est ce qui la rend autonome.
+# Depuis le dépôt, le moteur est à côté (../moteur) ; depuis l'installation (<Home>/moteur/salon), c'est le dossier parent.
+MO="$D/../moteur"; [ -d "$MO/outils" ] || MO="$D/.."
+if [ -d "$MO/outils" ]; then E="$B/Salon.app/Contents/Resources/moteur"; mkdir -p "$E/salon"
+  for d in outils tools patches obelisk pc compat mng; do [ -d "$MO/$d" ] && rsync -a --exclude .DS_Store --exclude __pycache__ --exclude tests --exclude notes --exclude 'recette-*.json' --exclude legendary-path.txt "$MO/$d" "$E/"; done
+  cp "$MO/.upstream-ref" "$MO/README.md" "$E/" 2>/dev/null
+  rsync -a --exclude .DS_Store --exclude .build --exclude '*.log' --exclude 'main.swift.avant-*' --exclude 'cle-*' "$D/" "$E/salon/"
+  ( cd "$E" && find . -type f ! -name .empreinte -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-64 ) > "$E/.empreinte"
+fi
 # Signature : si tu as créé un certificat « Salon Dev » (Trousseaux d'accès → Assistant de certification → Créer un certificat, type « Signature de code »),
 # l'app est signée avec et macOS garde ses autorisations (Accessibilité, Enregistrement d'écran, données d'autres apps) d'une version à l'autre.
 # Sinon, signature ad hoc : l'identité change à chaque compilation et macOS redemande les autorisations.

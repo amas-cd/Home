@@ -1,0 +1,38 @@
+From 67b1fbb444bdba239f0ed30058d07b761527bef0 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 23:16:41 +0000
+Subject: [PATCH 11/44] loader: a retail module's symbol table seen by a mod
+ points at the host replacements
+
+The mod resolves its SDK imports by name through rtld's module list and reached the SDK's nn::hid::InitializeTouchScreen
+(hid IPC) past the replacement the loader had bound.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index c767764d..8ff93d79 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -342,6 +342,18 @@ static void rtld_module_list(void) {
+    switch(tag){case 2:o->rela_plt_size=val;break;case 3:o->got=ptr;break;case 4:o->hash_bucket=ptr;if(ptr&&val+8<=m->key_off){uint32_t nb,nc;memcpy(&nb,ptr,4);memcpy(&nc,(uint8_t *)ptr+4,4);o->hash_nbucket=nb;o->hash_nchain=nc;o->hash_bucket=(uint8_t *)ptr+8;o->hash_chain=(uint8_t *)ptr+8+(uint64_t)nb*4;}break;
+     case 5:o->dynstr=ptr;break;case 6:o->dynsym=ptr;break;case 7:o->rela=ptr;break;case 8:o->rela_dyn_size=val;break;case 10:o->dynstr_size=val;break;
+     case 12:o->dt_init=ptr;break;case 13:o->dt_fini=ptr;break;case 23:o->rela_plt=ptr;break;case 0x6ffffff9:o->rela_count=val;break;case 0x6ffffffa:o->rel_count=val;break;case 14:o->soname_idx=val;break;default:break;}}
++  /* A mod resolves symbols by name through these tables (its SDK imports among them — that is how it reached the SDK's own
++     nn::hid::InitializeTouchScreen past the host replacement the loader had bound). A retail module's symbol table is
++     therefore a copy in which every symbol the host replaces points at the replacement (its value is the replacement's
++     address relative to the module base, as the lookup adds the base), exactly what relocation gives the game. */
++  if(m->ctor_flag&&o->dynsym&&o->dynstr&&o->hash_nchain){
++   size_t n=o->hash_nchain;uint8_t *copy=malloc(n*24);need(copy!=NULL,"symbol table copy");memcpy(copy,o->dynsym,n*24);unsigned replaced=0;
++   for(size_t k=1;k<n;k++){uint32_t nm;uint16_t shndx;memcpy(&nm,copy+k*24,4);memcpy(&shndx,copy+k*24+6,2);
++    if(!shndx||nm>=o->dynstr_size)continue;const char *name=(const char *)o->dynstr+nm;
++    void *h=runtime_override(name);if(!h)continue;
++    uint64_t v=(uint64_t)((uintptr_t)runtime_hle_wrap_named(h,name)-(uintptr_t)m->base);memcpy(copy+k*24+8,&v,8);replaced++;}
++   o->dynsym=copy;fprintf(stderr,"[totk] %s: %u of %zu symbols point at host replacements for a mod's lookups\n",m->name,replaced,n);
++  }
+   if(prev){prev->next=o;o->prev=prev;}else{rtld_auto_list.front=o;o->prev=(RtldModule *)&rtld_auto_list;}
+   prev=o;linked++;
+  }

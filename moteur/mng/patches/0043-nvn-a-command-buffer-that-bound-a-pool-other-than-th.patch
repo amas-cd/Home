@@ -1,0 +1,35 @@
+From a90089cd6f2a51d57815ed1a973b495d1430a489 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Wed, 11 Nov 2026 13:02:23 +0000
+Subject: [PATCH 43/44] nvn: a command buffer that bound a pool other than the
+ first shifts texture and sampler ID 0 too
+
+TOTK Online's overlay registers its font atlas as texture 0 and sampler 0 of its own two-entry pools, so its
+handle is 0. Only non-zero IDs were shifted into the pool's part of the host table: the overlay's draws sampled
+the first pool's empty slot 0 and came out fully transparent (the player list, chat, name tags and map icons
+drew 155,472 and 241,663 samples a frame and showed nothing). ID 0 is a real entry of such a pool.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
+index 85399783..dd5ab51b 100644
+--- a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
++++ b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
+@@ -2138,8 +2138,11 @@ static void bind_handles_rec(NVNcommandBuffer *c, int op, int st, int first, int
+         if ((tb || sb) && deferred) { static _Atomic int said; if (!atomic_exchange(&said, 1)) LOG("【红】延迟绑定的句柄在提交时才读：非首个描述符池的编号偏移还没加到它们上"); }
+         for (int i = 0; i < n && (tb || sb) && !deferred; i++) {
+             uint64_t v = r->h[i], tid = v & 0xfffff, sid = v >> 20;
+-            if (op == OP_BIND_SAMP) { if (sid) r->h[i] = (sid + (uint64_t)sb) << 20; }
+-            else { if (tid) tid += (uint64_t)tb; if (sid && op == OP_BIND_TEX) sid += (uint64_t)sb; r->h[i] = tid | sid << 20; }
++            /* ID 0 is a real entry of such a pool, not "no texture": TOTK Online's overlay registers its font atlas as texture 0
++               and sampler 0 of its own two-entry pools, so its handle is 0. Left unshifted it named the first pool's empty
++               slot 0: every overlay draw (player list, chat, name tags, map icons) sampled zero and was fully transparent. */
++            if (op == OP_BIND_SAMP) r->h[i] = (sid + (uint64_t)sb) << 20;
++            else { tid += (uint64_t)tb; if (op == OP_BIND_TEX) sid += (uint64_t)sb; r->h[i] = tid | sid << 20; }
+         }
+     }
+     if (totk_life_on() && (op == OP_BIND_TEX || op == OP_BIND_IMG)) for (int k = 0; k < n; k++) life_bind(c, op, st, first + k, h + k, deferred);

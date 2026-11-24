@@ -1,0 +1,36 @@
+From 80da4212114befd91d3cc5fcc43fa9badb089a23 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Wed, 11 Nov 2026 13:10:18 +0000
+Subject: [PATCH 44/44] totk: with TOTK_RT=0 the present thread asks for
+ user-interactive QoS
+
+Without the time-constraint declaration it kept an unspecified QoS (priority 46): macOS ran the frame's submission on
+the efficiency cores at 1.6 GHz, 11 ms of CPU a frame, 45-55 fps with the CPU 13 % busy.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
+index dd5ab51b..c13af9ac 100644
+--- a/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
++++ b/games/totk/third_party/d2r_gfx/gfx/nvn/hle_nvn.c
+@@ -3135,7 +3135,15 @@ static void slow_emit(uint64_t f) {
+    MacBook Air M5: 1.4-2 GHz, 40-50 fps; Ocarina of Time's market on nxnative went from 10-16 to 60 fps with DM_RT=0). */
+ static int rt_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("TOTK_RT"); if (!e || !*e) e = getenv("DM_RT"); v = !(e && !strcmp(e, "0")); if (!v) LOG("[nvn] TOTK_RT=0: the present thread gets no time-constraint policy (QoS only)"); } return v; }
+ static void set_time_constraint_comp(uint64_t period_ns, uint64_t comp_ns) {
+-    if (!rt_on()) return;
++    if (!rt_on()) {
++        /* Without the declaration this thread (the acquire / present thread, the frame's submission) kept an unspecified
++           QoS (the log's "出图 QoS 0", priority 46): macOS ran it on the efficiency cores at 1.6 GHz, 11 ms of CPU a
++           frame, 45-55 fps with the CPU 13 % busy. User-interactive keeps it on the performance cores. */
++        static __thread int done; if (done) return; done = 1;
++        int e = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
++        LOG("[nvn] TOTK_RT=0: present thread QoS user-interactive %s", e ? "refused" : "set");
++        return;
++    }
+     static mach_timebase_info_data_t tb; if (!tb.denom) mach_timebase_info(&tb);
+     if (comp_ns < 1000000ull) comp_ns = 1000000ull; if (comp_ns > period_ns * 9 / 10) comp_ns = period_ns * 9 / 10;
+     thread_time_constraint_policy_data_t p = {

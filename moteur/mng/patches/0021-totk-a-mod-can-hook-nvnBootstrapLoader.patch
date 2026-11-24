@@ -1,0 +1,72 @@
+From ed2e5b5931f67592d539730f6a293826f7413c4d Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 10:37:46 +0000
+Subject: [PATCH 21/44] totk: a mod can hook nvnBootstrapLoader
+
+TOTK Online inline-hooks nvnBootstrapLoader (found through rtld's module
+list) to wrap nvnDeviceGetProcAddress and nvnCommandBufferInitialize, where
+it creates its overlay state. The import was bound straight to the host, so
+the hook never ran and the first frame stopped in the mod's null check
+(SIGTRAP). The symbol now keeps its sdk address, whose first words forward
+to the host replacement, and its imports are bound there.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/loader.c | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 0bae610d..30d3e3e9 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -286,6 +286,33 @@ static void export_ios_text(const char *rewritten,const char *out) {
+   printf("%s text_bytes=%zu patched_words=%u patch_area_bytes=%zu patched_words=%u\n",m->name,n,diff,p1-p0,pdiff);}
+ }
+ #endif
++/* Host replacements a mod hooks by name. An exlaunch-style mod (TOTK Online) finds nvnBootstrapLoader through rtld's module list and
++   puts an inline hook at its first instruction, to wrap nvnDeviceGetProcAddress and from there nvnCommandBufferInitialize, where it
++   creates the state its overlay draws with. With the import bound straight to the host, the hook landed in sdk code nothing runs (or,
++   with the symbol pointing at the host, outside every module, which the mod refuses), its state stayed null and the first frame
++   stopped in the mod's null check (SIGTRAP). Such a symbol keeps its own address in sdk: its first words become a thunk to the host
++   replacement (a nop the mod may move into its trampoline, then ldr/br to the host), and every import of it is bound to that address,
++   so the game's calls pass through the mod's hook as on the console. */
++static const char *const hookable_names[]={"nvnBootstrapLoader"};
++static int hookable(const char *name){for(unsigned i=0;i<sizeof hookable_names/sizeof*hookable_names;i++)if(!strcmp(name,hookable_names[i]))return 1;return 0;}
++static void *hookable_entry(const char *name,void *host){
++#if TARGET_OS_IPHONE
++ return host;   /* the embedded text is mapped r-x from the start */
++#endif
++ static const char *done_name[4];static void *done_addr[4];static unsigned ndone;
++ for(unsigned i=0;i<ndone;i++)if(!strcmp(done_name[i],name))return done_addr[i];
++ for(unsigned i=0;i<NM;i++){Module *m=&modules[i];if(strcmp(m->name,"sdk"))continue;
++  for(unsigned k=0;k<m->nsym;k++){const Symbol *s=&m->symbols[k];
++   if(!s->defined||strcmp(s->name,name))continue;
++   if(s->value&3||s->value+20>m->text_end||(s->size&&s->size<20)){fprintf(stderr,"[totk] %s: no room for a hookable thunk in sdk, bound to the host\n",name);return host;}
++   uint32_t *w=(uint32_t *)(m->base+s->value);uint64_t h=(uint64_t)(uintptr_t)host;
++   w[0]=0xd503201f;w[1]=0x58000050;w[2]=0xd61f0200;memcpy(&w[3],&h,8);   /* nop; ldr x16, #8; br x16; .quad host */
++   if(ndone<4){done_name[ndone]=name;done_addr[ndone]=w;ndone++;}
++   fprintf(stderr,"[totk] %s: sdk+%#llx forwards to the host, imports bound there (a mod may hook it)\n",name,(unsigned long long)s->value);
++   return w;}
++ }
++ return host;
++}
+ static void relocate(Module *m) {
+  for(unsigned i=0;i<m->nreloc;i++) {
+   const Reloc *r=&m->relocs[i];
+@@ -297,6 +324,7 @@ static void relocate(Module *m) {
+    const Symbol *s=&m->symbols[r->symbol];void *p=r->kind==1026?runtime_observer(s->name):NULL;const char *how=p?"observer":NULL;
+    if(!p){p=runtime_override(s->name);if(p)how="host";}
+    if(p)p=runtime_hle_wrap_named(p,s->name);   /* host replacements run on the thread's host stack */
++   if(p&&hookable(s->name))p=hookable_entry(s->name,p);
+    if(!p){p=s->defined?(s->value<m->key_off?m->base+s->value:NULL):runtime_symbol(s->name);if(p)how=s->defined?"own":"game";}
+    if(m->ctor_flag==0&&!s->defined&&getenv("TOTK_DEBUG_LOG"))fprintf(stderr,"[totk] %s: import %s -> %s%s\n",m->name,s->name,how?how:"0",r->kind==1026?" (plt)":"");   /* a mod module's imports, for the log */
+    if(!p&&s->binding!=2){
+@@ -350,6 +378,7 @@ static void rtld_module_list(void) {
+    size_t n=o->hash_nchain;uint8_t *copy=malloc(n*24);need(copy!=NULL,"symbol table copy");memcpy(copy,o->dynsym,n*24);unsigned replaced=0;
+    for(size_t k=1;k<n;k++){uint32_t nm;uint16_t shndx;memcpy(&nm,copy+k*24,4);memcpy(&shndx,copy+k*24+6,2);
+     if(!shndx||nm>=o->dynstr_size)continue;const char *name=(const char *)o->dynstr+nm;
++    if(hookable(name))continue;   /* keeps its sdk address: the thunk (hookable_entry) */
+     void *h=runtime_override(name);if(!h)continue;
+     uint64_t v=(uint64_t)((uintptr_t)runtime_hle_wrap_named(h,name)-(uintptr_t)m->base);memcpy(copy+k*24+8,&v,8);replaced++;}
+    o->dynsym=copy;fprintf(stderr,"[totk] %s: %u of %zu symbols point at host replacements for a mod's lookups\n",m->name,replaced,n);

@@ -1,0 +1,498 @@
+From 547b25cd8adc24e4af4f5de087efe458fbb62436 Mon Sep 17 00:00:00 2001
+From: Anas <anas@local>
+Date: Sun, 8 Nov 2026 21:41:10 +0000
+Subject: [PATCH 01/44] TOTK: a mod's own code module (--mod-module),
+ MapProcessMemory for its hooks, real nn::socket for it (TOTK Online),
+ TOTK_BORDERLESS window
+
+---
+ build_app.py                          | 24 +++++--
+ games/totk/Makefile                   | 14 ++--
+ games/totk/runtime/frontend.m         | 11 +++
+ games/totk/runtime/loader.c           |  4 +-
+ games/totk/runtime/online_host.c      | 84 +++++++++++++++++++++++
+ games/totk/runtime/services.c         | 35 ++++++++++
+ games/totk/scripts/mod_module.py      | 97 +++++++++++++++++++++++++++
+ games/totk/scripts/prepare_runtime.py | 21 ++++--
+ 8 files changed, 270 insertions(+), 20 deletions(-)
+ create mode 100644 games/totk/runtime/online_host.c
+ create mode 100644 games/totk/scripts/mod_module.py
+
+diff --git a/build_app.py b/build_app.py
+index 4d30ed55..ccddc641 100644
+--- a/build_app.py
++++ b/build_app.py
+@@ -650,7 +650,7 @@ def merge_mod_exefs(tree, mod, version, logs):
+     return merged, report_path
+ 
+ 
+-def step_code(tree, game, keys, env, logs, *, version="v0", mod=None):
++def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module=None):
+     expected = VERSIONS[version]
+     update_args = [] if version == "v0" else ["--update"]
+     py = tree / '.venv/bin/python'
+@@ -704,13 +704,25 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None):
+     # was verified site by site (python3 games/totk/scripts/verify_rewrites.py re-runs that verification, hours) unless
+     # --mod merged a patch into main, which the report records.
+     digests = {f'{name}.patched.bin': sha256(out / f'{name}.patched.bin') for name in ('main', 'sdk', 'subsdk0')}
++    extra = {}
++    if mod_module:
++        # A mod's own code module (scripts/mod_module.py): inventoried and rewritten like the retail ones, loaded next to
++        # them (the loader takes the module list from the tables; prepare_runtime.py lists every subsdkN rewritten).
++        say(f'1/4 code: adding the mod module {mod_module.name} as a code module of the app')
++        mm_report = tree / f'extracted/{version}/mod-module.json'
++        run([py, 'scripts/mod_module.py', '--tree', tree, '--version', version, '--module', mod_module, '--report', mm_report],
++            logs / f'mod-module-{version}.log', cwd=tree)
++        mm = json.loads(mm_report.read_text())
++        extra = {f'extracted/{version}/exefs/{mm["name"]}': mm['module_sha256'], f'rewritten/{version}/{mm["name"]}.patched.bin': mm['rewritten_sha256']}
++        say(f'   {mm["name"]}: {mm["text_size"] // 1024} KiB of code, rewritten {mm["rewritten_sha256"][:16]}...')
+     scope = f'hash match with verified {expected["display_version"]} rewrite'
+     if merged:
+         scope = (f'verified {expected["display_version"]} rewrite, with the main-module patches of {merged["folder"]} '
+                  f'merged before it ({merged["patched_main_sha256"][:16]}...); the mod\u2019s bytes are bound by hash')
+     report = dict(format=1, status='pass', rom_version=version, scope=scope,
+                   module_file_sha256={**{f'extracted/{version}/exefs/{n}': want[n] for n in ('main', 'sdk', 'subsdk0')},
+-                                      **{f'rewritten/{version}/{n}': digests[n] for n in digests}},
++                                      **{f'rewritten/{version}/{n}': digests[n] for n in digests}, **extra},
++                  **({'mod_module': str(mod_module)} if mod_module else {}),
+                   **({'mod_exefs': {key: merged[key] for key in
+                                     ('folder', 'folder_sha256', 'build_id', 'patches', 'edit_bytes', 'reserved_sites',
+                                      'retail_main_sha256', 'patched_main_sha256', 'rewritten_main_sha256',
+@@ -2693,6 +2705,9 @@ def parse_args(argv):
+                     help='a mod folder prepared before the build: its exefs/ IPS / IPS32 / pchtxt patches for the main '
+                          'module are merged into the code before it is rewritten (its romfs/ goes in with '
+                          '--install-mod-romfs; docs/mods.md)')
++    ap.add_argument('--mod-module', type=Path, metavar='NSO',
++                    help="a mod's own code module (TOTK Online's subsdk4, say): rewritten for Apple silicon and loaded "
++                         'beside the game\'s modules, so its run-time hooks and its code run (scripts/mod_module.py)')
+     ap.add_argument('--install-mod-romfs', action='store_true',
+                     help='with --mod: at the end of the build, replace <data>/mods/<version> with the mod\'s romfs/ '
+                          'and its manifest.tsv, so the app plays with the mod. That folder is the player\'s: what it '
+@@ -2941,10 +2956,11 @@ def main(argv):
+             ('' if not native_5k or native_5k_roomy() else
+             '. Note: this Mac has less than 32 GB of memory; a native 5K app reserves about 2.7 GiB more than a 4K one at'
+             ' every start, whatever is shown'))
+-    step_code(tree, game, keys, env, logs, mod=None if update else code_mod)
++    mod_module = args.mod_module.expanduser().resolve() if getattr(args, 'mod_module', None) else None
++    step_code(tree, game, keys, env, logs, mod=None if update else code_mod, mod_module=None if update else mod_module)
+     if update:
+         step_code(tree, update, keys, env, logs, version=version,
+-                  mod=code_mod)   # a mod is for the updated main, not for 1.0.0
++                  mod=code_mod, mod_module=mod_module)   # a mod is for the updated main, not for 1.0.0
+     step_data(tree, game, keys, logs, firmware=firmware, shared_fonts=shared_fonts, mod=None if update else mod)
+     if update:
+         step_update_data(tree, game, update, keys, logs, version=version, mod=mod, native_4k=native_4k, native_5k=native_5k, vr=args.vr)
+diff --git a/games/totk/Makefile b/games/totk/Makefile
+index 3ba0a791..3dd111c4 100644
+--- a/games/totk/Makefile
++++ b/games/totk/Makefile
+@@ -99,7 +99,7 @@ $(eval $(call GAME_DATA,pkp,analysis/pkp-port/phase12-validation.json))
+ .PHONY: runtime binary probe-loader boot
+ 
+ build/totk-native: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(GFX_OBJECTS) Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework IOSurface -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework IOSurface -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -o "$@"
+ 
+ # Both warm-up lists come from the one shared shader list (docs/shader-list.md): pso_title.tsv is what the title screen,
+ # its menu and the save list use, the only list the first frame waits for (nvn_mtl.m warm_start); pso_manifest.tsv the rest.
+@@ -393,14 +393,14 @@ probe-world-survey: build/world-survey-probe
+ # Isolated 1.2.1 build (the same SDK modules as 1.0.0); never replace the validated v0 executable or its game data.
+ .PHONY: runtime-v121 binary-v121
+ build/totk-native-v121: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(GFX_OBJECTS) Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DTOTK_GAME_V121=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DTOTK_GAME_V121=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
+ binary-v121: build/totk-native-v121 build/pso_manifest.tsv build/pso_title.tsv
+ runtime-v121: binary-v121 game-data-v121
+ 
+ # Isolated 1.4.3 build; never replace the validated v0 executable or its game data.
+ .PHONY: runtime-v143 binary-v143
+ build/totk-native-v143: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(filter-out build/gfx/zeldaVR/gfx/totk_vr.m.o,$(GFX_OBJECTS)) build/gfx-v143/zeldaVR/gfx/totk_vr.m.o Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DTOTK_GAME_V143=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_v143.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(filter-out build/gfx/zeldaVR/gfx/totk_vr.m.o,$(GFX_OBJECTS)) build/gfx-v143/zeldaVR/gfx/totk_vr.m.o /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DTOTK_GAME_V143=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_v143.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(filter-out build/gfx/zeldaVR/gfx/totk_vr.m.o,$(GFX_OBJECTS)) build/gfx-v143/zeldaVR/gfx/totk_vr.m.o /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
+ binary-v143: build/totk-native-v143 build/pso_manifest.tsv build/pso_title.tsv
+ runtime-v143: binary-v143 game-data-v143
+ 
+@@ -459,7 +459,7 @@ build/game-data/botw160/aoc-config.txt: scripts/prepare_romfs_backend.py $(wildc
+ 	"$(PY)" scripts/prepare_romfs_backend.py --version botw160 --aoc
+ game-data-botw160: build/game-data/botw160/aoc-config.txt
+ build/totk-native-botw160: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(GFX_OBJECTS_BOTW) Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_BOTW=1 -DGAME_BOTW160=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_botw.c runtime/aoc_romfs.c runtime/settings_service.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_BOTW) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_BOTW=1 -DGAME_BOTW160=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_botw.c runtime/aoc_romfs.c runtime/settings_service.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_BOTW) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
+ runtime-botw160 binary-botw160: SHADER_LIST ?= ../botw/assets/shader_list.tsv
+ binary-botw160: build/totk-native-botw160 build/pso_manifest.tsv build/pso_title.tsv
+ runtime-botw160: binary-botw160 game-data-botw160
+@@ -475,7 +475,7 @@ build/game-data/botw190/aoc-config.txt: scripts/prepare_romfs_backend.py $(wildc
+ 	"$(PY)" scripts/prepare_romfs_backend.py --version botw190 --aoc
+ game-data-botw190: build/game-data/botw190/aoc-config.txt
+ build/totk-native-botw190: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(GFX_OBJECTS_BOTW190) Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_BOTW=1 -DGAME_BOTW190=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_botw.c runtime/aoc_romfs.c runtime/settings_service.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_BOTW190) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_BOTW=1 -DGAME_BOTW190=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_botw.c runtime/aoc_romfs.c runtime/settings_service.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_BOTW190) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
+ runtime-botw190 binary-botw190: SHADER_LIST ?= ../botw/assets/shader_list.tsv
+ binary-botw190: build/totk-native-botw190 build/pso_manifest.tsv build/pso_title.tsv
+ runtime-botw190: binary-botw190 game-data-botw190
+@@ -488,7 +488,7 @@ build/gfx-dkb/%.o: % $(GFX_HEADERS) Makefile
+ 	xcrun clang $(NATIVE_OPT) -g -Wall -Wextra $(GFX_FLAGS) -DGAME_DKB=1 -DGAME_NS2=1 -c "$<" -o "$@"
+ .PHONY: runtime-dkb binary-dkb
+ build/totk-native-dkb: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(GFX_OBJECTS_DKB) Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_DKB=1 -DGAME_NS2=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_ns2.c runtime/ns2_host.c runtime/ns2_codec.c runtime/ns2_audio_out.c runtime/ns2_opus_ms.c runtime/offline_host.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_DKB) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_DKB=1 -DGAME_NS2=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_ns2.c runtime/ns2_host.c runtime/ns2_codec.c runtime/ns2_audio_out.c runtime/ns2_opus_ms.c runtime/offline_host.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_DKB) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
+ runtime-dkb binary-dkb: SHADER_LIST ?= ../dkb/assets/shader_list.tsv
+ binary-dkb: build/totk-native-dkb build/pso_manifest.tsv build/pso_title.tsv
+ runtime-dkb: binary-dkb game-data-dkb
+@@ -500,7 +500,7 @@ build/gfx-pkp/%.o: % $(GFX_HEADERS) Makefile
+ 	xcrun clang $(NATIVE_OPT) -g -Wall -Wextra $(GFX_FLAGS) -DGAME_POKOPIA=1 -DGAME_NS2=1 -c "$<" -o "$@"
+ .PHONY: runtime-pkp binary-pkp
+ build/totk-native-pkp: $(wildcard runtime/*.[ch] runtime/*.m runtime/*.S) $(GFX_OBJECTS_PKP) Makefile runtime/game_info.plist app/launcher.m runtime/cloud_save.m
+-	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_POKOPIA=1 -DGAME_NS2=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_ns2.c runtime/ns2_host.c runtime/ns2_codec.c runtime/ns2_audio_out.c runtime/ns2_opus_ms.c runtime/offline_host.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_PKP) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
++	xcrun clang -std=c11 $(NATIVE_OPT) $(GAME_INFO) -g -Wall -Wextra -Werror -Wno-deprecated-declarations -Ithird_party/d2r_gfx/gfx/nvn/include -DGAME_POKOPIA=1 -DGAME_NS2=1 -Ibuild -I/opt/homebrew/opt/opus/include/opus -I/opt/homebrew/opt/libvpx/include runtime/loader.c runtime/game_data.c runtime/game_patches_ns2.c runtime/ns2_host.c runtime/ns2_codec.c runtime/ns2_audio_out.c runtime/ns2_opus_ms.c runtime/offline_host.c runtime/world_survey.c runtime/game_slot.c runtime/services.c runtime/online_host.c runtime/romfs.c runtime/threads.c runtime/gate.S runtime/hle_stack.S runtime/hle_stack.c runtime/thread_enter.S runtime/gfx_bridge.c runtime/frontend.m runtime/account.c runtime/input.c runtime/hid_feedback.c runtime/motion_fusion.c runtime/autoload.c runtime/gamepad.m runtime/input_prompts.m runtime/gamepad_feedback.m runtime/gfx_probe.c runtime/vpool_probe.m runtime/gpu_path_probe.m runtime/memory_probe.c runtime/shared_font.c runtime/ipc.c runtime/audio_renderer.c runtime/audio_mixer.c runtime/audio_reverb.c runtime/audio_effects.c runtime/fs_host.c runtime/opus_codec.c runtime/movie_host.c runtime/time_host.c runtime/applet_host.c runtime/swkbd_host.c app/launcher.m runtime/cloud_save.m $(GFX_OBJECTS_PKP) /opt/homebrew/opt/opus/lib/libopus.a /opt/homebrew/opt/libvpx/lib/libvpx.a -framework Metal -framework MetalFX -framework Foundation -framework QuartzCore -framework ImageIO -framework CoreGraphics -framework CoreText -framework UniformTypeIdentifiers -fobjc-arc -framework Cocoa -framework CoreVideo -framework CoreFoundation -framework AudioToolbox -framework GameController -framework CoreHaptics -framework IOKit -framework IOSurface -o "$@"
+ runtime-pkp binary-pkp: SHADER_LIST ?= ../pokopia/assets/shader_list.tsv
+ binary-pkp: build/totk-native-pkp build/pso_manifest.tsv build/pso_title.tsv
+ runtime-pkp: binary-pkp game-data-pkp
+diff --git a/games/totk/runtime/frontend.m b/games/totk/runtime/frontend.m
+index cf4ca159..66684088 100644
+--- a/games/totk/runtime/frontend.m
++++ b/games/totk/runtime/frontend.m
+@@ -710,6 +710,7 @@ void runtime_front_resize_aspect(double ratio){
+  if(!isfinite(ratio)||ratio<0.5||ratio>8)return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+   if(!window||(window.styleMask&NSWindowStyleMaskFullScreen))return;
++  {const char *e=getenv("TOTK_BORDERLESS");if(e&&!strcmp(e,"1"))return;}   /* the launcher's screen-sized window keeps its size */
+   NSScreen *screen=window.screen?:NSScreen.mainScreen;if(!screen)return;
+   static NSSize lastSize;static CGFloat preferredHeight;
+   NSRect oldFrame=window.frame;NSSize current=window.contentView.bounds.size;
+@@ -907,6 +908,16 @@ with it (a test's frames and pictures then say nothing). */
+   windowDelegate=[TOTKWindowDelegate new];window.delegate=windowDelegate;
+   front_hdr_init();
+   front_install_menu();
++  /* TOTK_BORDERLESS=1 (a launcher such as Salon): the window covers its screen as a plain window, no fullscreen Space, no switch
++     animation; the launcher stays behind it and its HUD above. Menu bar and Dock hidden while the game is the active app. */
++  {const char *e=getenv("TOTK_BORDERLESS");if(e&&!strcmp(e,"1")){
++    window.styleMask=NSWindowStyleMaskTitled|NSWindowStyleMaskFullSizeContentView;window.titlebarAppearsTransparent=YES;window.titleVisibility=NSWindowTitleHidden;window.movable=NO;
++    for(NSUInteger b=NSWindowCloseButton;b<=NSWindowZoomButton;b++)[window standardWindowButton:(NSWindowButton)b].hidden=YES;
++    NSApp.presentationOptions=NSApplicationPresentationHideMenuBar|NSApplicationPresentationHideDock;
++    NSScreen *sc=window.screen?:NSScreen.mainScreen;[window setFrame:sc.frame display:YES];
++    [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *n){(void)n;
++      if(window.styleMask&NSWindowStyleMaskFullScreen)return;NSApp.presentationOptions=NSApplicationPresentationHideMenuBar|NSApplicationPresentationHideDock;[window setFrame:(window.screen?:NSScreen.mainScreen).frame display:YES];}];
++  }}
+   if(window.level!=NSFloatingWindowLevel)window.collectionBehavior|=NSWindowCollectionBehaviorFullScreenPrimary;   /* a floating test window is an auxiliary one */
+   window.tabbingMode=NSWindowTabbingModeDisallowed;
+   window.contentView=[[TOTKInputView alloc] initWithFrame:NSMakeRect(0,0,ww,wh)];
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index ad0f319d..f744243f 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -560,13 +560,13 @@ uint64_t runtime_image_bytes(void) { uint64_t total=0;for(unsigned i=0;i<NM;i++)
+ static void loader_ready(void) { fprintf(stderr,"[totk] rtld callback: modules linked\n"); }
+ static void module_inits(void) {
+  fprintf(stderr,"[totk] SDK startup returned; running module constructors\n");
+- for(unsigned i=0;i<NM;i++){char detail[128];snprintf(detail,sizeof detail,TOTK_UI("运行 %s 游戏模块初始化代码（%u/%u）","Running the %s game module initializers (%u/%u)"),modules[i].name,i+1,(unsigned)NM);runtime_boot_status(TOTK_UI("初始化游戏模块","Initializing game modules"),detail);fprintf(stderr,"[totk] ENTER %s DT_INIT\n",modules[i].name);((void(*)(void))(modules[i].base+modules[i].init))();uint32_t state;memcpy(&state,modules[i].base+modules[i].ctor_flag,4);need(state==2,"DT_INIT deferred or skipped constructors");
++ for(unsigned i=0;i<NM;i++){char detail[128];snprintf(detail,sizeof detail,TOTK_UI("运行 %s 游戏模块初始化代码（%u/%u）","Running the %s game module initializers (%u/%u)"),modules[i].name,i+1,(unsigned)NM);runtime_boot_status(TOTK_UI("初始化游戏模块","Initializing game modules"),detail);fprintf(stderr,"[totk] ENTER %s DT_INIT\n",modules[i].name);((void(*)(void))(modules[i].base+modules[i].init))();uint32_t state=2;if(modules[i].ctor_flag){memcpy(&state,modules[i].base+modules[i].ctor_flag,4);need(state==2,"DT_INIT deferred or skipped constructors");}   /* a mod module (ctor_flag 0) has no nnsdk state word */
+  fprintf(stderr,"[totk] RETURN %s DT_INIT state=%u init_array_count=%llu\n",modules[i].name,state,(unsigned long long)(modules[i].init_size/8));}
+ }
+ void runtime_startup_checkpoint(uintptr_t caller) {
+  if(!getenv("TOTK_VERIFY_STARTUP"))return;
+  need(caller==(uintptr_t)modules[0].base+GAME_ADDR(0xe995c4),"checkpoint not reached from original nnMain");
+- for(unsigned i=0;i<NM;i++){uint32_t state;memcpy(&state,modules[i].base+modules[i].ctor_flag,4);need(state==2,"constructor checkpoint state");}
++ for(unsigned i=0;i<NM;i++){if(!modules[i].ctor_flag)continue;uint32_t state;memcpy(&state,modules[i].base+modules[i].ctor_flag,4);need(state==2,"constructor checkpoint state");}
+  printf("{\"status\":\"pass\",\"phase\":4,\"original_nnMain_return_pc\":\"0x%x\",\"scope\":\"all DT_INIT constructor loops completed; original nnMain prefix executed; stops at focus setup\"}\n", GAME_ADDR(0xe995c4));fflush(stdout);_exit(0);
+ }
+ #ifndef GAME_BOTW160
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+new file mode 100644
+index 00000000..ef81134f
+--- /dev/null
++++ b/games/totk/runtime/online_host.c
+@@ -0,0 +1,84 @@
++/* Host side of nn::socket for a mod module that plays online (TOTK Online: a client socket to its server; scripts/mod_module.py
++   loads the module). The retail game imports none of these, so nothing changes for it; the mod's imports bind to these functions
++   (runtime_override, before the SDK's own code, whose bsd:u service the host has no implementation of).
++
++   Horizon's socket library is FreeBSD's: sockaddr_in (sin_len, sin_family = 2, sin_port, sin_addr), the MSG_* flags, F_GETFL /
++   F_SETFL with O_NONBLOCK = 4, SOL_SOCKET = 0xffff and the errno numbers are the same values as macOS's, so descriptors and
++   arguments pass straight through. The host's descriptors are returned as the guest's. GetLastErrno is per thread, like the SDK's. */
++#include "runtime.h"
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#include <sys/socket.h>
++#include <poll.h>
++
++static _Thread_local int online_errno;
++static int online_log(void) { static int v = -1; if (v < 0) { const char *e = getenv("TOTK_ONLINE_LOG"); v = e && *e && strcmp(e, "0"); } return v; }
++static int fail(const char *what) { online_errno = errno ? errno : EIO; if (online_log()) fprintf(stderr, "[totk-online] %s: %s (%d)\n", what, strerror(online_errno), online_errno); return -1; }
++
++static uint32_t online_initialize(void *pool, uint64_t pool_size, uint64_t alloc_pool_size, int concurrency) {
++    (void)pool; (void)pool_size; (void)alloc_pool_size; (void)concurrency;
++    fprintf(stderr, "[totk-online] nn::socket::Initialize: host BSD sockets\n"); return 0;
++}
++static int online_last_errno(void) { return online_errno; }
++static int online_socket(int domain, int type, int protocol) {
++    int fd = socket(domain, type, protocol);
++    if (fd < 0) return fail("socket");
++    int one = 1; setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);   /* a closed peer must not kill the game */
++    if (type == SOCK_STREAM) setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
++    if (online_log()) fprintf(stderr, "[totk-online] socket(%d,%d,%d) = %d\n", domain, type, protocol, fd);
++    return fd;
++}
++static int online_connect(int fd, const struct sockaddr *addr, uint32_t len) {
++    if (online_log() && addr && addr->sa_family == AF_INET) { char ip[64]; const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
++        fprintf(stderr, "[totk-online] connect(%d) -> %s:%u\n", fd, inet_ntop(AF_INET, &in->sin_addr, ip, sizeof ip), ntohs(in->sin_port)); }
++    int r = connect(fd, addr, len);
++    return r < 0 ? fail("connect") : r;
++}
++static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) { ssize_t r = send(fd, buf, (size_t)len, flags | MSG_NOSIGNAL); return r < 0 ? fail("send") : r; }
++static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) { ssize_t r = recv(fd, buf, (size_t)len, flags); return r < 0 ? fail("recv") : r; }
++static int online_close(int fd) { if (online_log()) fprintf(stderr, "[totk-online] close(%d)\n", fd); int r = close(fd); return r < 0 ? fail("close") : r; }
++/* The guest follows AAPCS64 (its third argument in x2) while Apple's arm64 ABI passes variadic arguments on the stack:
++   a fixed third parameter reads x2, which is where the module put it. */
++static int online_fcntl(int fd, int cmd, long arg) {
++    int r = fcntl(fd, cmd, arg);
++    return r < 0 ? fail("fcntl") : r;
++}
++static int online_getsockopt(int fd, int level, int name, void *val, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getsockopt(fd, level, name, val, &l); if (len) *len = l; return r < 0 ? fail("getsockopt") : r; }
++static int online_setsockopt(int fd, int level, int name, const void *val, uint32_t len) { int r = setsockopt(fd, level, name, val, len); return r < 0 ? fail("setsockopt") : r; }
++static int online_getpeername(int fd, struct sockaddr *addr, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getpeername(fd, addr, &l); if (len) *len = l; return r < 0 ? fail("getpeername") : r; }
++static int online_getsockname(int fd, struct sockaddr *addr, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getsockname(fd, addr, &l); if (len) *len = l; return r < 0 ? fail("getsockname") : r; }
++static int online_shutdown(int fd, int how) { int r = shutdown(fd, how); return r < 0 ? fail("shutdown") : r; }
++static int online_poll(void *fds, uint64_t n, int timeout) { int r = poll(fds, (nfds_t)n, timeout); return r < 0 ? fail("poll") : r; }
++static int online_inet_pton(int af, const char *src, void *dst) { return inet_pton(af, src, dst); }
++static int online_inet_aton(const char *cp, struct in_addr *addr) { return inet_aton(cp, addr); }
++static uint16_t online_htons(uint16_t v) { return htons(v); }
++static uint32_t online_htonl(uint32_t v) { return htonl(v); }
++static uint16_t online_ntohs(uint16_t v) { return ntohs(v); }
++static uint32_t online_ntohl(uint32_t v) { return ntohl(v); }
++static const char *online_ntop(int af, const void *src, char *dst, uint32_t size) { return inet_ntop(af, src, dst, size); }
++
++void *runtime_online_override(const char *name) {
++    static const struct { const char *name; void *fn; } map[] = {
++        {"_ZN2nn6socket10InitializeEPvmmi", online_initialize},
++        {"_ZN2nn6socket12GetLastErrnoEv", online_last_errno}, {"_ZN2nn6socket12GetLastErrorEv", online_last_errno},
++        {"_ZN2nn6socket6SocketEiii", online_socket}, {"_ZN2nn6socket7ConnectEiPK8sockaddrj", online_connect},
++        {"_ZN2nn6socket4SendEiPKvmi", online_send}, {"_ZN2nn6socket4RecvEiPvmi", online_recv},
++        {"_ZN2nn6socket5CloseEi", online_close}, {"_ZN2nn6socket5FcntlEiiz", online_fcntl},
++        {"_ZN2nn6socket10GetSockOptEiiiPvPj", online_getsockopt}, {"_ZN2nn6socket10SetSockOptEiiiPKvj", online_setsockopt},
++        {"_ZN2nn6socket11GetPeerNameEiP8sockaddrPj", online_getpeername}, {"_ZN2nn6socket11GetSockNameEiP8sockaddrPj", online_getsockname},
++        {"_ZN2nn6socket8ShutdownEii", online_shutdown}, {"_ZN2nn6socket4PollEPNS0_6PollFdEmi", online_poll},
++        {"_ZN2nn6socket8InetPtonEiPKcPv", online_inet_pton}, {"_ZN2nn6socket8InetAtonEPKcP7in_addr", online_inet_aton},
++        {"_ZN2nn6socket9InetHtonsEt", online_htons}, {"_ZN2nn6socket9InetHtonlEj", online_htonl},
++        {"_ZN2nn6socket9InetNtohsEt", online_ntohs}, {"_ZN2nn6socket9InetNtohlEj", online_ntohl},
++        {"_ZN2nn6socket8InetNtopEiPKvPcj", online_ntop},
++    };
++    for (size_t i = 0; i < sizeof map / sizeof *map; i++) if (!strcmp(name, map[i].name)) return map[i].fn;
++    return NULL;
++}
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index 36f02838..5b6def32 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -3,6 +3,9 @@
+ #include <TargetConditionals.h>
+ #include "ipc.h"
+ #include <mach/mach.h>
++#include <mach/mach_vm.h>
++#include <mach/mach_error.h>
++#include <sys/mman.h>
+ #include "mach_vm_compat.h"
+ #include <stdio.h>
+ #include <CoreFoundation/CoreFoundation.h>
+@@ -419,6 +422,7 @@ void *runtime_observer(const char *name) {
+  {"_ZN2nn2os21AllocateAddressRegionEPmm",observed_region},{"_ZN2nn2os19AllocateMemoryPagesEmm",observed_pages},{"nnosInitialize",observed_os_init},{"nninitInitializeSdkModule",observed_sdk_init},{"nninitStartup",observed_startup},{"nnMain",observed_main}};
+  for(size_t i=0;i<sizeof(entries)/sizeof(entries[0]);i++)if(!strcmp(name,entries[i].name))return entries[i].fn;return NULL;
+ }
++void *runtime_online_override(const char *name);
+ void *runtime_override(const char *name) {
+  static const struct {const char *name;void *fn;} entries[]={
+   {"_ZN2nn2oe18GetDesiredLanguageEv",desired_language},
+@@ -439,6 +443,7 @@ void *runtime_override(const char *name) {
+  void *opusms=runtime_ns2_opus_ms_override(name);if(opusms)return opusms;
+  void *offline=runtime_offline_override(name);if(offline)return offline;
+  #endif
++ void *online=runtime_online_override(name);if(online)return online;   /* a mod module's sockets (runtime/online_host.c) */
+  void *input=runtime_input_override(name);if(input)return input;void *font=runtime_font_override(name);if(font)return font;void *codec=runtime_codec_override(name);if(codec)return codec;void *movie=runtime_movie_override(name);if(movie)return movie;void *clock=runtime_time_override(name);if(clock)return clock;void *applet=runtime_applet_override(name);if(applet)return applet;void *swkbd=runtime_swkbd_override(name);if(swkbd)return swkbd;void *account=runtime_account_override(name);if(account)return account;void *fs=runtime_fs_override(name);if(fs)return fs;void *front=runtime_front_override(name);return front?front:runtime_gfx_override(name);
+ }
+ void runtime_core_checkpoint(void);
+@@ -538,6 +543,36 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+  case 0x26: {uint32_t result=0;if(r[1]&&r[2]>=4)memcpy(&result,(void *)(uintptr_t)r[1],4);fprintf(stderr,"[totk] guest Break reason=%llx result=%x\n",(unsigned long long)r[0],result);runtime_trace_guest(r[29],r[30]);if(r[0]&0x80000000ULL)return 0;runtime_fail("original SDK Break");}
+  case 0x27: {size_t n=r[1];if(n>65536)runtime_fail("debug string too long");fwrite((void *)(uintptr_t)r[0],1,n,stderr);r[0]=0;return 0;}
+  case 0x0b:{int64_t ns=(int64_t)r[0];if(ns>0){struct timespec t={ns/1000000000,ns%1000000000};nanosleep(&t,NULL);}r[0]=0;return 0;}
++ /* MapProcessMemory / UnmapProcessMemory / SetProcessMemoryPermission, on the process itself: an exlaunch-style mod module
++    (scripts/mod_module.py) maps the game's code pages a second time, read-write, writes its hooks through that alias and
++    invalidates the instruction cache itself (ic ivau). The alias is a shared remap of the same physical pages
++    (mach_vm_remap, copy = FALSE), so the executable mapping sees the new bytes; macOS keeps W^X: the alias is RW, the code
++    stays RX. Only the current process (handle 0xffff8001) is accepted. */
++ case 0x74: {
++  uint64_t dst=r[0],handle=r[1],src=r[2],size=r[3];
++  if(handle!=0xffff8001){r[0]=0xe401;return r[0];}   /* InvalidHandle */
++  if((dst|src|size)&4095||!size){r[0]=0xcc01;return r[0];}
++  mach_vm_address_t target=dst;vm_prot_t cur=0,max=0;
++  kern_return_t kr=mach_vm_remap(mach_task_self(),&target,size,0,VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,mach_task_self(),src,FALSE,&cur,&max,VM_INHERIT_NONE);
++  if(kr==KERN_SUCCESS)kr=mach_vm_protect(mach_task_self(),target,size,FALSE,VM_PROT_READ|VM_PROT_WRITE);
++  fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx (+%#llx): %s\n",(unsigned long long)src,(unsigned long long)dst,(unsigned long long)size,kr==KERN_SUCCESS?"ok (rw alias)":mach_error_string(kr));
++  r[0]=kr==KERN_SUCCESS?0:0xd401;return r[0]; }
++ case 0x75: {
++  uint64_t dst=r[0],handle=r[1],size=r[3];
++  if(handle!=0xffff8001){r[0]=0xe401;return r[0];}
++  if((dst|size)&4095||!size){r[0]=0xcc01;return r[0];}
++  /* back to a reservation, as the region was before the alias (PROT_NONE keeps the address space shape the guest expects) */
++  void *p=mmap((void *)(uintptr_t)dst,size,PROT_NONE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
++  r[0]=p==MAP_FAILED?0xd401:0;return r[0]; }
++ case 0x73: {
++  uint64_t handle=r[0],addr=r[1],size=r[2];unsigned perm=(unsigned)r[3];
++  if(handle!=0xffff8001){r[0]=0xe401;return r[0];}
++  if((addr|size)&4095||!size){r[0]=0xcc01;return r[0];}
++  vm_prot_t want=(perm&1?VM_PROT_READ:0)|(perm&2?VM_PROT_WRITE:0)|(perm&4?VM_PROT_EXECUTE:0);
++  if((want&VM_PROT_WRITE)&&(want&VM_PROT_EXECUTE))want&=~VM_PROT_EXECUTE;   /* no RWX on macOS: a writable request gives RW */
++  kern_return_t kr=mach_vm_protect(mach_task_self(),addr,size,FALSE,want);
++  fprintf(stderr,"[totk] SetProcessMemoryPermission %#llx+%#llx perm %u: %s\n",(unsigned long long)addr,(unsigned long long)size,perm,kr==KERN_SUCCESS?"ok":mach_error_string(kr));
++  r[0]=kr==KERN_SUCCESS?0:0xd401;return r[0]; }
+  default:fprintf(stderr,"[totk] unimplemented SVC 0x%x at %s+%#llx\n",num,module,(unsigned long long)offset);if(num==0x1f)fprintf(stderr,"[totk] named port %.12s\n",(const char *)(uintptr_t)r[1]);runtime_trace_guest(r[29],r[30]);runtime_fail("system service not implemented");return 0;
+  }
+ }
+diff --git a/games/totk/scripts/mod_module.py b/games/totk/scripts/mod_module.py
+new file mode 100644
+index 00000000..de5d0cdc
+--- /dev/null
++++ b/games/totk/scripts/mod_module.py
+@@ -0,0 +1,97 @@
++#!/usr/bin/env python3
++"""Add a mod's own code module (an extra NSO, `subsdk4` of TOTK Online for instance) to the build as the game's next
++`subsdkN`, so the loader runs its code beside main, subsdk0 and sdk.
++
++The loader takes its module list from the runtime tables (runtime/loader.c, up to 12 modules named main, subsdk0…,
++sdk) and scripts/prepare_runtime.py puts every rewritten/<version>/subsdkN.patched.bin in them: what this script does
++is bring the mod's module to that state, exactly like the retail modules —
++
++  1. the NSO is copied to extracted/<version>/exefs/<name> (prepare_runtime reads its header for the symbol count);
++  2. scripts/prepare_modules.py inventories it (segments verified, dynamic symbols) into extracted/<version>/elf/;
++  3. third_party/d2r/patch_nso.py rewrites it for Apple silicon into rewritten/<version>/<name>.patched.bin.
++
++build_app.py then records the rewritten image's SHA-256 in the validation report, which binds the loader to it.
++The mod's code hooks the game at run time (exlaunch-style, through MapProcessMemory on the code pages), so no patch of
++main is merged here; a mod that also ships main patches goes through --mod (mod_exefs.py) as before.
++
++usage: mod_module.py --tree <work tree> --version v121 --module <NSO> [--name subsdk1] [--report <json>]
++"""
++import argparse
++import hashlib
++import json
++import os
++import shutil
++import struct
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
++
++
++def sha256(path):
++    h = hashlib.sha256()
++    with open(path, 'rb') as f:
++        for block in iter(lambda: f.read(1 << 20), b''):
++            h.update(block)
++    return h.hexdigest()
++
++
++def main():
++    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    ap.add_argument('--tree', type=Path, required=True)
++    ap.add_argument('--version', required=True)
++    ap.add_argument('--module', type=Path, required=True, help="the mod's NSO (subsdk4 of TOTK Online, say)")
++    ap.add_argument('--name', default=None, help='the module name in the build: the next free subsdkN (default)')
++    ap.add_argument('--report', type=Path)
++    a = ap.parse_args()
++    tree, version = a.tree.resolve(), a.version
++    exefs = tree / f'extracted/{version}/exefs'
++    elf = tree / f'extracted/{version}/elf'
++    out = tree / f'rewritten/{version}'
++    py = tree / '.venv/bin/python'
++    if not (exefs / 'main').is_file() or not (elf / 'main-inventory.json').is_file():
++        sys.exit('the retail code must be extracted and inventoried first (build_app.py step 1/4)')
++    data = a.module.read_bytes()
++    if data[:4] != b'NSO0':
++        sys.exit(f'{a.module} is not an NSO module')
++    name = a.name
++    if not name:
++        shipped = {n for n in os.listdir(exefs) if n.startswith('subsdk')}
++        name = next(f'subsdk{i}' for i in range(10) if f'subsdk{i}' not in shipped)
++    staged = exefs / name
++    if not staged.is_file() or sha256(staged) != hashlib.sha256(data).hexdigest():
++        staged.write_bytes(data)
++    # inventory: prepare_modules.py on a folder holding only this module, then only its files are copied in
++    with tempfile.TemporaryDirectory(dir=tree / 'extracted') as tmp:
++        tmp = Path(tmp)
++        (tmp / 'exefs').mkdir(); shutil.copy2(staged, tmp / 'exefs' / name)
++        (tmp / 'elf').mkdir()
++        subprocess.run([py, 'scripts/prepare_modules.py', tmp / 'exefs', '--output', tmp / 'elf'], cwd=tree, check=True,
++                       stdout=subprocess.DEVNULL)
++        for f in (tmp / 'elf').iterdir():
++            if f.name.startswith(name + '-') or f.name.startswith(name + '.'):
++                shutil.copy2(f, elf / f.name)
++    inventory = json.loads((elf / f'{name}-inventory.json').read_text())
++    # rewrite, cached on the module's bytes and the rewriter
++    out.mkdir(parents=True, exist_ok=True)
++    image = out / f'{name}.patched.bin'
++    stamp = out / f'{name}.mod-module.json'
++    key = dict(module_sha256=hashlib.sha256(data).hexdigest(), rewriter_sha256=sha256(tree / 'third_party/d2r/patch_nso.py'))
++    previous = json.loads(stamp.read_text()) if stamp.is_file() else {}
++    if not (image.is_file() and previous.get('module_sha256') == key['module_sha256'] and previous.get('rewriter_sha256') == key['rewriter_sha256']):
++        env = dict(os.environ, DM_RULESET='native', DM_PRIVATE_GATES='0')
++        subprocess.run([py, 'third_party/d2r/patch_nso.py', staged, out, name], cwd=tree, check=True, env=env,
++                       stdout=subprocess.DEVNULL)
++    key['rewritten_sha256'] = sha256(image)
++    stamp.write_text(json.dumps(key, indent=2) + '\n')
++    text = struct.unpack_from('<III', data, 0x10)
++    result = dict(status='pass', name=name, source=str(a.module), module_sha256=key['module_sha256'],
++                  rewritten_sha256=key['rewritten_sha256'], text_size=text[2],
++                  symbols=inventory.get('dynsym_count', inventory.get('symbols', None)) if isinstance(inventory, dict) else None)
++    if a.report:
++        a.report.write_text(json.dumps(result, indent=2) + '\n')
++    print(json.dumps(result, indent=2))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/games/totk/scripts/prepare_runtime.py b/games/totk/scripts/prepare_runtime.py
+index 56496a36..edf7e128 100644
+--- a/games/totk/scripts/prepare_runtime.py
++++ b/games/totk/scripts/prepare_runtime.py
+@@ -30,7 +30,9 @@ if version == 'v143':
+     assert report['module_file_sha256']['extracted/v143/exefs/main'] == 'e84a90d551fed0824b4b74933b9c6d043c458521363a7cea58b2faca1822dc9e', 'Unsupported 1.4.3 main image'
+ modules = []
+ # main first (the loader patches modules[0]), then the subsdk modules this title ships, sdk last (games/wonder's rule)
+-names = ['main', *(f'subsdk{i}' for i in range(10) if (ROOT / f'rewritten/{version}/subsdk{i}.patched.bin').is_file()), 'sdk']
++names = ['main', *(f'subsdk{i}' for i in range(10) if (ROOT / f'rewritten/{version}/subsdk{i}.patched.bin').is_file()
++                   # a mod's module (scripts/mod_module.py) left from an earlier build only goes in when this build's report binds it
++                   and (i == 0 or f'rewritten/{version}/subsdk{i}.patched.bin' in report['module_file_sha256'])), 'sdk']
+ for name in names:
+     path = ROOT / f'rewritten/{version}/{name}.patched.bin'
+     image = path.read_bytes()
+@@ -103,12 +105,17 @@ for name in names:
+             w = struct.unpack_from('<I', image, at + 4 * j)[0]
+             if w & 0xffc003ff == 0xb9400008 | (reg << 5): found = (at, a, w); break
+         if found: break
+-    assert found, f'{name}: DT_INIT state load not found'
+-    at, a, w = found
+-    imm = ((a >> 29) & 3) | (((a >> 5) & 0x7ffff) << 2)
+-    imm = (imm ^ (1 << 20)) - (1 << 20)
+-    ctor_flag = (at & ~4095) + (imm << 12) + ((w >> 10) & 0xfff)*4
+-    assert layout['DATA_OFF'] <= ctor_flag < layout['KEY_PAGE_OFF']
++    if found:
++        at, a, w = found
++        imm = ((a >> 29) & 3) | (((a >> 5) & 0x7ffff) << 2)
++        imm = (imm ^ (1 << 20)) - (1 << 20)
++        ctor_flag = (at & ~4095) + (imm << 12) + ((w >> 10) & 0xfff)*4
++        assert layout['DATA_OFF'] <= ctor_flag < layout['KEY_PAGE_OFF']
++    else:
++        # A mod's own module (scripts/mod_module.py, exlaunch-style) has no nnsdk constructor state word: the loader runs its
++        # DT_INIT and skips the state check (ctor_flag 0). A retail module without the pattern is still an error.
++        assert name not in ('main', 'sdk', 'subsdk0'), f'{name}: DT_INIT state load not found'
++        ctor_flag = 0
+     modules.append(dict(name=name, sha256=digest, size=len(image), ctor_flag=ctor_flag, layout=layout, tags=tags,
+                         symbols=symbols, relocs=relocs, gates=gates))
+ 

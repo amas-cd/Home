@@ -1,0 +1,62 @@
+From b270fb836e78b72c3073d23ea9fee9becc089a23 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Tue, 10 Nov 2026 12:24:32 +0100
+Subject: [PATCH 31/44] totk 1.2.1: fixed resolution (the 1.4.3 patch ported),
+ on by default
+
+1.2.1's dynamic resolution controller (main+0xcc26f4, 24 frame-time
+samples, called from main+0xcc0fa0) returns its tier's scale through
+mov w9, w23 at main+0xcc2c00, as 1.4.3's at main+0x5848a8. On a 2560x1440
+canvas the scene stepped between 2560x1440 and 2048x1152 forty times in a
+few minutes, and the temporal anti-aliasing restarted its history at each
+step. The move becomes a move of 1.0f; TOTK_FIXED_RES=0 turns it off.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/game_patches.c | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/games/totk/runtime/game_patches.c b/games/totk/runtime/game_patches.c
+index d9ce74bb..cd17deb7 100644
+--- a/games/totk/runtime/game_patches.c
++++ b/games/totk/runtime/game_patches.c
+@@ -700,6 +700,30 @@ static void patch_shadow_res_121(Module *m) {
+ }
+ #endif
+ 
++#if defined(TOTK_GAME_V121)
++/* Fixed resolution for 1.2.1 (Mac; the 1.4.3 patch of game_patches_v143.c ported, user 2026-11-10: the temporal
++   anti-aliasing restarted its history at every step, so edges and shadows stayed jagged). 1.2.1's dynamic resolution
++   controller is main+0xcc26f4, called once a frame from main+0xcc0fa0: a window of 24 frame-time samples (cmp #0x18), tiers
++   chosen from the predicted cost, the tier's scale in w23 (1.0f by default, main+0xcc2b2c) returned through one epilogue as
++   orr x0, x8, x9 after mov w9, w23 at main+0xcc2c00, as 1.4.3's at main+0x5848a8. On a 2560x1440 canvas the scene stepped
++   between 2560x1440 and 2048x1152 forty times in a few minutes. That move becomes a move of 1.0f: the controller still runs,
++   every tier is 100 %. Default on; TOTK_FIXED_RES=0 lets the game step again. */
++static void patch_fixed_res_121(Module *m) {
++#if TARGET_OS_IPHONE
++    (void)m;
++#else
++    const char *e = getenv("TOTK_FIXED_RES");
++    if (e && !strcmp(e, "0")) return;
++    if (getenv("TOTK_EXPORT_IOS")) return;
++    const uint64_t site = 0xcc2c00; const uint32_t original = 0x2a1703e9, replacement = 0x52a7f009;   /* mov w9, w23 -> mov w9, #0x3f800000 */
++    uint32_t word; memcpy(&word, m->base + site, 4);
++    if (word != original) { fprintf(stderr, "[totk] 1.2.1 fixed resolution: main+%#llx is %08x, not %08x; the game's dynamic resolution\n", (unsigned long long)site, word, original); return; }
++    memcpy(m->base + site, &replacement, 4);
++    fprintf(stderr, "[totk] 1.2.1 fixed resolution (TOTK_FIXED_RES=0 turns it off): the dynamic resolution controller's scale is held at 100 %% (1 instruction at main+%#llx)\n", (unsigned long long)site);
++#endif
++}
++#endif
++
+ #if defined(TOTK_GAME_V121)
+ /* Benchmark camera for 1.2.1 (survey sessions only; see game_patches_v143.c for the block on the data page at +0x100).
+    1.2.1's look-at camera update stores eye, target and up into the camera in x20 at main+0xcb4390..0xcb4464 and then
+@@ -850,6 +874,7 @@ void runtime_game_patches(Module *m) {
+                      (m->file_size + 0x3fff) & ~0x3fffULL); }
+     patch_bench_cam(m);
+     patch_shadow_res_121(m);
++    patch_fixed_res_121(m);
+ #else
+     if (aspect_requested()) runtime_fail("TOTK_ASPECT: only 1.2.1 and 1.4.3 so far");
+ #endif

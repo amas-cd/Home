@@ -1,0 +1,45 @@
+From 97cf724989dec41dbec8ada6df3293ff51d7ca48 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 23:07:22 +0000
+Subject: [PATCH 09/44] loader: log how each import of a mod module is resolved
+ (TOTK_DEBUG_LOG)
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c      | 7 ++++---
+ games/totk/runtime/online_host.c | 2 +-
+ 2 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 92730cab..c767764d 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -294,10 +294,11 @@ static void relocate(Module *m) {
+   if(r->kind==1027) { need(r->addend>=0&&(uint64_t)r->addend<m->key_off,"relative addend");v=(uintptr_t)m->base+r->addend;m->relative++; }
+   else {
+    need(r->kind==257||r->kind==1025||r->kind==1026,"relocation kind");
+-   const Symbol *s=&m->symbols[r->symbol];void *p=r->kind==1026?runtime_observer(s->name):NULL;
+-   if(!p)p=runtime_override(s->name);
++   const Symbol *s=&m->symbols[r->symbol];void *p=r->kind==1026?runtime_observer(s->name):NULL;const char *how=p?"observer":NULL;
++   if(!p){p=runtime_override(s->name);if(p)how="host";}
+    if(p)p=runtime_hle_wrap_named(p,s->name);   /* host replacements run on the thread's host stack */
+-   if(!p)p=s->defined?(s->value<m->key_off?m->base+s->value:NULL):runtime_symbol(s->name);
++   if(!p){p=s->defined?(s->value<m->key_off?m->base+s->value:NULL):runtime_symbol(s->name);if(p)how=s->defined?"own":"game";}
++   if(m->ctor_flag==0&&!s->defined&&getenv("TOTK_DEBUG_LOG"))fprintf(stderr,"[totk] %s: import %s -> %s%s\n",m->name,s->name,how?how:"0",r->kind==1026?" (plt)":"");   /* a mod module's imports, for the log */
+    if(!p&&s->binding!=2){
+     /* A mod module (ctor_flag 0, scripts/mod_module.py) imports game symbols the game never exports (its dynsym has 29): Horizon's
+        rtld leaves such imports unresolved (0) and exlaunch-style mods fill their own tables from version-specific offsets at run time.
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+index 277e4621..c777b0e9 100644
+--- a/games/totk/runtime/online_host.c
++++ b/games/totk/runtime/online_host.c
+@@ -67,7 +67,7 @@ static const char *online_ntop(int af, const void *src, char *dst, uint32_t size
+ 
+ /* The rest of what an exlaunch-style mod imports from the SDK and the host does not otherwise replace: hid touch screen
+    and single mouse state (the SDK's own would open the "hid" IPC service and the hid shared memory), the profile image. */
+-static void mod_touch_init(void) {}
++static void mod_touch_init(void) { fprintf(stderr, "[totk] touch screen: host (no touches)\n"); }
+ static void mod_touch_state16(uint8_t *out) { static _Atomic int64_t sample; memset(out, 0, 0x10 + 16 * 0x28); int64_t n = ++sample; memcpy(out, &n, 8); }   /* TouchScreenState<16>: no touches */
+ static void mod_mouse_state(uint8_t *out) { static _Atomic int64_t sample; memset(out, 0, 0x28); int64_t n = ++sample; memcpy(out, &n, 8); }             /* MouseState: no mouse */
+ static uint32_t mod_profile_image(size_t *size, void *buffer, size_t cap, const void *uid) { (void)buffer; (void)cap; (void)uid; if (size) *size = 0; return 0; }   /* nn::account::LoadProfileImage: no picture */

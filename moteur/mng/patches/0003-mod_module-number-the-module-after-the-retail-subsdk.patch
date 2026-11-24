@@ -1,0 +1,35 @@
+From f23dd9e9a6437b2534b9eef9270ad019c8a5314b Mon Sep 17 00:00:00 2001
+From: Anas <anas@local>
+Date: Sun, 8 Nov 2026 21:50:43 +0000
+Subject: [PATCH 03/44] mod_module: number the module after the retail subsdks
+ (modules.json), drop stale copies
+
+---
+ games/totk/scripts/mod_module.py | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/games/totk/scripts/mod_module.py b/games/totk/scripts/mod_module.py
+index de5d0cdc..974bd21f 100644
+--- a/games/totk/scripts/mod_module.py
++++ b/games/totk/scripts/mod_module.py
+@@ -54,10 +54,16 @@ def main():
+     data = a.module.read_bytes()
+     if data[:4] != b'NSO0':
+         sys.exit(f'{a.module} is not an NSO module')
+-    name = a.name
+-    if not name:
+-        shipped = {n for n in os.listdir(exefs) if n.startswith('subsdk')}
+-        name = next(f'subsdk{i}' for i in range(10) if f'subsdk{i}' not in shipped)
++    # The loader wants the modules in sequence (main, subsdk0, subsdk1, ..., sdk): the mod module takes the number after the
++    # retail subsdks of this version (those the elf/ inventory of the retail code lists), and copies of earlier attempts go.
++    retail = [m['module'] for m in json.loads((elf / 'modules.json').read_text())]   # the retail ExeFS as prepare_modules.py inventoried it
++    retail_subsdks = sorted(n for n in retail if n.startswith('subsdk'))
++    name = a.name or f'subsdk{len(retail_subsdks)}'
++    for k in range(10):
++        other = f'subsdk{k}'
++        if other == name or other in retail_subsdks: continue
++        for stale in [exefs / other, *out.glob(f'{other}.*'), *elf.glob(f'{other}-*'), *elf.glob(f'{other}.*')]:
++            if stale.exists(): stale.unlink()
+     staged = exefs / name
+     if not staged.is_file() or sha256(staged) != hashlib.sha256(data).hexdigest():
+         staged.write_bytes(data)

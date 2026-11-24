@@ -1,0 +1,81 @@
+From 2d3421d097bab81df44d27e605f207d929c4da6d Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Wed, 11 Nov 2026 12:27:07 +0000
+Subject: [PATCH 40/44] diag: "hletrace 3" also counts the host calls made from
+ a mod module (by the guest return address)
+
+Says whether the game's NVN calls pass through TOTK Online's hooks (its overlay) or go straight to the host.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/hle_stack.c | 23 +++++++++++++++++++++--
+ games/totk/runtime/input.c     |  2 +-
+ 2 files changed, 22 insertions(+), 3 deletions(-)
+
+diff --git a/games/totk/runtime/hle_stack.c b/games/totk/runtime/hle_stack.c
+index e986ad4e..6846a512 100644
+--- a/games/totk/runtime/hle_stack.c
++++ b/games/totk/runtime/hle_stack.c
+@@ -64,9 +64,25 @@ const char *runtime_hle_raw_name(unsigned i) { return i < HLE_THUNKS ? names[i]
+ void runtime_hle_describe(unsigned i, char *out, size_t cap) { name_of(i, out, cap); }
+ 
+ /* hle_stack.S calls this before each wrapped call while tracing (on the host stack, arguments kept). */
++/* "hletrace 3": also which module made each call. The guest's return address is in the frame record runtime_hle_switch
++   left (hle_note_kept's caller frame): runtime_hle_note -> hle_note_kept -> that record. A call from a module that is not
++   the game's own (main, subsdk0, sdk: a mod module such as TOTK Online's) is counted apart, so the summary says whether the
++   game's NVN calls go through the mod (its overlay hooks) or straight to the host. */
++static _Atomic uint64_t from_mod[HLE_THUNKS];
++int runtime_module_offset(uint64_t pc, const char **name, uint64_t *off);
++__attribute__((noinline)) static uint64_t guest_return_address(void) {
++    uint64_t *f = __builtin_frame_address(1);          /* runtime_hle_note's frame (this one is noinline, one level down) */
++    if (!f || !(f = (uint64_t *)f[0]) || !(f = (uint64_t *)f[0])) return 0;   /* hle_note_kept's, then the switch's record */
++    return f[1];
++}
+ void runtime_hle_note(uint64_t i) {
+     if (i >= HLE_THUNKS) return;
+     atomic_fetch_add_explicit(&counts[i], 1, memory_order_relaxed);
++    if (runtime_hle_trace == 3) {
++        const char *m = NULL; uint64_t off = 0, lr = guest_return_address();
++        if (lr && runtime_module_offset(lr, &m, &off) && m && strcmp(m, "main") && strcmp(m, "sdk") && strcmp(m, "subsdk0"))
++            atomic_fetch_add_explicit(&from_mod[i], 1, memory_order_relaxed);
++    }
+     runtime_thread_note_hle((unsigned)i);
+     if (runtime_hle_trace != 2 || atomic_exchange_explicit(&seen[i], 1, memory_order_relaxed)) return;
+     char text[256]; name_of((unsigned)i, text, sizeof text);
+@@ -78,9 +94,10 @@ static int by_count(const void *a, const void *b) {
+     const hit_t *x = a, *y = b; return x->n < y->n ? 1 : x->n > y->n ? -1 : (int)x->i - (int)y->i;
+ }
+ void runtime_hle_trace_set(int mode) {
+-    if (mode < 0 || mode > 2) runtime_fail("hletrace takes 0, 1 or 2");
++    if (mode < 0 || mode > 3) runtime_fail("hletrace takes 0, 1, 2 or 3");
+     if (mode) {
+         for (unsigned i = 0; i < HLE_THUNKS; i++) since[i] = atomic_load_explicit(&counts[i], memory_order_relaxed);
++        for (unsigned i = 0; i < HLE_THUNKS; i++) atomic_store_explicit(&from_mod[i], 0, memory_order_relaxed);
+         for (unsigned i = 0; i < HLE_THUNKS; i++) atomic_store_explicit(&seen[i], 0, memory_order_relaxed);
+         trace_t0 = runtime_now_ns();
+         __atomic_store_n(&runtime_hle_trace, mode, __ATOMIC_RELEASE);
+@@ -97,7 +114,9 @@ void runtime_hle_trace_set(int mode) {
+     fprintf(stderr, "[hle] tracing off after %.1f s: %llu calls to %u functions\n", (runtime_now_ns() - trace_t0) / 1e9, (unsigned long long)total, k);
+     for (unsigned j = 0; j < k; j++) {
+         char text[256]; name_of(hits[j].i, text, sizeof text);
+-        fprintf(stderr, "[hle] %10llu  %s\n", (unsigned long long)hits[j].n, text);
++        uint64_t fm = atomic_load_explicit(&from_mod[hits[j].i], memory_order_relaxed);
++        if (fm) fprintf(stderr, "[hle] %10llu  %s  (%llu from a mod module)\n", (unsigned long long)hits[j].n, text, (unsigned long long)fm);
++        else fprintf(stderr, "[hle] %10llu  %s\n", (unsigned long long)hits[j].n, text);
+     }
+ }
+ 
+diff --git a/games/totk/runtime/input.c b/games/totk/runtime/input.c
+index 74977d51..cceb7250 100644
+--- a/games/totk/runtime/input.c
++++ b/games/totk/runtime/input.c
+@@ -339,7 +339,7 @@ static void *input_file(void *arg) {
+             line[strcspn(line, "\r\n")] = 0; runtime_front_text_test("shot", line + 7);
+         } else if (!strcmp(line, "kbenter\n") || !strcmp(line, "kbesc\n")) {
+             runtime_front_text_test(line[2] == 'e' && line[3] == 'n' ? "enter" : "esc", NULL);
+-        } else if (sscanf(line, "hletrace %u %n", &code, &used) == 1 && used && !line[used] && code <= 2) {
++        } else if (sscanf(line, "hletrace %u %n", &code, &used) == 1 && used && !line[used] && code <= 3) {
+             runtime_hle_trace_set((int)code);   /* 1 count host calls, 2 also log the first call of each, 0 stop and print the counts */
+         } else if (!strncmp(line, "framestep ", 10)) {   /* "framestep <ms>": pin the real-time frame step, 0 = back to real time */
+             char *end; double ms = strtod(line + 10, &end); if (end == line + 10 || ms < 0 || ms > 100) runtime_fail("framestep takes milliseconds (0 = real time)");

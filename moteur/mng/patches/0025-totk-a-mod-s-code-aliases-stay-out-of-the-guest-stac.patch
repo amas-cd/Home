@@ -1,0 +1,77 @@
+From 81164c1eacfeffa2cc2ec582c65aa6d5680f9423 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 11:29:34 +0000
+Subject: [PATCH 25/44] totk: a mod's code aliases stay out of the guest stack
+ region
+
+QueryMemory reported the whole low space below the heap as one free block,
+so TOTK Online's mod placed its 45 MiB read-write alias of main across the
+guest stack region; MapProcessMemory overwrote those pages, and stacks of
+threads started later wrote over main's code (SIGILL on zero words).
+QueryMemory now reports the stack region and live aliases as not free and
+clamps free blocks around them; MapProcessMemory refuses such a destination.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/services.c | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index 61fd8a6a..daf79645 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -456,7 +456,7 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+ #define runtime_svc runtime_svc_inner
+ #endif
+ #include <libkern/OSCacheControl.h>
+-static uint64_t mpm_dst[16],mpm_src[16],mpm_size[16];   /* MapProcessMemory aliases (0x74), for the icache at 0x75 */
++static uint64_t mpm_dst[32],mpm_src[32],mpm_size[32];   /* MapProcessMemory aliases (0x74), for the icache at 0x75 */
+ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset) {
+  runtime_core_checkpoint();
+  // Successful SVCs occur several times per frame. Keep the detailed trace available
+@@ -518,6 +518,19 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   else if(!addr){base=0;size=ASLR_START;state=0;perm=0;}
+   else if(runtime_module_query(addr,&base,&size,&state,&perm,&attr)){}
+   else {state=3;perm=5;}
++  /* The guest stack region (thread stacks are carved from it as threads start) and the read-write aliases MapProcessMemory
++     made are not free, and no free block runs over them: TOTK Online's mod took a free block below the heap for its 45 MiB
++     alias of main, which reached into the stack region; MapProcessMemory replaced those stack pages with main's code, and the
++     stacks of the threads started later wrote over the game's instructions (SIGILL on zero words in main). */
++  if(state==0){
++   uint64_t blk[1+32][2];unsigned nb=0;blk[nb][0]=STACK_START;blk[nb][1]=STACK_START+STACK_SIZE;nb++;
++   for(unsigned k=0;k<32;k++)if(mpm_dst[k]){blk[nb][0]=mpm_dst[k]&~0x3fffULL;blk[nb][1]=(mpm_dst[k]+mpm_size[k]+0x3fff)&~0x3fffULL;nb++;}
++   for(unsigned k=0;k<nb;k++){uint64_t b0=blk[k][0],b1=blk[k][1],e=base+size;
++    if(addr>=b0&&addr<b1){base=b0;size=b1-b0;state=0x10;perm=0;break;}
++    if(b1<=addr&&b1>base){base=b1;}
++    if(b0>addr&&b0<e){e=b0;}
++    size=e-base;}
++  }
+   pthread_mutex_lock(&memory_lock);
+   if(addr>=ALIAS_START&&addr<ALIAS_START+ALIAS_SIZE){
+    unsigned p=(unsigned)((addr-ALIAS_START)/4096),low=p,high=p+1;unsigned allocated=alias_pages[p];
+@@ -584,11 +597,14 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+      a mod module's random destinations on 16 KiB boundaries; any other offset is refused here rather than mapped wrong. */
+   if((dst-src)&0x3fff){fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx: not at the same offset in a 16 KiB page, refused\n",(unsigned long long)src,(unsigned long long)dst);r[0]=0xd401;return r[0];}
+   uint64_t d=dst&0x3fff;mach_vm_address_t target=dst-d;uint64_t len=(size+d+0x3fff)&~0x3fffULL;vm_prot_t cur=0,max=0;
++  {uint64_t t0=target,t1=target+len;int clash=t0<STACK_START+STACK_SIZE&&t1>STACK_START;
++   for(unsigned k=0;k<32&&!clash;k++)if(mpm_dst[k]&&mpm_dst[k]!=dst){uint64_t b0=mpm_dst[k]&~0x3fffULL,b1=(mpm_dst[k]+mpm_size[k]+0x3fff)&~0x3fffULL;clash=t0<b1&&t1>b0;}
++   if(clash){fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx (+%#llx): over the guest stacks or another alias, refused\n",(unsigned long long)src,(unsigned long long)dst,(unsigned long long)size);r[0]=0xd401;return r[0];}}
+   kern_return_t kr=mach_vm_remap(mach_task_self(),&target,len,0,VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,mach_task_self(),src-d,FALSE,&cur,&max,VM_INHERIT_NONE);
+   if(kr==KERN_SUCCESS&&target!=dst-d){fprintf(stderr,"[totk] MapProcessMemory: the kernel moved the alias to %#llx\n",(unsigned long long)target);kr=KERN_INVALID_ADDRESS;}
+   if(kr==KERN_SUCCESS)kr=mach_vm_protect(mach_task_self(),target,len,FALSE,VM_PROT_READ|VM_PROT_WRITE);
+   fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx (+%#llx)%s: %s\n",(unsigned long long)src,(unsigned long long)dst,(unsigned long long)size,d?" (4 KiB offset kept)":"",kr==KERN_SUCCESS?"ok (rw alias)":mach_error_string(kr));
+-  if(kr==KERN_SUCCESS){unsigned k=0;while(k<16&&mpm_dst[k]&&mpm_dst[k]!=dst)k++;if(k<16){mpm_dst[k]=dst;mpm_src[k]=src;mpm_size[k]=size;}}
++  if(kr==KERN_SUCCESS){unsigned k=0;while(k<32&&mpm_dst[k]&&mpm_dst[k]!=dst)k++;if(k<32){mpm_dst[k]=dst;mpm_src[k]=src;mpm_size[k]=size;}}
+   r[0]=kr==KERN_SUCCESS?0:0xd401;return r[0]; }
+  case 0x75: {
+   uint64_t dst=r[0],handle=r[1],size=r[3];
+@@ -597,7 +613,7 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   /* back to a reservation, as the region was before the alias (PROT_NONE keeps the address space shape the guest expects);
+      the whole 16 KiB pages the alias took (see 0x74) */
+   /* code written through the alias (a mod's hooks after its init) runs from the source: its instruction cache is cleared here */
+-  for(unsigned k=0;k<16;k++)if(mpm_dst[k]==dst){sys_icache_invalidate((void *)(uintptr_t)mpm_src[k],mpm_size[k]);mpm_dst[k]=0;break;}
++  for(unsigned k=0;k<32;k++)if(mpm_dst[k]==dst){sys_icache_invalidate((void *)(uintptr_t)mpm_src[k],mpm_size[k]);mpm_dst[k]=0;break;}
+   uint64_t d=dst&0x3fff;void *p=mmap((void *)(uintptr_t)(dst-d),(size+d+0x3fff)&~0x3fffULL,PROT_NONE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
+   r[0]=p==MAP_FAILED?0xd401:0;return r[0]; }
+  case 0x73: {

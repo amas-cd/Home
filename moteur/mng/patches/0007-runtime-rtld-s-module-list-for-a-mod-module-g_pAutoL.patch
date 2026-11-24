@@ -1,0 +1,156 @@
+From 9433d34e3865d6e9d7a70c4a9761595ba839c118 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 22:40:04 +0000
+Subject: [PATCH 07/44] runtime: rtld's module list for a mod module
+ (g_pAutoLoadList), modules placed in Horizon's address order, GetInfo 65001,
+ ArbitrateLock/Unlock
+
+An exlaunch-style mod's DT_INIT walks nn::ro::detail::g_pAutoLoadList (ModuleObject per module at the MOD0 runtime
+offset), sorts the modules by address (second lowest = main), maps a RW mirror with MapProcessMemory after
+GetInfo(65001), and locks its own mutexes with SVC 0x1a/0x1b.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c   | 61 +++++++++++++++++++++++++++++++++--
+ games/totk/runtime/services.c | 18 +++++++++++
+ 2 files changed, 77 insertions(+), 2 deletions(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index ea6128e8..92730cab 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -232,6 +232,19 @@ static void map_module(Module *m,const char *dir) {
+  fprintf(stderr,"[totk] mapped embedded %s at %p size=%zu symbols=%u\n",m->name,m->base,m->size,m->nsym);
+ }
+ #else
++/* Where the modules go: one reservation, in Horizon's address order — a mod module (ctor_flag 0, scripts/mod_module.py)
++   first, then main, the retail subsdks and nnSdk as the tables list them. An exlaunch-style mod sorts the modules it finds
++   through rtld's list (below) by address and takes the second lowest for main (the lowest is rtld on Horizon): with the mod
++   alone below main, that is main here too. */
++static uint8_t *module_slots[MAX_MODULES];
++static void place_modules(void) {
++ size_t total=0;for(unsigned i=0;i<NM;i++)total+=page_up(modules[i].file_size)+0x8000;
++ uint8_t *arena=mmap(NULL,total,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);need(arena!=MAP_FAILED,"reserve module arena");
++ uint8_t *cursor=arena;
++ for(int pass=0;pass<2;pass++)for(unsigned i=0;i<NM;i++){
++  if((modules[i].ctor_flag==0)!=(pass==0))continue;
++  module_slots[i]=cursor;cursor+=page_up(modules[i].file_size)+0x8000;}
++}
+ static void map_module(Module *m,const char *dir) {
+  char path[4096];need(snprintf(path,sizeof(path),"%s/%s.patched.bin",dir,m->name)<(int)sizeof(path),"image path");
+  FILE *f=fopen(path,"rb");need(f!=NULL,"open patched module");
+@@ -239,8 +252,9 @@ static void map_module(Module *m,const char *dir) {
+  /* The main module gets one private, writable page after its rewritten image. The
+     real-time frame-step patch reads its two floats from this page via ADRP. */
+  m->size=page_up(m->file_size)+(!strcmp(m->name,"main")?0x4000:0);
+- m->base=mmap(NULL,m->size,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON,-1,0);
+- need(m->base!=MAP_FAILED,"map module");need(fread(m->base,1,m->file_size,f)==m->file_size,"read image");fclose(f);
++ uint8_t *slot=module_slots[m-modules];need(slot!=NULL,"module slot");
++ m->base=mmap(slot,m->size,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
++ need(m->base==slot,"map module");need(fread(m->base,1,m->file_size,f)==m->file_size,"read image");fclose(f);
+  unsigned char digest[32];CC_SHA256(m->base,(CC_LONG)m->file_size,digest);char hex[65];
+  for(unsigned i=0;i<32;i++)snprintf(hex+i*2,3,"%02x",digest[i]);
+  need(!strcmp(hex,m->digest),"image SHA256 differs from verified rewrite");
+@@ -297,6 +311,45 @@ static void relocate(Module *m) {
+   memcpy(m->base+r->where,&v,8);
+  }
+ }
++/* Horizon's rtld keeps a ModuleObject per loaded module — its storage is the module's own __nx_module_runtime (.bss, at the
++   MOD0 header's ModuleRuntimeOffset) — linked in nn::ro::detail::g_pAutoLoadList, and after relocating everything writes that
++   list's address into the variable nn::ro::detail::g_pAutoLoadList of a module that defines it (nnSdk's nn::ro does, and so
++   does an exlaunch-style mod module, scripts/mod_module.py). The mod's DT_INIT walks the list: each ModuleObject's module_base
++   (+0x20), then QueryMemory for the text/rodata/data ranges, the GNU build ID at the end of rodata, the path at the start of
++   rodata, and its own ModuleObject's address to know itself. The list is built here with the fields rtld fills from each
++   module's .dynamic; only a mod module's variable is written, nnSdk keeps running as before (its nn::ro is not used). */
++typedef struct RtldModule {
++ struct RtldModule *next,*prev;void *rela_plt,*rela;uint8_t *module_base;void *dynamic;uint64_t is_rela,rela_plt_size;
++ void *dt_init,*dt_fini,*hash_bucket,*hash_chain,*dynstr,*dynsym;uint64_t dynstr_size;void *got;uint64_t rela_dyn_size,rel_dyn_size,rel_count,rela_count,hash_nchain,hash_nbucket;
++ void *got_stub_ptr;uint64_t soname_idx,nro_size,cannot_revert_symbols;
++} RtldModule;
++_Static_assert(sizeof(RtldModule)==0xd0,"rtld ModuleObject layout (6.x+)");
++static struct {RtldModule *front,*back;} rtld_auto_list;
++static void rtld_module_list(void) {
++ RtldModule *prev=NULL;unsigned linked=0;
++ for(int pass=0;pass<2;pass++)for(unsigned i=0;i<NM;i++){   /* list order: mod modules, then main, subsdk*, sdk (as the addresses) */
++  Module *m=&modules[i];if((m->ctor_flag==0)!=(pass==0))continue;
++  uint32_t mod0;memcpy(&mod0,m->base+4,4);
++  if(mod0+0x1c>m->key_off||memcmp(m->base+mod0,"MOD0",4)){fprintf(stderr,"[totk] %s: no MOD0 header, not in rtld's module list\n",m->name);continue;}
++  int32_t off[6];memcpy(off,m->base+mod0+4,sizeof off);   /* dynamic, bss start, bss end, eh_frame_hdr start/end, module runtime */
++  uint64_t dyn=(uint64_t)mod0+off[0],rt=(uint64_t)mod0+off[5];
++  if(dyn+16>m->key_off||rt<m->data_off||rt+sizeof(RtldModule)>m->key_off){fprintf(stderr,"[totk] %s: MOD0 offsets out of the image, not in rtld's module list\n",m->name);continue;}
++  RtldModule *o=(RtldModule *)(m->base+rt);memset(o,0,sizeof *o);
++  o->module_base=m->base;o->dynamic=m->base+dyn;o->is_rela=1;
++  for(uint64_t d=dyn;d+16<=m->key_off;d+=16){int64_t tag;uint64_t val;memcpy(&tag,m->base+d,8);memcpy(&val,m->base+d+8,8);if(tag==0)break;
++   void *ptr=val<m->key_off?m->base+val:NULL;
++   switch(tag){case 2:o->rela_plt_size=val;break;case 3:o->got=ptr;break;case 4:o->hash_bucket=ptr;if(ptr&&val+8<=m->key_off){uint32_t nb,nc;memcpy(&nb,ptr,4);memcpy(&nc,(uint8_t *)ptr+4,4);o->hash_nbucket=nb;o->hash_nchain=nc;o->hash_bucket=(uint8_t *)ptr+8;o->hash_chain=(uint8_t *)ptr+8+(uint64_t)nb*4;}break;
++    case 5:o->dynstr=ptr;break;case 6:o->dynsym=ptr;break;case 7:o->rela=ptr;break;case 8:o->rela_dyn_size=val;break;case 10:o->dynstr_size=val;break;
++    case 12:o->dt_init=ptr;break;case 13:o->dt_fini=ptr;break;case 23:o->rela_plt=ptr;break;case 0x6ffffff9:o->rela_count=val;break;case 0x6ffffffa:o->rel_count=val;break;case 14:o->soname_idx=val;break;default:break;}}
++  if(prev){prev->next=o;o->prev=prev;}else{rtld_auto_list.front=o;o->prev=(RtldModule *)&rtld_auto_list;}
++  prev=o;linked++;
++ }
++ if(!prev)return;
++ prev->next=(RtldModule *)&rtld_auto_list;rtld_auto_list.back=prev;
++ for(unsigned i=0;i<NM;i++){Module *m=&modules[i];if(m->ctor_flag)continue;   /* only a mod module learns the list */
++  for(unsigned k=0;k<m->nsym;k++){const Symbol *s=&m->symbols[k];if(!s->defined||s->value+8>m->key_off)continue;
++   if(!strcmp(s->name,"_ZN2nn2ro6detail15g_pAutoLoadListE")){void *p=&rtld_auto_list;memcpy(m->base+s->value,&p,8);fprintf(stderr,"[totk] %s: nn::ro::detail::g_pAutoLoadList set (%u modules in rtld's list)\n",m->name,linked);}}}
++}
+ static void verify_identity(int negative) {
+  unsigned checked=0;void *original=required("nnMain");
+  for(unsigned i=0;i<NM;i++)for(unsigned j=0;j<modules[i].nreloc;j++) {
+@@ -641,8 +694,12 @@ int main(int argc,char **argv) {
+  runtime_hle_stack_init((uint64_t)runtime_keys[4]*8);
+  need(pthread_key_create(&environment_key,environment_destroy)==0,"thread environment key");
+  load_tables();
++#if !TARGET_OS_IPHONE
++ place_modules();
++#endif
+  for(unsigned i=0;i<NM;i++)map_module(&modules[i],argv[1]);
+  for(unsigned i=0;i<NM;i++)relocate(&modules[i]);
++ rtld_module_list();
+  for(unsigned i=0;i<NM;i++)if(!strcmp(modules[i].name,"main"))runtime_game_patches(&modules[i]);
+ #if !TARGET_OS_IPHONE
+  if(!strcmp(argv[2],"export-ios")){const char *out=getenv("TOTK_EXPORT_IOS");need(out!=NULL,"export-ios needs TOTK_EXPORT_IOS=<dir>");export_ios_text(argv[1],out);return 0;}
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index 5b6def32..ce9dc505 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -229,6 +229,7 @@ static void memory_init(void) {
+  * The leading/trailing partial source pages cannot be isolated on this host.
+  */
+ static pthread_mutex_t memory_lock=PTHREAD_MUTEX_INITIALIZER;
++static pthread_mutex_t arbiter_lock=PTHREAD_MUTEX_INITIALIZER;static pthread_cond_t arbiter_cond=PTHREAD_COND_INITIALIZER;   /* SVC 0x1a/0x1b */
+ typedef struct{uint64_t dst,src,size;} StackMap;static StackMap stack_maps[4096];static unsigned nstack_maps;
+ static int overlaps(uint64_t a,uint64_t n,uint64_t b,uint64_t m){return a<b+m&&b<a+n;}
+ static uint64_t stack_move(int unmap,uint64_t dst,uint64_t src,uint64_t size){
+@@ -493,6 +494,9 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+      which the host replaces: no remote region, no remote memory. */
+   case 25:case 26:case 27:value=0;break;
+   case 29:case 30:case 31:case 32:value=0;break;
++  /* Mesosphere's InfoType 65001 (MesosphereCurrentProcess): a handle to the current process, what exlaunch asks for before
++     MapProcessMemory (0x74) — the emulators answer it too. The pseudo handle is the one 0x74 accepts. */
++  case 65001:value=0xffff8001;break;
+   case 33:value=0x1000;break;
+   default:fprintf(stderr,"unknown GetInfo id %u\n",id);runtime_fail("GetInfo id not implemented");
+   }
+@@ -535,6 +539,20 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+  case 0x0c: r[0]=0;r[1]=44;return 0;
+  case 0x0e: r[0]=0;r[1]=0;r[2]=15;return 0;
+  case 0x25: {uint64_t id;pthread_threadid_np(NULL,&id);r[0]=0;r[1]=id;return 0;}
++ /* ArbitrateLock(owner handle, mutex address, own handle) / ArbitrateUnlock(mutex address): the raw mutex of a mod module's
++    libnx-style code (the game's own nn::os mutexes are host replacements). libnx mutexLock sets the 0x40000000 waiter bit
++    and calls 0x1a when the word is owned; 0x1b wakes the waiters after the owner stored 0. One lock and condition serve
++    every such mutex; a waiter takes the word itself when it is free, as the kernel would hand it over. */
++ case 0x1a: {
++  volatile uint32_t *word=(volatile uint32_t *)(uintptr_t)r[1];uint32_t owner=(uint32_t)r[0],self=(uint32_t)r[2];
++  if(!word||((uintptr_t)word&3)){r[0]=0xcc01;return r[0];}
++  pthread_mutex_lock(&arbiter_lock);
++  for(;;){uint32_t v=*word;
++   if((v&~0x40000000u)==0){*word=self;break;}             /* free: ours */
++   if((v&~0x40000000u)!=owner)break;                        /* another owner already: the caller retries */
++   *word=v|0x40000000u;pthread_cond_wait(&arbiter_cond,&arbiter_lock);}
++  pthread_mutex_unlock(&arbiter_lock);r[0]=0;return 0; }
++ case 0x1b: {pthread_mutex_lock(&arbiter_lock);pthread_cond_broadcast(&arbiter_cond);pthread_mutex_unlock(&arbiter_lock);r[0]=0;return 0;}
+  case 0x10:r[0]=0;return 0;
+  /* SynchronizePreemptionState: the SDK calls it after clearing ThreadLocalRegion disable_count (+0x100) when interrupt_flag
+     (+0x102) was set by a preemption that had to wait (threads.c totk_preempt_signal). The switch itself happened at this

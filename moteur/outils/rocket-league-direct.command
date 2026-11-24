@@ -6,7 +6,8 @@
 #  2. déclare à Legendary l'installation existante d'Obelisk (aucun téléchargement) ;
 #  3. écrit la recette de lancement (moteur Voile d'Obelisk, préfixe, exécutable, options) à partir de la capture analyser-rocket-league ;
 #  4. vérifie que Legendary fournit bien un code de connexion Epic.
-MOT="/Applications/Home/moteur"; OB="$MOT/obelisk"; CAP="/Applications/Home/log/rocket-league"; mkdir -p "$OB"
+HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+MOT="$HR/moteur"; OB="$MOT/obelisk"; CAP="$HR/log/rocket-league"; mkdir -p "$OB"
 fin() { echo; read -r -p "Entrée pour fermer." _; exit "${1:-0}"; }
 [ -f "$CAP/launch.sh" ] && [ -f "$CAP/arguments.txt" ] || { echo "Il manque la capture ($CAP/launch.sh et arguments.txt) : lance d'abord analyser-rocket-league.command."; fin 1; }
 cp "$CAP/launch.sh" "$OB/launch.sh"; chmod +x "$OB/launch.sh"

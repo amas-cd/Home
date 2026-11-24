@@ -47,7 +47,10 @@ Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
 | `moteur/outils/` | Les scripts que Home lance (voir plus bas) |
 | `moteur/patches/` | Les patchs d'Anas pour nxnative (`series` donne l'ordre) |
 | `moteur/tools/` | `engine.py` (version figée de nxnative + patchs), notes de version, tests |
-| `moteur/obelisk/` | Lancement direct Epic (Legendary) |
+| `moteur/obelisk/` | Lancement direct Epic (Legendary), `launch.sh` du moteur Voile (repris d'Obelisk, GPL-3.0) |
+| `moteur/pc/pc.py` | Jeux PC sans Obelisk : télécharge Voile, compte Epic (Legendary), bibliothèque, installation, lancement. Lancé par `outils/pc.command` |
+| `moteur/compat/pc.json` | Liste de compatibilité PC, avec sources : `bloque` (jamais lancé), `verifie`, `linux`. Un jeu absent n'est jamais bloqué |
+| `moteur/.upstream-ref`, `moteur/mng/` | Versions figées : commit de nxnative ; commit de MacNativeGames + les commits d'Anas en patchs |
 | `scripts/installer-local.sh` | Recopie le dépôt dans `/Applications/Home/moteur`, puis compile et installe Home sur ce Mac |
 | `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home.zip` pour un tag `v*` ou pour « Run workflow » avec une version |
 | `.claude/` | Ce contexte : le hook Stop qui te rappelle de demander l'envoi de la mise à jour |
@@ -115,6 +118,9 @@ Home les lance dans le Terminal, sans le PATH du Terminal (ajoute Homebrew au PA
 | `mng-mettre-a-jour.command`, `mng-reconstruire.command` | MacNativeGames à jour, apps reconstruites sans ROM |
 | `mng-mods-appliquer.command`, `mng-combiner-mods.sh` | Mods RomFS et mods de code pour MacNativeGames |
 | `totk-mng-online.command` | TotK MacNativeGames avec le mod TOTK Online |
+| `installer-embarque.sh` | Installe dans `<Home>/moteur` ce que Home.app embarque (`Contents/Resources/moteur`). Lancé par Home au démarrage si l'empreinte a changé |
+| `preparer-moteurs.command` | « Préparer ce Mac » : Xcode, Metal, Homebrew, .NET, Python, nxnative, MacNativeGames. `--etat` : dit seulement ce qui manque |
+| `pc.command` | Lance `moteur/pc/pc.py` avec le bon Python (`etat`, `preparer`, `connexion`, `bibliotheque`, `installer`, `lancer [--essai]`) |
 | `home-mettre-a-jour.command` | « Mettre à jour Home » : recompile depuis `/Applications/Home/moteur/salon` si la source a changé |
 | `alleger-build.sh` | Allège un dossier de construction |
 | `journaux.command` | « Journaux pour Claude » : copie les journaux dans `/Applications/Home/log/diag` |
@@ -218,7 +224,15 @@ Numéro de version `X.Y.Z` (dernière release : `gh api repos/amas-cd/home/relea
 Décidé avec Anas pour Home autonome (pour lui et ses amis) :
 
 1. **Fait** : dépôt privé, compilation et releases automatiques (0.1.0).
-2. **À faire : Home autonome.** Au premier lancement, sans dossier `/Applications/Home` :
+2. **Fait en grande partie (à tester sur un Mac neuf) : Home autonome.**
+   - Fait : scripts embarqués et installés au démarrage ; « Préparer ce Mac » ; dossiers configurables (`Application Support/Salon/dossiers.json`,
+     `HOME_RACINE` / `HOME_JEUX` dans les scripts) ; jeux Epic sans Obelisk (moteur Linux de Voile seulement : programmes 64 bits, pas .NET) ;
+     liste de compatibilité.
+   - Reste : Steam et GOG sans Obelisk, moteur Rosetta de Voile (jeux 32 bits / .NET), désinstaller un jeu PC depuis Home, serveurs en ligne.
+   - Règle de la liste de compatibilité : ne bloquer qu'avec une source (refus de l'éditeur ou d'Obelisk). Un anti-triche seul ne prouve rien :
+     Rocket League fonctionne.
+
+   Plan d'origine. Au premier lancement, sans dossier `/Applications/Home` :
    - installer les scripts embarqués dans l'app ;
    - vérifier les outils Xcode (`xcode-select --install`) ;
    - récupérer nxnative (version figée par `moteur/tools/engine.py` + `moteur/patches`) et MacNativeGames ;

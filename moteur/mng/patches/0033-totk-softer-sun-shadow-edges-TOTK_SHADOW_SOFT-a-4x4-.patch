@@ -1,0 +1,69 @@
+From 042fbcb387469ca55984a3845f8c3ccf38aac474 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Tue, 10 Nov 2026 11:40:41 +0000
+Subject: [PATCH 33/44] totk: softer sun-shadow edges (TOTK_SHADOW_SOFT), a 4x4
+ compare kernel
+
+The shadow pre-pass compares the sun's cascades with four bilinear taps; each
+becomes four taps around it, rebuilt at load with the AO patch. Radius 1
+texel by default, TOTK_SHADOW_SOFT=<0.25..3>, 0 keeps the game's filter.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ .../third_party/d2r_gfx/gfx/nvn/totk_ssao.h   | 35 +++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h b/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
+index d027b196..08f3f1c6 100644
+--- a/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
++++ b/games/totk/third_party/d2r_gfx/gfx/nvn/totk_ssao.h
+@@ -282,6 +282,40 @@ static int ssao_entry(const char *key) {
+     for (int i = 0; i < (int)(sizeof k_ssao_keys / sizeof *k_ssao_keys); i++) if (!strncmp(key, k_ssao_keys[i].prefix, 16)) return i;
+     return -1;
+ }
++/* Softer sun-shadow edges (Mac, TOTK; user 2026-11-10: "les ombres toujours pas clean", stair steps along the shadows'
++   edges after the shadow maps went to 3200x3200). The same shadow pre-pass shaders compare the sun's cascades with four
++   bilinear sample_compare taps of fp_t_tcb_14 (a 2x2 kernel); each tap becomes four taps half a texel-radius around it, so
++   the kernel is a 4x4 grid of bilinear compares: a smoother and slightly wider penumbra. The mask this pass writes is
++   upsampled to the screen, so a smoother term also softens its steps there. TOTK_SHADOW_SOFT=<texels> sets the radius
++   (default 1, 0.25 .. 3), TOTK_SHADOW_SOFT=0 keeps the game's own filter. The source is rebuilt at load with the AO patch
++   (same keys and life cycle); a failed compile leaves both stock with a red line. */
++static float pcf_radius(void) {
++    static float r; static dispatch_once_t once;
++    dispatch_once(&once, ^{ const char *e = getenv("TOTK_SHADOW_SOFT"); r = e && *e ? (float)atof(e) : 1.0f;
++        if (r != 0 && (r < 0.25f || r > 3.0f)) r = 1.0f;
++        MLOG("[pcf] sun shadows: %s", r > 0 ? [NSString stringWithFormat:@"4x4 compare kernel, radius %.2f texel (TOTK_SHADOW_SOFT)", r].UTF8String : "the game's own 2x2 filter (TOTK_SHADOW_SOFT=0)"); });
++    return r;
++}
++static NSString *pcf_patch_src(NvShader *o, NSString *src, NSString *at) {
++    float r = pcf_radius(); if (!(r > 0)) return src;
++    NSString *call = @"spvDepthCast(spvDescriptorSet0.fp_t_tcb_14).sample_compare(spvDescriptorSet0.fp_t_tcb_14Smplr, ";
++    NSUInteger n = [src componentsSeparatedByString:call].count - 1;
++    if (n == 0 || n > 8 || [src rangeOfString:at].location == NSNotFound) { MLOG("[pcf] %s: %lu shadow taps, kept as it is", o->key, (unsigned long)n); return src; }
++    NSString *helper = [NSString stringWithFormat:
++        @"// ---- TOTK_SHADOW_SOFT: each shadow-map tap as four, %.3f texel around it (inserted by the PCF patch) ----\n"
++        "template <typename T>\n"
++        "static inline float totk_pcf(depth2d_array<T> t, sampler s, float2 uv, uint layer, float ref, level lod)\n"
++        "{\n"
++        "    const float2 o = float2(%.3f) / float2(float(t.get_width()), float(t.get_height()));\n"
++        "    return 0.25 * (float(t.sample_compare(s, uv + float2(-o.x, -o.y), layer, ref, lod)) + float(t.sample_compare(s, uv + float2(o.x, -o.y), layer, ref, lod))\n"
++        "                 + float(t.sample_compare(s, uv + float2(-o.x, o.y), layer, ref, lod)) + float(t.sample_compare(s, uv + float2(o.x, o.y), layer, ref, lod)));\n"
++        "}\n", r * 0.5f, r * 0.5f];
++    NSString *out = [src stringByReplacingOccurrencesOfString:call withString:@"totk_pcf(spvDepthCast(spvDescriptorSet0.fp_t_tcb_14), spvDescriptorSet0.fp_t_tcb_14Smplr, "];
++    out = [out stringByReplacingOccurrencesOfString:at withString:[NSString stringWithFormat:@"%@\n%@", helper, at]];
++    MLOG("[pcf] %s: %lu shadow taps softened", o->key, (unsigned long)n);
++    return out;
++}
++
+ static NSString *ssao_patch_src(NvShader *o, NSString *src, int i, const char **why) {
+     const int slot = k_ssao_keys[i].slot;
+     if ([src rangeOfString:[NSString stringWithFormat:@"_c1)._m0[%d]", slot]].location != NSNotFound) { *why = "the stock source reads the parameter slot"; return nil; }
+@@ -298,6 +332,7 @@ static NSString *ssao_patch_src(NvShader *o, NSString *src, int i, const char **
+     NSString *out = [src stringByReplacingOccurrencesOfString:at withString:[NSString stringWithFormat:@"%s\n%@", k_ssao_keys[i].helper, at]];
+     out = [out stringByReplacingOccurrencesOfString:store withString:@(k_ssao_keys[i].call)];
+     if (sstore) out = [out stringByReplacingOccurrencesOfString:sstore withString:@(k_ssao_keys[i].shadow_call)];
++    out = pcf_patch_src(o, out, at);
+     return [@SSAO_MARK stringByAppendingString:out];
+ }
+ 

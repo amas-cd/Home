@@ -1,0 +1,115 @@
+From 01e157255e959ac83f661ef0761a6cc8d49e907b Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 13:04:10 +0000
+Subject: [PATCH 28/44] build_app: --from-work, the TotK Mac app again from the
+ work folder alone (no game file or keys)
+
+A code mod or a new runtime goes into the app from the ExeFS and RomFS an earlier build extracted and
+verified (pinned hashes), the shared fonts it kept and this repository's runtime: the game file is only
+needed once.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ build_app.py | 64 ++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 62 insertions(+), 2 deletions(-)
+
+diff --git a/build_app.py b/build_app.py
+index ca8b8acd..8ce5b5d3 100644
+--- a/build_app.py
++++ b/build_app.py
+@@ -657,7 +657,9 @@ def step_code(tree, game, keys, env, logs, *, version="v0", mod=None, mod_module
+     exefs = tree / f'extracted/{version}/exefs'
+     want = expected['exefs_sha256']
+     manifest = exefs.parent / 'extraction-manifest.json'
+-    if not source_matches(manifest, game) or not exefs_matches(exefs, want, expected['title_id']):
++    if game is None and not exefs_matches(exefs, want, expected['title_id']):
++        raise BuildError(f'--from-work: the {version} ExeFS in {exefs} is not the verified one; build once from the game file')
++    if game is not None and (not source_matches(manifest, game) or not exefs_matches(exefs, want, expected['title_id'])):
+         say('1/4 code: extracting the ExeFS from the game file')
+         if exefs.exists():
+             shutil.rmtree(exefs)
+@@ -1091,6 +1093,8 @@ def step_update_data(tree, game, update, keys, logs, *, version, mod=None, nativ
+                      and (folder/'romfs.bin').stat().st_size == expected['romfs']['size'])
+         except (ValueError, KeyError):
+             pass
++    if not valid and game is None:
++        raise BuildError(f'--from-work: the {expected["display_version"]} RomFS in {folder} is not the verified one; build once from the game files')
+     if not valid:
+         hactool = build_hactool(tree, logs)
+         if folder.exists():
+@@ -2683,8 +2687,11 @@ def mac_game_data(args, device_app):
+ def parse_args(argv):
+     ap = argparse.ArgumentParser(description='Build a native Mac app or unsigned iPhone/iPad IPA from TOTK base 1.0.0 (XCI/NSP), optionally with the separate 1.2.1 or 1.4.3 update; or a Mac app from Breath of the Wild: a combined 1.6.0 card image, or a base NSP with its separate 1.6.0 or 1.9.0 update NSP and optional add-on content NSPs (--dlc).',
+                                  epilog='example: python3 build_app.py ~/Games/totk.xci -k ~/keys/prod.keys')
+-    ap.add_argument('game', type=Path, help='the game file (.xci or .nsp), base game 1.0.0 (Breath of the Wild: the 1.6.0 card image, or the base NSP with --update); '
++    ap.add_argument('game', type=Path, nargs='?', help='the game file (.xci or .nsp), base game 1.0.0 (Breath of the Wild: the 1.6.0 card image, or the base NSP with --update); '
+                     'or a Switch 2 dump folder (base/, updates/<version>/ with exefs/ and romfs/: Pokemon Pokopia 2.0.1)')
++    ap.add_argument('--from-work', choices=('v0', 'v121', 'v143'), metavar='VERSION',
++                    help='Tears of the Kingdom on Mac: build the app again from the work folder (--work) alone, without the game file or keys, '
++                         'from the files an earlier build extracted and verified for VERSION (v121, v143, v0); with --mod / --mod-module it merges a code mod')
+     ap.add_argument('--update', type=Path, help='separate supported cumulative update NSP/NSZ; outputs the same single app (Breath of the Wild: the 1.9.0 update NSP, not for a card image)')
+     ap.add_argument('--dlc', type=Path, action='append', metavar='DLC.nsp', help='Breath of the Wild with a separate 1.6.0 or 1.9.0 --update: an add-on content (DLC) NSP; repeat for the second pack (01007EF00011F001, 01007EF00011F002); each is optional, and a pack left out is not in the app; such a build takes its packs from --dlc only, also when the game file is a card image')
+     ap.add_argument('--platform', choices=('macos','ios','visionos'), default='macos', help='build a macOS app (default), unsigned iPhone/iPad IPA, or native Vision Pro IPA')
+@@ -2751,8 +2758,61 @@ def build_oot(args, source):
+                            shader_chain=shader_chain), args)
+ 
+ 
++def main_from_work(args):
++    """--from-work VERSION: the Tears of the Kingdom Mac app built again from the work folder alone (no game file, no keys):
++    the ExeFS and RomFS an earlier build extracted for VERSION, checked against the pinned hashes as a build checks them,
++    the shared fonts it kept, and this repository's runtime; --mod / --mod-module merge a code mod as a full build does"""
++    version = args.from_work
++    if args.platform != 'macos': raise BuildError('--from-work builds the Mac app')
++    if not args.work or not args.out: raise BuildError('--from-work needs --work <the work folder of an earlier build> and -o <the app>')
++    if args.game or args.update or args.dlc: raise BuildError('--from-work takes no game file, update or DLC: the work folder holds the game')
++    work, out = args.work.expanduser().resolve(), args.out.expanduser().resolve()
++    if out.suffix.lower() != '.app': raise BuildError(f'the macos output must end in .app: {out}')
++    if not (work / 'totk/extracted' / version).is_dir(): raise BuildError(f'--from-work: no extracted {version} in {work}/totk/extracted')
++    if not fonts_valid(work / 'totk/extracted/firmware/shared-fonts'): raise BuildError(f'--from-work: no verified shared fonts in {work}/totk/extracted/firmware')
++    mod = args.mod.expanduser().resolve() if args.mod else None
++    if mod and not ((mod / 'exefs').is_dir() or (mod / 'romfs').is_dir()):
++        raise BuildError(f'--mod expects a mod folder prepared before the build (its files under exefs/ and/or romfs/): {mod} has neither. See docs/mods.md.')
++    if args.install_mod_romfs and not (mod and (mod / 'romfs').is_dir()): raise BuildError('--install-mod-romfs needs --mod with a romfs/ folder')
++    code_mod = mod if mod and (mod / 'exefs').is_dir() else None
++    mod_module = args.mod_module.expanduser().resolve() if getattr(args, 'mod_module', None) else None
++    args.mac_game_data, game_data_folder = mac_game_data(args, False)
++    py = prerequisites(args)
++    logs = work / 'logs'
++    env = dict(os.environ, PATH=os.pathsep.join(TOOL_PATHS + [os.environ.get('PATH', '/usr/bin:/bin:/usr/sbin:/sbin')]))
++    t0 = time.time()
++    tree = prepare_work(work, py, logs)
++    native_5k = native_5k_enabled(args.platform, version, args.native_5k, args.native_4k)
++    native_4k = True if native_5k else args.native_4k
++    if native_4k is None: native_4k = version in ('v143', 'v121') and native_4k_default()
++    say(f'Tears of the Kingdom {VERSIONS[version]["display_version"]} from the work folder {work}, without the game file'
++        + (f'; code mod {code_mod.name}' if code_mod else '') + (f'; mod module {mod_module.name}' if mod_module else ''))
++    step_code(tree, None, None, env, logs, version=version, mod=code_mod, mod_module=mod_module)
++    if version == 'v0': step_data(tree, None, None, logs, mod=mod)
++    else: step_update_data(tree, None, None, None, logs, version=version, mod=mod, native_4k=native_4k, native_5k=native_5k, vr=False)
++    if mod: check_mod_overlays(tree, mod, version)
++    step_shaders(tree, logs, version=version)
++    step_shader_libs(tree, logs, version=version)
++    step_binary(tree, None, None, env, logs, version=version)
++    say(f'4/4 app: assembling {out}')
++    step_app(tree, out, logs, version=version, game_data=args.mac_game_data, game_data_folder=game_data_folder,
++             native_5k=False if args.native_4k is False else args.native_5k)
++    run([LSREGISTER, '-f', out], logs / 'register-app.log')
++    say('4/4 app: macOS checks the app once (seconds when this app folder was checked before, a few minutes for a new one)')
++    r = subprocess.run([out / 'Contents/MacOS/TOTK', '--check'], capture_output=True, text=True, timeout=1800)
++    if r.returncode: raise BuildError(f'the app does not start: {(r.stdout + r.stderr).strip()}')
++    step_warm_metal(tree, out, logs)
++    if mod and args.install_mod_romfs: install_mod_romfs(mod, tree, version, out, py, logs)
++    elif mod: say_mod_copy_steps(mod, tree, version, out)
++    say(f'done in {(time.time() - t0) / 60:.0f} min: {out}')
++
++
+ def main(argv):
+     args = parse_args(argv)
++    if getattr(args, 'from_work', None):
++        return main_from_work(args)
++    if args.game is None:
++        raise BuildError('the game file is needed (or --from-work <version> with --work, to build again from a work folder)')
+     if args.game.suffix.lower() == '.nup':
+         return build_oot(args, args.game.expanduser().resolve())
+     if args.game.expanduser().is_dir():   # a Switch 2 dump folder

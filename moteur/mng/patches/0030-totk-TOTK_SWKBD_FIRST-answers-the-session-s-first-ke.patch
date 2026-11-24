@@ -1,0 +1,47 @@
+From b0ad0fd7290143eecb3e4d21b508f11ce380ef58 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 13:48:00 +0000
+Subject: [PATCH 30/44] totk: TOTK_SWKBD_FIRST answers the session's first
+ keyboard only
+
+TOTK Online asks for the server's IP and port at every start: a launcher answers it, and the keyboards
+after it (a horse's name) still show the text bar.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/swkbd_host.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/games/totk/runtime/swkbd_host.c b/games/totk/runtime/swkbd_host.c
+index 4c8718e4..4c0f434d 100644
+--- a/games/totk/runtime/swkbd_host.c
++++ b/games/totk/runtime/swkbd_host.c
+@@ -15,6 +15,8 @@
+    code and 8 user name are character sets the applet knows; not applied here).
+ 
+    TOTK_SWKBD_ANSWER=<text> answers without showing the bar (tests; "<cancel>" cancels, "<initial>" keeps the initial text).
++   TOTK_SWKBD_FIRST=<text> answers only the session's first keyboard that way, the later ones show the bar: a mod that asks
++   the same thing at every start (TOTK Online: the server's IP and port) is answered by the launcher, a horse is still named.
+    make probe-swkbd builds the arguments with the guest SDK and calls through main's own PLT stub. */
+ #include "runtime.h"
+ #include "totk_ui_lang.h"
+@@ -132,6 +134,9 @@ static unsigned show_keyboard(void *out_string, const void *arg_ptr) {
+ 
+     char text[KB_LIMIT * 4 + 1] = ""; int confirmed = 0;
+     const char *forced = getenv("TOTK_SWKBD_ANSWER");
++    static int first_answered;
++    const char *first = getenv("TOTK_SWKBD_FIRST");
++    if (!forced && first && *first && !__atomic_exchange_n(&first_answered, 1, __ATOMIC_SEQ_CST)) forced = first;
+     if (forced) {
+         confirmed = strcmp(forced, "<cancel>") != 0;
+         snprintf(text, sizeof text, "%s", strcmp(forced, "<initial>") ? forced : initial);
+@@ -162,7 +167,7 @@ static unsigned show_keyboard(void *out_string, const void *arg_ptr) {
+     char shown[sizeof text]; utf16_to_utf8(u, n, shown, sizeof shown);
+     if (password) snprintf(shown, sizeof shown, "(password, %zu characters, not logged)", n);
+     fprintf(stderr, "[totk] keyboard: \"%s\" (type %u, %d-%d characters, disabled keys %#x, %s out)%s -> %s%s%s\n", prompt, type, min_len,
+-            max_len, disabled, utf8 ? "UTF-8" : "UTF-16", forced ? " [TOTK_SWKBD_ANSWER]" : "", confirmed ? "\"" : "cancelled",
++            max_len, disabled, utf8 ? "UTF-8" : "UTF-16", forced ? (forced == first ? " [TOTK_SWKBD_FIRST]" : " [TOTK_SWKBD_ANSWER]") : "", confirmed ? "\"" : "cancelled",
+             confirmed ? shown : "", confirmed ? "\"" : "");
+     return confirmed ? 0 : SWKBD_CANCELED;
+ }

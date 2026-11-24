@@ -1,0 +1,65 @@
+From 62c5daeafe2a2058b3dc5301e17c7f2e00173947 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 07:14:03 +0000
+Subject: [PATCH 14/44] services: MapProcessMemory honours a 4 KiB-aligned
+ destination exactly (the kernel rounded it down by up to 0xc000)
+
+The mod read the game's instructions at the right addresses and wrote its hooks 0x2000 past them through the alias.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c   |  4 ++--
+ games/totk/runtime/services.c | 18 ++++++++++++------
+ 2 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index da605b77..19f5efb7 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -238,9 +238,9 @@ static void map_module(Module *m,const char *dir) {
+    alone below main, that is main here too. */
+ static uint8_t *module_slots[MAX_MODULES];
+ static void place_modules(void) {
+- size_t total=0;for(unsigned i=0;i<NM;i++)total+=page_up(modules[i].file_size)+0x8000;
++ size_t total=0x8000;for(unsigned i=0;i<NM;i++)total+=page_up(modules[i].file_size)+0x8000;
+  uint8_t *arena=mmap(NULL,total,PROT_NONE,MAP_PRIVATE|MAP_ANON,-1,0);need(arena!=MAP_FAILED,"reserve module arena");
+- uint8_t *cursor=arena;
++ uint8_t *cursor=arena+0x8000;   /* reserved guard pages before every module: MapProcessMemory (services.c) may alias from a little before a module */
+  for(int pass=0;pass<2;pass++)for(unsigned i=0;i<NM;i++){
+   if((modules[i].ctor_flag==0)!=(pass==0))continue;
+   module_slots[i]=cursor;cursor+=page_up(modules[i].file_size)+0x8000;}
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index ce9dc505..9f656598 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -570,17 +570,23 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   uint64_t dst=r[0],handle=r[1],src=r[2],size=r[3];
+   if(handle!=0xffff8001){r[0]=0xe401;return r[0];}   /* InvalidHandle */
+   if((dst|src|size)&4095||!size){r[0]=0xcc01;return r[0];}
+-  mach_vm_address_t target=dst;vm_prot_t cur=0,max=0;
+-  kern_return_t kr=mach_vm_remap(mach_task_self(),&target,size,0,VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,mach_task_self(),src,FALSE,&cur,&max,VM_INHERIT_NONE);
+-  if(kr==KERN_SUCCESS)kr=mach_vm_protect(mach_task_self(),target,size,FALSE,VM_PROT_READ|VM_PROT_WRITE);
+-  fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx (+%#llx): %s\n",(unsigned long long)src,(unsigned long long)dst,(unsigned long long)size,kr==KERN_SUCCESS?"ok (rw alias)":mach_error_string(kr));
++  /* Horizon pages are 4 KiB, this kernel's 16 KiB: a destination the guest picked on a 4 KiB boundary is honoured exactly by
++     mapping from `d` bytes before the source onto the 16 KiB boundary below (the modules' arena keeps guard pages before each
++     module for that), so that dst + k is src + k as the guest expects. mach_vm_remap would otherwise round the destination
++     down silently: an exlaunch-style mod then wrote its hooks 0x2000 past the instructions it had read. */
++  uint64_t d=dst&0x3fff;mach_vm_address_t target=dst-d;uint64_t len=(size+d+0x3fff)&~0x3fffULL;vm_prot_t cur=0,max=0;
++  kern_return_t kr=mach_vm_remap(mach_task_self(),&target,len,0,VM_FLAGS_FIXED|VM_FLAGS_OVERWRITE,mach_task_self(),src-d,FALSE,&cur,&max,VM_INHERIT_NONE);
++  if(kr==KERN_SUCCESS&&target!=dst-d){fprintf(stderr,"[totk] MapProcessMemory: the kernel moved the alias to %#llx\n",(unsigned long long)target);kr=KERN_INVALID_ADDRESS;}
++  if(kr==KERN_SUCCESS)kr=mach_vm_protect(mach_task_self(),target,len,FALSE,VM_PROT_READ|VM_PROT_WRITE);
++  fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx (+%#llx)%s: %s\n",(unsigned long long)src,(unsigned long long)dst,(unsigned long long)size,d?" (4 KiB offset kept)":"",kr==KERN_SUCCESS?"ok (rw alias)":mach_error_string(kr));
+   r[0]=kr==KERN_SUCCESS?0:0xd401;return r[0]; }
+  case 0x75: {
+   uint64_t dst=r[0],handle=r[1],size=r[3];
+   if(handle!=0xffff8001){r[0]=0xe401;return r[0];}
+   if((dst|size)&4095||!size){r[0]=0xcc01;return r[0];}
+-  /* back to a reservation, as the region was before the alias (PROT_NONE keeps the address space shape the guest expects) */
+-  void *p=mmap((void *)(uintptr_t)dst,size,PROT_NONE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
++  /* back to a reservation, as the region was before the alias (PROT_NONE keeps the address space shape the guest expects);
++     the whole 16 KiB pages the alias took (see 0x74) */
++  uint64_t d=dst&0x3fff;void *p=mmap((void *)(uintptr_t)(dst-d),(size+d+0x3fff)&~0x3fffULL,PROT_NONE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
+   r[0]=p==MAP_FAILED?0xd401:0;return r[0]; }
+  case 0x73: {
+   uint64_t handle=r[0],addr=r[1],size=r[2];unsigned perm=(unsigned)r[3];

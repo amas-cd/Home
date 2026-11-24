@@ -1,0 +1,61 @@
+From 738f3000217325e82cc306951627d170b2a30dac Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 10:15:47 +0000
+Subject: [PATCH 18/44] totk online: give the virtual core up while a socket
+ call waits
+
+The mod's save sync waited in a blocking recv for its server while holding
+a virtual core, and the boot stopped at Creating the Metal device. Also logs
+the first send/recv/poll results under TOTK_ONLINE_LOG.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/online_host.c | 18 ++++++++++++++----
+ 1 file changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+index c7acd7fc..fb7574ff 100644
+--- a/games/totk/runtime/online_host.c
++++ b/games/totk/runtime/online_host.c
+@@ -34,6 +34,15 @@ static int fail(const char *what) {
+     return -1;
+ }
+ 
++/* A socket call that waits (a blocking connect, recv, send or poll) gives the guest thread's virtual core up around the wait, like
++   the kernel's own waits: TOTK Online's save sync waits in recv for its server on a thread that shares a core with the boot,
++   which then stopped at "Creating the Metal device" with the server waiting for the game. errno is kept across the core's return. */
++#define ONLINE_WAIT(expr) ({ int away_ = runtime_core_away(); __typeof__(expr) r_ = (expr); int e_ = errno; runtime_core_back(&away_); errno = e_; r_; })
++static void online_trace(const char *what, int fd, long long r) {   /* the first calls of each kind, to follow the exchange */
++    static _Atomic int n_send, n_recv, n_poll; _Atomic int *n = what[0] == 's' ? &n_send : what[0] == 'r' ? &n_recv : &n_poll;
++    if (online_log() && r >= 0 && atomic_fetch_add(n, 1) < 6) fprintf(stderr, "[totk-online] %s(%d) = %lld\n", what, fd, r);
++}
++
+ static uint32_t online_initialize(void *pool, uint64_t pool_size, uint64_t alloc_pool_size, int concurrency) {
+     (void)pool; (void)pool_size; (void)alloc_pool_size; (void)concurrency;
+     fprintf(stderr, "[totk-online] nn::socket::Initialize: host BSD sockets\n"); return 0;
+@@ -50,11 +59,12 @@ static int online_socket(int domain, int type, int protocol) {
+ static int online_connect(int fd, const struct sockaddr *addr, uint32_t len) {
+     if (online_log() && addr && addr->sa_family == AF_INET) { char ip[64]; const struct sockaddr_in *in = (const struct sockaddr_in *)addr;
+         fprintf(stderr, "[totk-online] connect(%d) -> %s:%u\n", fd, inet_ntop(AF_INET, &in->sin_addr, ip, sizeof ip), ntohs(in->sin_port)); }
+-    int r = connect(fd, addr, len);
++    int r = ONLINE_WAIT(connect(fd, addr, len));
++    if (online_log() && r == 0) fprintf(stderr, "[totk-online] connect(%d): connected\n", fd);
+     return r < 0 ? fail("connect") : r;
+ }
+-static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) { ssize_t r = send(fd, buf, (size_t)len, flags | MSG_NOSIGNAL); return r < 0 ? fail("send") : r; }
+-static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) { ssize_t r = recv(fd, buf, (size_t)len, flags); return r < 0 ? fail("recv") : r; }
++static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, flags | MSG_NOSIGNAL)); online_trace("send", fd, r); return r < 0 ? fail("send") : r; }
++static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags)); online_trace("recv", fd, r); return r < 0 ? fail("recv") : r; }
+ static int online_close(int fd) { if (online_log()) fprintf(stderr, "[totk-online] close(%d)\n", fd); int r = close(fd); return r < 0 ? fail("close") : r; }
+ /* The guest follows AAPCS64 (its third argument in x2) while Apple's arm64 ABI passes variadic arguments on the stack:
+    a fixed third parameter reads x2, which is where the module put it. */
+@@ -67,7 +77,7 @@ static int online_setsockopt(int fd, int level, int name, const void *val, uint3
+ static int online_getpeername(int fd, struct sockaddr *addr, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getpeername(fd, addr, &l); if (len) *len = l; return r < 0 ? fail("getpeername") : r; }
+ static int online_getsockname(int fd, struct sockaddr *addr, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getsockname(fd, addr, &l); if (len) *len = l; return r < 0 ? fail("getsockname") : r; }
+ static int online_shutdown(int fd, int how) { int r = shutdown(fd, how); return r < 0 ? fail("shutdown") : r; }
+-static int online_poll(void *fds, uint64_t n, int timeout) { int r = poll(fds, (nfds_t)n, timeout); return r < 0 ? fail("poll") : r; }
++static int online_poll(void *fds, uint64_t n, int timeout) { int r = timeout ? ONLINE_WAIT(poll(fds, (nfds_t)n, timeout)) : poll(fds, (nfds_t)n, timeout); online_trace("poll", -1, r); return r < 0 ? fail("poll") : r; }
+ static int online_inet_pton(int af, const char *src, void *dst) { return inet_pton(af, src, dst); }
+ static int online_inet_aton(const char *cp, struct in_addr *addr) { return inet_aton(cp, addr); }
+ static uint16_t online_htons(uint16_t v) { return htons(v); }

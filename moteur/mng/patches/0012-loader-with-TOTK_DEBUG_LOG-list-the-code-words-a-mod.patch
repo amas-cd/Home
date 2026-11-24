@@ -1,0 +1,48 @@
+From 1eb8bedaaee8637f1213cd46a2f22c30d0c0758c Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Sun, 8 Nov 2026 23:29:08 +0000
+Subject: [PATCH 12/44] loader: with TOTK_DEBUG_LOG, list the code words a mod
+ module changed in the retail modules (its hooks)
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 8ff93d79..ad900278 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -629,10 +629,31 @@ uintptr_t runtime_frame_controller_return_pc(void) {
+ }
+ uint64_t runtime_image_bytes(void) { uint64_t total=0;for(unsigned i=0;i<NM;i++)total+=modules[i].key_off;return page_up(total); }
+ static void loader_ready(void) { fprintf(stderr,"[totk] rtld callback: modules linked\n"); }
++/* TOTK_DEBUG_LOG with a mod module: after the constructors, where did the mod write into the retail modules' code? Each
++   changed instruction word against the image on disk (the game patches of game_patches.c are applied before, so they are
++   excluded by comparing with a copy taken right after them), with the first bytes: the mod's hooks, for the log. */
++static uint8_t *code_snapshot[MAX_MODULES];
++static void hook_survey(int take) {
++#if !TARGET_OS_IPHONE
++ int mod=0;for(unsigned i=0;i<NM;i++)if(!modules[i].ctor_flag)mod=1;
++ if(!mod||!getenv("TOTK_DEBUG_LOG"))return;
++ for(unsigned i=0;i<NM;i++){Module *m=&modules[i];if(!m->ctor_flag)continue;size_t n=page_up(m->text_end);
++  if(take){code_snapshot[i]=malloc(n);if(code_snapshot[i])memcpy(code_snapshot[i],m->base,n);continue;}
++  if(!code_snapshot[i])continue;unsigned shown=0,total=0;
++  for(size_t k=0;k<n;k+=4)if(memcmp(code_snapshot[i]+k,m->base+k,4)){total++;
++   if(shown<48){uint32_t was,now;memcpy(&was,code_snapshot[i]+k,4);memcpy(&now,m->base+k,4);fprintf(stderr,"[totk] mod wrote %s+%#zx: %08x -> %08x\n",m->name,k,was,now);shown++;}}
++  if(total)fprintf(stderr,"[totk] mod wrote %u instruction word(s) in %s\n",total,m->name);
++  free(code_snapshot[i]);code_snapshot[i]=NULL;}
++#else
++ (void)take;
++#endif
++}
+ static void module_inits(void) {
+  fprintf(stderr,"[totk] SDK startup returned; running module constructors\n");
++ hook_survey(1);
+  for(unsigned i=0;i<NM;i++){char detail[128];snprintf(detail,sizeof detail,TOTK_UI("运行 %s 游戏模块初始化代码（%u/%u）","Running the %s game module initializers (%u/%u)"),modules[i].name,i+1,(unsigned)NM);runtime_boot_status(TOTK_UI("初始化游戏模块","Initializing game modules"),detail);fprintf(stderr,"[totk] ENTER %s DT_INIT\n",modules[i].name);((void(*)(void))(modules[i].base+modules[i].init))();uint32_t state=2;if(modules[i].ctor_flag){memcpy(&state,modules[i].base+modules[i].ctor_flag,4);need(state==2,"DT_INIT deferred or skipped constructors");}   /* a mod module (ctor_flag 0) has no nnsdk state word */
+  fprintf(stderr,"[totk] RETURN %s DT_INIT state=%u init_array_count=%llu\n",modules[i].name,state,(unsigned long long)(modules[i].init_size/8));}
++ hook_survey(0);
+ }
+ void runtime_startup_checkpoint(uintptr_t caller) {
+  if(!getenv("TOTK_VERIFY_STARTUP"))return;

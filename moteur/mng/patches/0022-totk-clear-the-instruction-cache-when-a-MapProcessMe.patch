@@ -1,0 +1,45 @@
+From a6c6b1b706ad1b303ab76c62f06df1aee55a2e19 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 10:38:23 +0000
+Subject: [PATCH 22/44] totk: clear the instruction cache when a
+ MapProcessMemory alias is unmapped
+
+A mod that installs a hook after its init writes the code through an alias;
+the source runs it, so its instruction cache is cleared at UnmapProcessMemory.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/services.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/games/totk/runtime/services.c b/games/totk/runtime/services.c
+index 24cf1fdd..4fba084f 100644
+--- a/games/totk/runtime/services.c
++++ b/games/totk/runtime/services.c
+@@ -455,6 +455,8 @@ uint64_t runtime_svc_inner(unsigned num,uint64_t *r,const char *module,uint64_t
+ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset){uint64_t v=runtime_svc_inner(num,r,module,offset);runtime_core_checkpoint();return v;}
+ #define runtime_svc runtime_svc_inner
+ #endif
++#include <libkern/OSCacheControl.h>
++static uint64_t alias_dst[16],alias_src[16],alias_size[16];   /* MapProcessMemory aliases (0x74), for the icache at 0x75 */
+ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset) {
+  runtime_core_checkpoint();
+  // Successful SVCs occur several times per frame. Keep the detailed trace available
+@@ -586,6 +588,7 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   if(kr==KERN_SUCCESS&&target!=dst-d){fprintf(stderr,"[totk] MapProcessMemory: the kernel moved the alias to %#llx\n",(unsigned long long)target);kr=KERN_INVALID_ADDRESS;}
+   if(kr==KERN_SUCCESS)kr=mach_vm_protect(mach_task_self(),target,len,FALSE,VM_PROT_READ|VM_PROT_WRITE);
+   fprintf(stderr,"[totk] MapProcessMemory %#llx -> %#llx (+%#llx)%s: %s\n",(unsigned long long)src,(unsigned long long)dst,(unsigned long long)size,d?" (4 KiB offset kept)":"",kr==KERN_SUCCESS?"ok (rw alias)":mach_error_string(kr));
++  if(kr==KERN_SUCCESS){unsigned k=0;while(k<16&&alias_dst[k]&&alias_dst[k]!=dst)k++;if(k<16){alias_dst[k]=dst;alias_src[k]=src;alias_size[k]=size;}}
+   r[0]=kr==KERN_SUCCESS?0:0xd401;return r[0]; }
+  case 0x75: {
+   uint64_t dst=r[0],handle=r[1],size=r[3];
+@@ -593,6 +596,8 @@ uint64_t runtime_svc(unsigned num,uint64_t *r,const char *module,uint64_t offset
+   if((dst|size)&4095||!size){r[0]=0xcc01;return r[0];}
+   /* back to a reservation, as the region was before the alias (PROT_NONE keeps the address space shape the guest expects);
+      the whole 16 KiB pages the alias took (see 0x74) */
++  /* code written through the alias (a mod's hooks after its init) runs from the source: its instruction cache is cleared here */
++  for(unsigned k=0;k<16;k++)if(alias_dst[k]==dst){sys_icache_invalidate((void *)(uintptr_t)alias_src[k],alias_size[k]);alias_dst[k]=0;break;}
+   uint64_t d=dst&0x3fff;void *p=mmap((void *)(uintptr_t)(dst-d),(size+d+0x3fff)&~0x3fffULL,PROT_NONE,MAP_PRIVATE|MAP_ANON|MAP_FIXED,-1,0);
+   r[0]=p==MAP_FAILED?0xd401:0;return r[0]; }
+  case 0x73: {

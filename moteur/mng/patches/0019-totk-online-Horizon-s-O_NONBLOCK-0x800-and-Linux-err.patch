@@ -1,0 +1,94 @@
+From 406a90a2e6b7a57e447eb986e68361b743ff79ba Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 10:21:48 +0000
+Subject: [PATCH 19/44] totk online: Horizon's O_NONBLOCK (0x800) and Linux
+ errno numbers
+
+The mod's non-blocking switch was passed through as macOS's O_EXCL, so its
+save sync waited in a blocking recv while the server waited for it. Same
+translations as nxnative's hle_net.c (fcntl flag, GetLastErrno and SO_ERROR
+in Linux numbering, MSG_* mask), and a poll with timeout 0 that finds
+nothing waits 1 ms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/online_host.c | 36 +++++++++++++++++++++++++-------
+ 1 file changed, 28 insertions(+), 8 deletions(-)
+
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+index fb7574ff..23c47ac6 100644
+--- a/games/totk/runtime/online_host.c
++++ b/games/totk/runtime/online_host.c
+@@ -3,7 +3,7 @@
+    (runtime_override, before the SDK's own code, whose bsd:u service the host has no implementation of).
+ 
+    Horizon's socket library is FreeBSD's: sockaddr_in (sin_len, sin_family = 2, sin_port, sin_addr), the MSG_* flags, F_GETFL /
+-   F_SETFL with O_NONBLOCK = 4, SOL_SOCKET = 0xffff and the errno numbers are the same values as macOS's, so descriptors and
++   F_SETFL (O_NONBLOCK is 0x800 there, translated in online_fcntl), SOL_SOCKET = 0xffff and the errno numbers are returned in Linux's numbering (linux_errno), descriptors and
+    arguments pass straight through. The host's descriptors are returned as the guest's. GetLastErrno is per thread, like the SDK's. */
+ #include "runtime.h"
+ #include <errno.h>
+@@ -23,13 +23,26 @@ static _Thread_local int online_errno;
+ static int online_log(void) { static int v = -1; if (v < 0) { const char *e = getenv("TOTK_ONLINE_LOG"); v = e && *e && strcmp(e, "0"); } return v; }
+ /* A failed call is logged the first 8 times for each call name, then once every 10,000: a mod polling a socket that is not
+    connected (getpeername while its server is not running) wrote 8.8 million lines in a few minutes. */
++/* The errno a mod reads (nn::socket::GetLastErrno) in the numbering emulators give it, Linux's (Ryujinx, yuzu): a non-blocking Recv with
++   no data must read 11, not macOS's 35 (nxnative hle_net.c, where TOTK Online plays). Flags and structures stay FreeBSD's = macOS's. */
++static int linux_errno(int e) {
++    switch (e) {
++    case EAGAIN: return 11; case EINPROGRESS: return 115; case EALREADY: return 114; case ENOTSOCK: return 88; case EDESTADDRREQ: return 89; case EMSGSIZE: return 90;
++    case EPROTOTYPE: return 91; case ENOPROTOOPT: return 92; case EPROTONOSUPPORT: return 93; case EOPNOTSUPP: return 95; case EAFNOSUPPORT: return 97;
++    case EADDRINUSE: return 98; case EADDRNOTAVAIL: return 99; case ENETDOWN: return 100; case ENETUNREACH: return 101; case ENETRESET: return 102;
++    case ECONNABORTED: return 103; case ECONNRESET: return 104; case ENOBUFS: return 105; case EISCONN: return 106; case ENOTCONN: return 107; case ESHUTDOWN: return 108;
++    case ETIMEDOUT: return 110; case ECONNREFUSED: return 111; case EHOSTDOWN: return 112; case EHOSTUNREACH: return 113;
++    default: return e;
++    }
++}
+ static int fail(const char *what) {
+-    online_errno = errno ? errno : EIO;
++    int host_errno = errno ? errno : EIO; online_errno = linux_errno(host_errno); errno = host_errno;
++    if (host_errno == EAGAIN && online_log()) { static _Atomic int again; if (atomic_fetch_add(&again, 1) >= 3) return -1; }
+     if (online_log()) {
+         static const char *names[16]; static unsigned long counts[16]; unsigned k = 0;
+         while (k < 16 && names[k] && strcmp(names[k], what)) k++;
+         unsigned long n = 0; if (k < 16) { if (!names[k]) names[k] = what; n = ++counts[k]; }
+-        if (n <= 8 || n % 10000 == 0) fprintf(stderr, "[totk-online] %s: %s (%d)%s\n", what, strerror(online_errno), online_errno, n == 8 ? " (now logged once every 10,000)" : n > 8 ? " (again)" : "");
++        if (n <= 8 || n % 10000 == 0) fprintf(stderr, "[totk-online] %s: %s (%d)%s\n", what, strerror(host_errno), host_errno, n == 8 ? " (now logged once every 10,000)" : n > 8 ? " (again)" : "");
+     }
+     return -1;
+ }
+@@ -63,21 +76,28 @@ static int online_connect(int fd, const struct sockaddr *addr, uint32_t len) {
+     if (online_log() && r == 0) fprintf(stderr, "[totk-online] connect(%d): connected\n", fd);
+     return r < 0 ? fail("connect") : r;
+ }
+-static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, flags | MSG_NOSIGNAL)); online_trace("send", fd, r); return r < 0 ? fail("send") : r; }
+-static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags)); online_trace("recv", fd, r); return r < 0 ? fail("recv") : r; }
++static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, (flags & 0xC7) | MSG_NOSIGNAL)); online_trace("send", fd, r); return r < 0 ? fail("send") : r; }
++static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) { ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags & 0xC7)); online_trace("recv", fd, r); return r < 0 ? fail("recv") : r; }
+ static int online_close(int fd) { if (online_log()) fprintf(stderr, "[totk-online] close(%d)\n", fd); int r = close(fd); return r < 0 ? fail("close") : r; }
+ /* The guest follows AAPCS64 (its third argument in x2) while Apple's arm64 ABI passes variadic arguments on the stack:
+    a fixed third parameter reads x2, which is where the module put it. */
++/* Horizon's O_NONBLOCK is 0x800 (nn::socket::FcntlFlag::O_NonBlock), macOS's 4 (0x800 there is O_EXCL, which F_SETFL ignores): passed
++   through, the mod's "make the socket non-blocking" left it blocking, its save sync waited in Recv for a server that waits for it, and the
++   boot stopped at "Creating the Metal device". F_GETFL (3) and F_SETFL (4) are the same numbers. */
+ static int online_fcntl(int fd, int cmd, long arg) {
+-    int r = fcntl(fd, cmd, arg);
++    int r;
++    if (cmd == 4) { int cur = fcntl(fd, F_GETFL, 0); if (cur < 0) cur = 0; r = fcntl(fd, F_SETFL, (arg & 0x800) ? (cur | O_NONBLOCK) : (cur & ~O_NONBLOCK)); }
++    else if (cmd == 3) { r = fcntl(fd, F_GETFL, 0); if (r >= 0) r = (r & O_NONBLOCK ? 0x800 : 0) | (r & O_ACCMODE); }
++    else r = fcntl(fd, cmd, arg);
++    static _Atomic int nlog; if (online_log() && atomic_fetch_add(&nlog, 1) < 6) fprintf(stderr, "[totk-online] fcntl(%d, %d, %#lx) = %#x\n", fd, cmd, arg, r);
+     return r < 0 ? fail("fcntl") : r;
+ }
+-static int online_getsockopt(int fd, int level, int name, void *val, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getsockopt(fd, level, name, val, &l); if (len) *len = l; return r < 0 ? fail("getsockopt") : r; }
++static int online_getsockopt(int fd, int level, int name, void *val, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getsockopt(fd, level, name, val, &l); if (len) *len = l; if (!r && level == SOL_SOCKET && name == SO_ERROR && val && l >= 4 && *(int *)val) *(int *)val = linux_errno(*(int *)val); return r < 0 ? fail("getsockopt") : r; }
+ static int online_setsockopt(int fd, int level, int name, const void *val, uint32_t len) { int r = setsockopt(fd, level, name, val, len); return r < 0 ? fail("setsockopt") : r; }
+ static int online_getpeername(int fd, struct sockaddr *addr, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getpeername(fd, addr, &l); if (len) *len = l; return r < 0 ? fail("getpeername") : r; }
+ static int online_getsockname(int fd, struct sockaddr *addr, uint32_t *len) { socklen_t l = len ? *len : 0; int r = getsockname(fd, addr, &l); if (len) *len = l; return r < 0 ? fail("getsockname") : r; }
+ static int online_shutdown(int fd, int how) { int r = shutdown(fd, how); return r < 0 ? fail("shutdown") : r; }
+-static int online_poll(void *fds, uint64_t n, int timeout) { int r = timeout ? ONLINE_WAIT(poll(fds, (nfds_t)n, timeout)) : poll(fds, (nfds_t)n, timeout); online_trace("poll", -1, r); return r < 0 ? fail("poll") : r; }
++static int online_poll(void *fds, uint64_t n, int timeout) { int r = timeout ? ONLINE_WAIT(poll(fds, (nfds_t)n, timeout)) : poll(fds, (nfds_t)n, timeout); if (r == 0 && timeout == 0) ONLINE_WAIT(usleep(1000)); online_trace("poll", -1, r); return r < 0 ? fail("poll") : r; }
+ static int online_inet_pton(int af, const char *src, void *dst) { return inet_pton(af, src, dst); }
+ static int online_inet_aton(const char *cp, struct in_addr *addr) { return inet_aton(cp, addr); }
+ static uint16_t online_htons(uint16_t v) { return htons(v); }

@@ -1,0 +1,33 @@
+From 4bea4fa9f11608b73f6e1dcc0f228b33992056ea Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Mon, 9 Nov 2026 09:53:12 +0000
+Subject: [PATCH 16/44] frontend: TOTK_FULLSCREEN=1 starts in macOS fullscreen
+ on the launcher's display (TOTK_SCREEN_ID)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeenf2po
+---
+ games/totk/runtime/frontend.m | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/games/totk/runtime/frontend.m b/games/totk/runtime/frontend.m
+index f5b503e5..dff045ea 100644
+--- a/games/totk/runtime/frontend.m
++++ b/games/totk/runtime/frontend.m
+@@ -965,7 +965,15 @@ corners by the present encoder (gfx/nvn/fps_overlay.c). The box sits under the o
+   if(window.level==NSFloatingWindowLevel){NSRect f=window.frame;[window setFrameOrigin:NSMakePoint(NSMaxX(vis)-f.size.width,NSMaxY(vis)-f.size.height)];}   /* TOTK_WINDOW_FLOAT: top-right corner */
+   front_sync_drawable();
+   if(assume_focus()){[window orderFrontRegardless];}else{[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];}   /* in front of other apps' windows, keyboard left alone */
+-  if(borderlessScreen){[window setFrame:borderlessScreen.frame display:YES];dispatch_async(dispatch_get_main_queue(),^{[window setFrame:borderlessScreen.frame display:YES];});}   /* TOTK_BORDERLESS: [window center] above and the first ordering go to the key window's screen; the chosen screen wins */
++  if(borderlessScreen){[window setFrame:borderlessScreen.frame display:YES];dispatch_async(dispatch_get_main_queue(),^{[window setFrame:borderlessScreen.frame display:YES];});}
++  /* TOTK_FULLSCREEN=1 (a launcher such as Salon): macOS fullscreen from the start, on the launcher's display (TOTK_SCREEN_ID): the window is
++     centred there first, so the fullscreen Space opens on that screen. */
++  {const char *e=getenv("TOTK_FULLSCREEN");if(e&&!strcmp(e,"1")&&!borderlessScreen&&!(window.styleMask&NSWindowStyleMaskFullScreen)){
++    NSScreen *sc=window.screen?:NSScreen.mainScreen;const char *id=getenv("TOTK_SCREEN_ID");
++    if(id&&*id){unsigned long want=strtoul(id,NULL,10);for(NSScreen *x in NSScreen.screens)if([x.deviceDescription[@"NSScreenNumber"] unsignedLongValue]==want){sc=x;break;}}
++    NSRect v=sc.visibleFrame,f=window.frame;[window setFrameOrigin:NSMakePoint(NSMidX(v)-f.size.width/2,NSMidY(v)-f.size.height/2)];
++    fprintf(stderr,"[totk] fullscreen at start on '%s' (TOTK_FULLSCREEN)\n",sc.localizedName.UTF8String);
++    dispatch_async(dispatch_get_main_queue(),^{if(!(window.styleMask&NSWindowStyleMaskFullScreen))[window toggleFullScreen:nil];});}}   /* TOTK_BORDERLESS: [window center] above and the first ordering go to the key window's screen; the chosen screen wins */
+   front_sr_view();
+   [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n){(void)n;note_window_screen();front_sr_view();}];   /* a refresh rate changed on the same screen */
+   dispatch_after(dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC),dispatch_get_main_queue(),^{note_occlusion(" 3 s after opening");});

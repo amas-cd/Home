@@ -1,0 +1,28 @@
+From bbcfbac3bfd4f1767bbe5feee4c2f42a992cab14 Mon Sep 17 00:00:00 2001
+From: Anas <anas@local>
+Date: Sun, 8 Nov 2026 21:56:48 +0000
+Subject: [PATCH 05/44] loader: a mod module's unresolved game imports stay 0
+ like Horizon's rtld
+
+---
+ games/totk/runtime/loader.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index f744243f..ea6128e8 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -284,7 +284,12 @@ static void relocate(Module *m) {
+    if(!p)p=runtime_override(s->name);
+    if(p)p=runtime_hle_wrap_named(p,s->name);   /* host replacements run on the thread's host stack */
+    if(!p)p=s->defined?(s->value<m->key_off?m->base+s->value:NULL):runtime_symbol(s->name);
+-   if(!p&&s->binding!=2){fprintf(stderr,"%s unresolved %s\n",m->name,s->name);runtime_fail("strong import unresolved");}
++   if(!p&&s->binding!=2){
++    /* A mod module (ctor_flag 0, scripts/mod_module.py) imports game symbols the game never exports (its dynsym has 29): Horizon's
++       rtld leaves such imports unresolved (0) and exlaunch-style mods fill their own tables from version-specific offsets at run time.
++       The same here; a retail module's unresolved strong import is still an error. */
++    if(m->ctor_flag==0){static unsigned shown;if(shown++<8)fprintf(stderr,"[totk] %s: import %s left unresolved (rtld rule)\n",m->name,s->name);m->weak++;}
++    else{fprintf(stderr,"%s unresolved %s\n",m->name,s->name);runtime_fail("strong import unresolved");}}
+    if(!p)m->weak++;
+    if(p&&!s->defined)m->cross++;
+    v=(uintptr_t)p+(r->kind==1026?0:r->addend);m->symbolic++;

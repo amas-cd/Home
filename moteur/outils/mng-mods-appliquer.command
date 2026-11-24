@@ -4,8 +4,9 @@
 # MacNativeGames ne lit que les fichiers listés dans mods/<version>/manifest.tsv (docs/mods.md) : le dossier est refait avec
 # le romfs/ de chaque mod activé, dans l'ordre (le dernier gagne), puis le manifeste est recalculé avec l'outil du projet.
 # Sans mod activé, le dossier est vidé (jeu d'origine). La première fois, ce qui s'y trouvait est gardé à côté.
+HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 APP="$1"; shift
-MNG="/Applications/Home/MacNativeGames"; BASE="$HOME/Library/Application Support/MacNativeGames/TOTK/mods"
+MNG="$HR/MacNativeGames"; BASE="$HOME/Library/Application Support/MacNativeGames/TOTK/mods"
 fin() { echo; read -r -t 8 -p "Fenêtre fermée dans 8 s (Entrée pour fermer maintenant)." _; exit "${1:-0}"; }
 [ -d "$APP" ] || { echo "App introuvable : $APP"; fin 1; }
 VER="$(ls "$APP/Contents/Resources/totk/extracted" 2>/dev/null | grep -E '^v[0-9]+$' | head -1)"

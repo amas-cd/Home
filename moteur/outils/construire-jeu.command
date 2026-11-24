@@ -10,7 +10,8 @@
 # nxnative garde le jeu extrait dans son dossier <jeu>_build (extract/v<version>/) et l'app est faite de clones APFS de ces
 # fichiers (aucune place en plus) : --depuis-build reconstruit à partir de là, sans le NSP, qui peut donc être supprimé.
 # Home retient ce qui a servi (sources/registre.json). Journal : /Applications/Home/log/construire-<jeu>.log
-GAMES=/Applications/Jeux; H="/Applications/Home"; MOT="$H/moteur"; MNG="$H/MacNativeGames"; SRC="$H"; LOGD="$H/log"; CONS="$H/constructions"; mkdir -p "$CONS"
+HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
+GAMES=$JX; H="$HR"; MOT="$H/moteur"; MNG="$H/MacNativeGames"; SRC="$H"; LOGD="$H/log"; CONS="$H/constructions"; mkdir -p "$CONS"
 mkdir -p "$SRC" "$LOGD"
 # HOME_DISCRET=1 (Home → Avancé → Construction silencieuse) : la construction tourne sur les cœurs économes du Mac
 # (priorité « arrière-plan » de macOS) avec 4 compilations de shaders à la fois au lieu d'une par cœur : plus lente, mais
@@ -60,7 +61,7 @@ LOG="$LOGD/construire-$SLUG.log"; exec > >(tee "$LOG") 2>&1
 caffeinate -d -i -s -w $$ &
 echo "===== $(date '+%d/%m %H:%M') : construction de $NOM avec $MOTEUR"
 KEYS=""; [ -z "$WORK" ] && for k in "$HOME_CLES" "$HOME/Downloads/ProdKeys/prod.keys" "$HOME/.switch/prod.keys" "$HOME/Downloads/prod.keys" "$H/prod.keys"; do [ -f "$k" ] && { KEYS="$k"; break; }; done
-[ -z "$KEYS" ] && [ -z "$WORK" ] && case "$BASE" in *.nup) ;; *) echo "prod.keys introuvable (cherché dans Téléchargements/ProdKeys, ~/.switch, Téléchargements, /Applications/Jeux)"; fin 1;; esac
+[ -z "$KEYS" ] && [ -z "$WORK" ] && case "$BASE" in *.nup) ;; *) echo "prod.keys introuvable (cherché dans Téléchargements/ProdKeys, ~/.switch, Téléchargements, $JX)"; fin 1;; esac
 if [ -n "$WORK" ]; then echo "depuis le dossier de construction : $WORK (aucun NSP, aucune clé)"; else echo "clés : ${KEYS:-aucune (NUP)}"; fi
 # un seul build à la fois : deux en même temps saturent la mémoire
 while pgrep -f "[b]uild_ipa_from_nsp.py|[b]uild_app.py" >/dev/null; do echo "$(date '+%H:%M') : un autre jeu se construit, j'attends…"; sleep 60; done

@@ -1,0 +1,49 @@
+From b24c9b74490f2a0c0f05b1d6eedee6c93639659d Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Wed, 11 Nov 2026 12:40:04 +0000
+Subject: [PATCH 42/44] totk online: with TOTK_ONLINE_LOG, log the first
+ received chunk that carries a plugin's source or name (BasicUIs, client.py,
+ icons)
+
+Says whether TOTK Online's Python plugins (player list, chat, name tags, map icons) reach the Mac.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/online_host.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+index cc779222..5aadd0cb 100644
+--- a/games/totk/runtime/online_host.c
++++ b/games/totk/runtime/online_host.c
+@@ -97,6 +97,21 @@ static void online_stats(int fd) {
+     fprintf(stderr, "[totk-online] rate over %.1f s: send %.0f/s %.1f KB/s, recv %.0f/s %.1f KB/s, recv with no data %.0f/s, most unread %lld B\n",
+             s, sn / s, sb / s / 1024, rn / s, rb / s / 1024, none / s, back);
+ }
++/* What the server sends besides the game's state: TOTK Online's server ships Python plugins (BasicUIs: the player list, chat,
++   name tags and map icons) and resources to its clients. With TOTK_ONLINE_LOG, the first time a received chunk carries a
++   plugin's source or a known name, it is logged with its size and the text around it: whether the plugins reach the Mac. */
++static void online_scan(const void *buf, size_t n) {
++    static const char *const marks[] = {"import totk", "def calc", "def render", "BasicUIs", "client.py", "register_event", "Font.ttf", "icons/"};
++    static _Atomic unsigned seen;
++    for (unsigned k = 0; k < sizeof marks / sizeof *marks; k++) {
++        if (atomic_load(&seen) & (1u << k)) continue;
++        const char *m = marks[k]; size_t ml = strlen(m); const char *b = buf;
++        for (size_t i = 0; i + ml <= n; i++) if (b[i] == m[0] && !memcmp(b + i, m, ml)) {
++            if (atomic_fetch_or(&seen, 1u << k) & (1u << k)) break;
++            char ctx[81]; size_t s0 = i > 20 ? i - 20 : 0, c = 0; for (size_t j = s0; j < n && c < 80; j++, c++) ctx[c] = b[j] >= 32 && b[j] < 127 ? b[j] : '.'; ctx[c] = 0;
++            fprintf(stderr, "[totk-online] received '%s' (chunk of %zu bytes): %s\n", m, n, ctx); break; }
++    }
++}
+ static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) {
+     ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, (flags & 0xC7) | MSG_NOSIGNAL)); online_trace("send", fd, r);
+     if (r >= 0) { atomic_fetch_add(&st_send_n, 1); atomic_fetch_add(&st_send_b, r); }
+@@ -107,6 +122,7 @@ static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) {
+     ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags & 0xC7)); online_trace("recv", fd, r);
+     int e = errno;
+     if (r >= 0) { atomic_fetch_add(&st_recv_n, 1); atomic_fetch_add(&st_recv_b, r); } else if (e == EAGAIN) atomic_fetch_add(&st_recv_none, 1);
++    if (r > 0 && online_log()) online_scan(buf, (size_t)r);
+     online_stats(fd); errno = e;
+     return r < 0 ? fail("recv") : r;
+ }

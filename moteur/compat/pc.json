@@ -1,0 +1,1535 @@
+{
+ "a_lire": "Compatibilité des jeux PC sur le moteur de Home (Voile, moteur Linux). bloque : l'éditeur ou l'anti-triche refuse Linux et Mac, avec une source ; Home ne l'installe pas et ne le lance pas. verifie : confirmé sur ce moteur par Obelisk. linux : fonctionne sous Linux/Proton, pas encore confirmé sur Mac. Un jeu absent de la liste n'est jamais bloqué. Un jeu avec anti-triche n'est pas bloqué pour autant : Rocket League (Easy Anti-Cheat) fonctionne.",
+ "source": "Are We Anti-Cheat Yet (games.json, MIT, commit du 2026-10-24) + Obelisk notes.json/profiles.json (commit 51755d4 du 2026-11-19) + ProtonDB (résumés par jeu)",
+ "date": "2026-11-24",
+ "jeux": [
+  {
+   "nom": "2XKO",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Vanguard : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Vanguard"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/2xko",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Apex Legends",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1172470,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat : Electronic Arts refuse Wine et Linux depuis octobre 2024",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Arena Breakout: Infinite",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2073620,
+   "etat": "bloque",
+   "raison": "Anti-triche Anti-Cheat Expert : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Anti-Cheat Expert"
+   ],
+   "preuve": "https://www.arenabreakoutinfinite.com/act/a20250421safecentercag/index.html?Language=EN",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Battlefield 1",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1238840,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "FairFight",
+    "EA anticheat"
+   ],
+   "preuve": "https://www.ea.com/games/battlefield/battlefield-2042/news/eaac-and-battlefield",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Battlefield 6",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2807960,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.techspot.com/news/108925-battlefield-6-anti-cheat-system-requires-secure-boot.html",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Battlefield REDSEC",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.gamingonlinux.com/anticheat/vendor/ea-javelin-anticheat/",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Battlefield V",
+   "epic": null,
+   "epic_namespace": "bf5708c386744107b8a8a24ac707dd0e",
+   "steam": 1238810,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "FairFight",
+    "EA anticheat"
+   ],
+   "preuve": "https://www.ea.com/games/battlefield/battlefield-2042/news/eaac-and-battlefield",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Battlefield™ 2042",
+   "epic": null,
+   "epic_namespace": "52f57f57120c440fad9bfa0e6c279317",
+   "steam": 1517290,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/1517290#atmpx3XrXL",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Breachers",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1922010,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/breachers-vr",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Call of Duty (appli Steam commune : Modern Warfare II / III, Warzone)",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1938090,
+   "etat": "bloque",
+   "raison": "Anti-triche RICOCHET pas ouvert à Linux/Wine : le jeu ne se lance pas ou refuse la connexion",
+   "anticheat": [
+    "RICOCHET"
+   ],
+   "preuve": "https://www.protondb.com/app/1938090",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty: Black Ops 6",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2933620,
+   "etat": "bloque",
+   "raison": "Anti-triche Treyarch Anti-Cheat / RICOCHET pas ouvert à Linux/Wine : le jeu ne se lance pas ou refuse la connexion",
+   "anticheat": [
+    "Treyarch Anti-Cheat",
+    "RICOCHET"
+   ],
+   "preuve": "https://www.protondb.com/app/2933620",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty: Black Ops 7",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3606480,
+   "etat": "bloque",
+   "raison": "Anti-triche Ricochet : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Ricochet"
+   ],
+   "preuve": "https://www.pcgamesn.com/call-of-duty-black-ops-7/steam-deck",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Call of Duty: Warzone",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1962663,
+   "etat": "bloque",
+   "raison": "Anti-triche RICOCHET pas ouvert à Linux/Wine : le jeu ne se lance pas ou refuse la connexion",
+   "anticheat": [
+    "RICOCHET"
+   ],
+   "preuve": "https://www.protondb.com/app/1962663",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Concord",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 907630,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/concord",
+   "origine": "awacy"
+  },
+  {
+   "nom": "CRSED: Cuisine Royale",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://store.steampowered.com/news/app/884660/view/546735912086668871",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Delta Force: Hawk Ops",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2507950,
+   "etat": "bloque",
+   "raison": "Anti-triche Anti-Cheat Expert : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Anti-Cheat Expert"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2025/04/delta-force-devs-say-desktop-linux-support-is-not-part-of-our-agenda-in-the-future/",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Destiny 2",
+   "epic": null,
+   "epic_namespace": "428115def4ca4deea9d69c99c5a5a99e",
+   "steam": 1085660,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://help.bungie.net/hc/en-us/articles/360049024592-Destiny-2-Steam-Guide#steam-deck-and-destiny-2-0-3",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS FC™ 24",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2195250,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/2195250",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS FC™ 25",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2669320,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/2669320",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS FC™ 26",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3405690,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.gamingonlinux.com/anticheat/vendor/ea-javelin-anticheat/",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS™ FIFA 23",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1811260,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/1811260#7Le7LDSMJ6",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS™ Madden NFL 24",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2140330,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/2140330",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS™ Madden NFL 25",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/madden-nfl-25",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS™ Madden NFL 26",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3230400,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/3230400",
+   "origine": "awacy"
+  },
+  {
+   "nom": "EA SPORTS™ WRC 24",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1849250,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/ea-sports-wrc",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Exoborne",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2705130,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat / AnyBrain : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "AnyBrain"
+   ],
+   "preuve": "https://www.protondb.com/app/2705130",
+   "origine": "awacy"
+  },
+  {
+   "nom": "F1 25",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3059520,
+   "etat": "bloque",
+   "raison": "Anti-triche EA Javelin : pilote noyau Windows, Electronic Arts refuse Wine et Linux",
+   "anticheat": [
+    "EA Javelin Anticheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "F1® 24",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2488620,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.protondb.com/app/2488620",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Farlight 84",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1928420,
+   "etat": "bloque",
+   "raison": "Anti-triche NetEase Yidun : refuse Wine et Linux, des comptes ont été suspendus. Ne pas lancer",
+   "anticheat": [
+    "NetEase Yidun"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "FiveM",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Unknown (Custom) : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://forum.cfx.re/t/is-adhesive-by-any-chance-ever-going-to-be-supported-over-fivem-proton/5120618/2?u=hebi_kotei",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Forefront",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/forefront",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Fortnite",
+   "epic": "Fortnite",
+   "epic_namespace": "fn",
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat : Epic Games refuse Wine et Linux (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Ghosts of Tabor",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://github.com/AreWeAntiCheatYet/AreWeAntiCheatYet/issues/1866",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Hunt: Showdown 1896",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 594650,
+   "etat": "bloque",
+   "raison": "Protections en plus d'Easy Anti-Cheat : le jeu ne se lance pas pour l'instant avec Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "League of Legends",
+   "epic": null,
+   "epic_namespace": "24b9b5e323bc40eea252a10cdd3b2f10",
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Vanguard : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Vanguard"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2024/04/riot-games-talk-vanguard-anti-cheat-for-league-of-legends-and-why-its-a-no-for-linux",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Marathon",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3065800,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://www.protondb.com/app/3065800",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Plants vs Zombies: Garden Warfare 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://www.ea.com/games/plants-vs-zombies/plants-vs-zombies-garden-warfare-2/news/pvzgw2-anticheat-update",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Plants vs. Zombies: Battle for Neighborville",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1262240,
+   "etat": "bloque",
+   "raison": "Anti-triche EA anticheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "EA anticheat"
+   ],
+   "preuve": "https://answers.ea.com/t5/Other-Plants-vs-Zombies-Games/ANNOUNCEMENT-Plants-vs-Zombies-Battle-for-Neighborville/td-p/13645726",
+   "origine": "awacy"
+  },
+  {
+   "nom": "PUBG: BATTLEGROUNDS",
+   "epic": null,
+   "epic_namespace": "9361c8c6d2f34b42b5f2f61093eedf48",
+   "steam": 578080,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : KRAFTON refuse Wine et Linux",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "ROB RUN",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 4262460,
+   "etat": "bloque",
+   "raison": "Easy Anti-Cheat pas activé pour Linux par le studio : pas encore jouable",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Roblox",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Hyperion : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Hyperion"
+   ],
+   "preuve": "https://gamingonlinux.com/2024/03/game-over-for-roblox-on-linux-steam-deck-as-its-now-blocked/",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Rust",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 252490,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "VAC"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2022/10/facepunch-put-out-a-fresh-statement-on-rust-for-steam-deck-linux/",
+   "origine": "awacy"
+  },
+  {
+   "nom": "skate.",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3354750,
+   "etat": "bloque",
+   "raison": "Anti-triche EA Javelin : pilote noyau Windows, Electronic Arts refuse Wine et Linux",
+   "anticheat": [
+    "EA Javelin Anticheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Spectre Divide",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2641470,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://www.protondb.com/app/2641470",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Teamfight Tactics",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Vanguard : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Vanguard"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2024/04/riot-games-talk-vanguard-anti-cheat-for-league-of-legends-and-why-its-a-no-for-linux",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Tom Clancy's Rainbow Six Siege X",
+   "epic": null,
+   "epic_namespace": "carnation",
+   "steam": 359550,
+   "etat": "bloque",
+   "raison": "Anti-triche BattlEye : Ubisoft refuse Wine et Linux",
+   "anticheat": [
+    "BattlEye"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "VALORANT",
+   "epic": "602eb4abc8764c87b7f2607a1ef8c18e",
+   "epic_namespace": "cbd5b3d310a54b12bf3fe8c41994174f",
+   "steam": null,
+   "etat": "bloque",
+   "raison": "Anti-triche Vanguard : pilote noyau Windows, Riot Games refuse Wine et Linux",
+   "anticheat": [
+    "Vanguard"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/notes.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Vampire: The Masquerade - Bloodhunt",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 760160,
+   "etat": "bloque",
+   "raison": "Anti-triche Easy Anti-Cheat / Anti-Cheat Expert : l'éditeur refuse Linux et Wine (donc le Mac)",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "Anti-Cheat Expert"
+   ],
+   "preuve": "https://www.protondb.com/app/760160#aywgnGYqO3",
+   "origine": "awacy"
+  },
+  {
+   "nom": "Aimlabs",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 714010,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (EQU8 accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "EQU8"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/aimlabs",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "ARC Raiders",
+   "epic": null,
+   "epic_namespace": "b4bb52a95d0b43d9af543c6ec3c54e04",
+   "steam": 1808500,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/arc-raiders",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Armored Core VI: Fires of Rubicon",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1888160,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/armored-core-6",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Assassin's Creed IV: Black Flag",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 242050,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/assassins-creed-iv-black-flag",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Back 4 Blood",
+   "epic": null,
+   "epic_namespace": "57dfd95548214a138218e56cd9e5b9d8",
+   "steam": 924970,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://back4blood.com/en-us/patch-notes/april-2022-update",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "BattleBit Remastered",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 671860,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat / FACEIT accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "FACEIT"
+   ],
+   "preuve": "https://imgur.com/a/yAH2j8S",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Battlefield 4",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1238860,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster / FairFight accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster",
+    "FairFight"
+   ],
+   "preuve": "https://www.protondb.com/app/1238860",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Black Desert Online",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 582660,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (XIGNCODE3 accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "XIGNCODE3"
+   ],
+   "preuve": "https://www.theverge.com/2021/10/5/22709918/valve-steam-deck-supported-games-anti-cheat-proton-eac-battleye-epic",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Blue Archive",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3557620,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Nexon Game Security accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Nexon Game Security"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/blue-archive",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Brawlhalla",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 291550,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2021/10/brawlhalla-to-get-easy-anti-cheat-dev-puts-up-beta-with-eac-working-on-linux-with-proton",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty 4: Modern Warfare",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 7940,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster"
+   ],
+   "preuve": "https://www.protondb.com/app/7940",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty: Black Ops",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 42700,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Treyarch Anti-Cheat / VAC / PunkBuster accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Treyarch Anti-Cheat",
+    "VAC",
+    "PunkBuster"
+   ],
+   "preuve": "https://www.protondb.com/app/42700",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty: Black Ops II",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 202970,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (VAC / Treyarch Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "VAC",
+    "Treyarch Anti-Cheat"
+   ],
+   "preuve": "https://www.protondb.com/app/202970",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty: World at War",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 10090,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster / Treyarch Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster",
+    "Treyarch Anti-Cheat"
+   ],
+   "preuve": "https://www.protondb.com/app/10090",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Call of Duty®: Black Ops III",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 311210,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (VAC / Treyarch Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "VAC",
+    "Treyarch Anti-Cheat"
+   ],
+   "preuve": "https://www.protondb.com/app/311210#BP75Ef3fMr",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Dark and Darker",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2016590,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (IronShield / Tavern accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "IronShield",
+    "Tavern"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/dark-and-darker",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Diablo® IV",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2344520,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Warden accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Warden"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/diablo-iv",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "DJMAX RESPECT V",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 960170,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (XIGNCODE3 accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "XIGNCODE3"
+   ],
+   "preuve": "https://www.protondb.com/app/960170#FXZsa0HW7J",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Elden Ring: Nightreign",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2622380,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/elden-ring-nightreign",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Fallout 76",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1151340,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Unknown (Custom) accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://www.protondb.com/app/1151340",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Far Cry 3",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 220240,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/far-cry3",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Far Cry 5",
+   "epic": null,
+   "epic_namespace": "coriander",
+   "steam": 552520,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://steamdb.info/depot/552521/history/?changeid=M:7117179758041625493",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "For Honor",
+   "epic": null,
+   "epic_namespace": "sundrop",
+   "steam": 304390,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.protondb.com/app/304390",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "FragPunk",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2943650,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (NEAC Protect accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "NEAC Protect"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/fragpunk",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Gray Zone Warfare",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2479810,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat / AnyBrain accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "AnyBrain"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/gray-zone-warfare",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Gunfire Reborn",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1217060,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Unknown (Custom) accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://www.protondb.com/app/1217060",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Halo Infinite",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1240440,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Arbiter / Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Arbiter",
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2024/03/halo-infinite-added-easy-anti-cheat-enabled-for-linux-steam-deck/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Halo: The Master Chief Collection",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 976730,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://support.halowaypoint.com/hc/en-us/articles/14589112499348",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Hell Let Loose",
+   "epic": null,
+   "epic_namespace": "3e02273b543f4ff0a1c24d3b534a9ac3",
+   "steam": 686810,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.reddit.com/r/linux_gaming/comments/16v2ula/hell_let_loose_works_on_linux_now/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Insurgency: Sandstorm",
+   "epic": null,
+   "epic_namespace": "94cec4802e954a6c9579e29e8b817f3a",
+   "steam": 581320,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.reddit.com/r/linux_gaming/comments/t56f5r/insurgency_sandstorm_works_on_linux/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Marvel Rivals",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2767030,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (NetEase Game Security accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "NetEase Game Security"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/marvel-rivals",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Multiversus",
+   "epic": null,
+   "epic_namespace": "3a212c0da4f1438e840c21565df4b6fe",
+   "steam": 1818750,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.protondb.com/app/1818750",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "NARAKA: BLADEPOINT",
+   "epic": null,
+   "epic_namespace": "0c6aee83b9b64372bf44a043001325f2",
+   "steam": 1203220,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (NEAC Protect accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "NEAC Protect"
+   ],
+   "preuve": "https://www.protondb.com/app/1203220#XuXXlsqjmY",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Once Human (ROW/INTL)",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2139460,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (NEAC Protect accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "NEAC Protect"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/once-human",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Overwatch 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2357570,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Warden accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Warden"
+   ],
+   "preuve": "https://us.forums.blizzard.com/en/overwatch/en/overwatch/t/can-we-get-banned-for-playing-on-linux/70929/4",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Phantasy Star Online 2 (NA)",
+   "epic": null,
+   "epic_namespace": "bf333e6236914222a95a536389c05813",
+   "steam": 1056640,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (nProtect GameGuard accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "nProtect GameGuard"
+   ],
+   "preuve": "https://www.reddit.com/r/PSO2NGS/comments/ua5gf5/comment/i5vm95k/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Phasmophobia",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 739630,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (GuardingPearSoftware's Anti Cheat Pro accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "GuardingPearSoftware's Anti Cheat Pro"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/phasmophobia",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Prey",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 480490,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/prey",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Project CARS 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 378860,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/project-cars-2",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Quake Champions",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 611500,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Unknown (Custom) accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://www.protondb.com/app/611500",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Quake Live",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 282440,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (PunkBuster / VAC accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "PunkBuster",
+    "VAC"
+   ],
+   "preuve": "https://www.protondb.com/app/282440",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Rising Storm 2: Vietnam",
+   "epic": null,
+   "epic_namespace": "3542a1df211e492bb2abecb7c734f7f9",
+   "steam": 418460,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.protondb.com/app/418460#9Rm6QJUXau",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Sea of Thieves",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1172620,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/sea-of-thieves",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "SMITE",
+   "epic": null,
+   "epic_namespace": "076207fa2b5c4803a636af606c3c28b7",
+   "steam": 386360,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.smitegame.com/news/the-season-of-souls-10-6-update-notes/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Splitgate 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2918300,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (RedKard accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "RedKard"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/splitgate-2",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Squad",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 393380,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat / VAC accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "VAC"
+   ],
+   "preuve": "https://github.com/ValveSoftware/Proton/issues/938#issuecomment-1381029311",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "STAR WARS™ Battlefront™ II (2017)",
+   "epic": null,
+   "epic_namespace": "b156c3365a5b4cb9a01a5e1108b4e3f4",
+   "steam": 1237950,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (FairFight accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "FairFight"
+   ],
+   "preuve": "https://www.protondb.com/app/1237950",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Strinova",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1282270,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Anti-Cheat Expert accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Anti-Cheat Expert"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/strinova",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Super Animal Royale",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 843380,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Unknown (Custom) accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://store.steampowered.com/news/app/843380/view/3217271087481920646",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "The First Descendant",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2074920,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Nexon Game Security / Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Nexon Game Security",
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/the-first-descendant",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Throne and Liberty",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2429640,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/throne-and-liberty",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Titanfall 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1237970,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (FairFight accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "FairFight"
+   ],
+   "preuve": "https://www.protondb.com/app/1237970",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Tom Clancy's The Division 2",
+   "epic": null,
+   "epic_namespace": "impala",
+   "steam": 2221490,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://steamcommunity.com/games/2221490/announcements/detail/3632750190483497137",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Totally Accurate Battlegrounds",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 823130,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://www.gamingonlinux.com/2023/02/totally-accurate-battlegrounds-now-works-on-linux-and-steam-deck/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Umamusume: Pretty Derby",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 3224770,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (CrackProof accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "CrackProof"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/umamusume-pretty-derby",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Warframe",
+   "epic": null,
+   "epic_namespace": "244aaaa06bfa49d088205b13b9d2d115",
+   "steam": 230410,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Unknown (Custom) accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://www.protondb.com/app/230410",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Warhammer 40,000: Darktide",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1361210,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/w40k-darktide",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Warhammer: Vermintide 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 552500,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://gamingonlinux.com/2025/03/warhammer-vermintide-2-gets-an-easy-anti-cheat-upgrade-finally-works-properly-on-linux",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Watch_Dogs® 2",
+   "epic": null,
+   "epic_namespace": "angelonia",
+   "steam": 447040,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Easy Anti-Cheat accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/watch-dogs-2",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "World of Tanks",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1407200,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Unknown (Custom) accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Unknown (Custom)"
+   ],
+   "preuve": "https://areweanticheatyet.com/game/world-of-tanks",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Wuthering Waves",
+   "epic": null,
+   "epic_namespace": "e885327ce4414509bff4c10757f88334",
+   "steam": 3513350,
+   "etat": "linux",
+   "raison": "Marche sous Linux/Proton (Anti-Cheat Expert accepte Linux) ; pas encore confirmé sur Mac par Obelisk",
+   "anticheat": [
+    "Anti-Cheat Expert"
+   ],
+   "preuve": "https://store.steampowered.com/app/3513350/Wuthering_Waves/",
+   "origine": "awacy+protondb"
+  },
+  {
+   "nom": "Dead by Daylight",
+   "epic": "Brill",
+   "epic_namespace": "611482b8586142cda48a0786eb8a127c",
+   "steam": 381210,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : l'anti-triche accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "ELDEN RING",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 1245620,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : l'anti-triche accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Fall Guys",
+   "epic": "0a2d9f6403244d12969e11da6713137b",
+   "epic_namespace": "50118b7f954e450f8823df1614b24e80",
+   "steam": 1097150,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : l'anti-triche accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "HELLDIVERS 2",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 553850,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : Easy Anti-Cheat (remplace GameGuard depuis octobre 2026) accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "Rocket League",
+   "epic": "Sugar",
+   "epic_namespace": "9773aa1aa54f4f7b80e44bef04986cea",
+   "steam": 252950,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : l'anti-triche accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "THE FINALS",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 2073850,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : l'anti-triche accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat",
+    "Denuvo Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  },
+  {
+   "nom": "VRChat",
+   "epic": null,
+   "epic_namespace": null,
+   "steam": 438100,
+   "etat": "verifie",
+   "raison": "Vérifié avec Obelisk (moteur Linux) : l'anti-triche accepte Linux",
+   "anticheat": [
+    "Easy Anti-Cheat"
+   ],
+   "preuve": "https://github.com/Zagrios/Obelisk/blob/51755d418091f4c290057c5ddcec59cf3c7bc79f/crates/game-runtime/profiles.json",
+   "origine": "obelisk"
+  }
+ ]
+}

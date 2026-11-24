@@ -1,0 +1,92 @@
+From 0a78797eaf083f16b8c3a90788cc46ae6483b092 Mon Sep 17 00:00:00 2001
+From: Anas <anas@local>
+Date: Sun, 8 Nov 2026 21:44:53 +0000
+Subject: [PATCH 02/44] d2r: function starts from .eh_frame and dynamic symbols
+ when a module has no .eh_frame_hdr (mod modules)
+
+---
+ games/totk/third_party/d2r/patch_nso.py | 70 ++++++++++++++++++++++---
+ 1 file changed, 62 insertions(+), 8 deletions(-)
+
+diff --git a/games/totk/third_party/d2r/patch_nso.py b/games/totk/third_party/d2r/patch_nso.py
+index 64b4926a..5131518d 100644
+--- a/games/totk/third_party/d2r/patch_nso.py
++++ b/games/totk/third_party/d2r/patch_nso.py
+@@ -609,15 +609,69 @@ def rd(o, enc):
+     if app == 0x10: v += o
+     if app == 0x30: v += ehs
+     return v, sz
+-_, penc, cenc, tenc = IMG[ehs:ehs + 4]
+-o = ehs + 4
+-_, s = rd(o, penc); o += s
+-nfde, s = rd(o, cenc); o += s
++ehe = m0 + struct.unpack_from('<i', IMG, m0 + 20)[0]
+ starts = set()
+-for _ in range(nfde):
+-    a, s = rd(o, tenc); o += s
+-    _, s = rd(o, tenc); o += s
+-    starts.add(a)
++if ehe > ehs and IMG[ehs] == 1 and (IMG[ehs + 3] & 0xF) in (0x3, 0xB, 0x4):
++    _, penc, cenc, tenc = IMG[ehs:ehs + 4]
++    o = ehs + 4
++    _, s = rd(o, penc); o += s
++    nfde, s = rd(o, cenc); o += s
++    for _ in range(nfde):
++        a, s = rd(o, tenc); o += s
++        _, s = rd(o, tenc); o += s
++        starts.add(a)
++else:
++    # No .eh_frame_hdr (a mod module linked by devkitA64: MOD0 points at an empty table, the .eh_frame CIE/FDE records follow).
++    # Walk .eh_frame itself: each CIE gives the FDE pointer encoding of the FDEs that cite it; an FDE's pc_begin is a function start.
++    def uleb(o):
++        v = k = 0
++        while True:
++            b = IMG[o]; o += 1; v |= (b & 0x7f) << k; k += 7
++            if not b & 0x80: return v, o
++    o, cies = ehs, {}
++    while o + 8 <= RO_OFF + (DATA_OFF - RO_OFF):
++        length = struct.unpack_from('<I', IMG, o)[0]
++        if length == 0: break
++        rec, cie_id = o + 4, struct.unpack_from('<I', IMG, o + 4)[0]
++        body = rec + 4
++        if cie_id == 0:
++            ver = IMG[body]; aug_end = IMG.index(0, body + 1); aug = IMG[body + 1:aug_end].decode(errors='replace'); q = aug_end + 1
++            _, q = uleb(q); _, q = uleb(q); q = q + 1 if ver == 1 else uleb(q)[1]
++            enc = 0
++            if aug.startswith('z'):
++                _, q = uleb(q)
++                for c in aug[1:]:
++                    if c == 'R': enc = IMG[q]; q += 1
++                    elif c == 'P': pe = IMG[q]; q += 1; q += 8 if (pe & 0xF) in (0, 0x4, 0xC) else 4
++                    elif c == 'L': q += 1
++            cies[o] = enc
++        else:
++            cie = rec - cie_id
++            enc = cies.get(cie, 0x1b)
++            fmt, app = enc & 0xF, enc & 0x70
++            if fmt in (0x3,): v = struct.unpack_from('<I', IMG, body)[0]
++            elif fmt in (0xB,): v = struct.unpack_from('<i', IMG, body)[0]
++            elif fmt in (0x4, 0xC, 0x0): v = struct.unpack_from('<q', IMG, body)[0]
++            else: v = None
++            if v is not None:
++                if app == 0x10: v += body
++                if 0 <= v < TEXT_END: starts.add(v)
++        o = rec + length
++    # dynamic FUNC symbols of the module complete what .eh_frame left out (leaf functions without unwind records)
++    try:
++        dyn = m0 + struct.unpack_from('<i', IMG, m0 + 4)[0]
++        tags = {}
++        for off in range(dyn, dyn + 4096 * 16, 16):
++            tag, value = struct.unpack_from('<qQ', IMG, off)
++            if tag == 0: break
++            tags[tag] = value
++        if 5 in tags and 6 in tags:
++            for i in range((tags[5] - tags[6]) // 24):
++                _, info, _, sect, value, _ = struct.unpack_from('<IBBHQQ', IMG, tags[6] + 24 * i)
++                if sect and (info & 15) == 2 and value < TEXT_END: starts.add(value)
++    except Exception:
++        pass
++    print(f'[patch_nso] {NAME}: no .eh_frame_hdr; {len(starts)} function starts from .eh_frame and the dynamic symbols')
+ starts = sorted(x for x in starts if x < TEXT_END)
+ 
+ # ---- 线性扫描找全部改写点（不靠寄存器读写报告）----

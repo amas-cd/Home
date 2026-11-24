@@ -1,0 +1,85 @@
+From 41bd6c96537c345dd25e59b6238f736b5c92cec6 Mon Sep 17 00:00:00 2001
+From: Anas <assosbs9@gmail.com>
+Date: Tue, 10 Nov 2026 22:39:04 +0000
+Subject: [PATCH 37/44] totk: a mod's hooks written after the constructors are
+ watched every 250 ms and their instruction cache invalidated
+
+TOTK Online installs more hooks once the game runs (its renderer, its Python plugins' code patcher, the puppets' syncs).
+Written through its read-write aliases, they kept running stale instruction-cache lines at the executable addresses until
+those happened to be evicted: other players without hair or clothes at first, gliding and teleporting, and no name tags,
+map icons or A+B list. As nxnative syncs the same mod's code every 250 ms, a utility-QoS thread compares the code with the
+snapshot in 16 KiB chunks and, once a changed chunk has held still for a period, invalidates its changed words.
+TOTK_HOOK_WATCH=0 turns it off.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01TFGN95PNfagSjomeEnf2po
+---
+ games/totk/runtime/loader.c | 41 ++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 9a2b2896..b0ddfbdb 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -22,6 +22,8 @@
+ #include "game_patches.h"
+ #include "game_version.h"
+ #include <errno.h>
++#include <pthread.h>
++#include <pthread/qos.h>
+ pthread_key_t runtime_keys[8];
+ static uint64_t timer_calls, svc_calls;
+ _Noreturn void runtime_fail(const char *message) { fprintf(stderr,"[totk] FAIL: %s\n",message); exit(1); }
+@@ -683,7 +685,43 @@ static void hook_survey(int take) {
+     if(verbose&&shown<64){uint32_t was,now;memcpy(&was,code_snapshot[i]+k,4);memcpy(&now,m->base+k,4);fprintf(stderr,"[totk] mod wrote %s+%#zx: %08x -> %08x\n",m->name,k,was,now);shown++;}}
+    else if(run_end&&run_end<=k){sys_icache_invalidate(m->base+run_start,run_end-run_start);run_end=0;}}
+   if(total)fprintf(stderr,"[totk] mod wrote %u instruction word(s) in %s; instruction cache invalidated at the executable addresses\n",total,m->name);
+-  free(code_snapshot[i]);code_snapshot[i]=NULL;}
++  memcpy(code_snapshot[i],m->base,n);}   /* kept, as the code now stands, for the later hooks (hook_watch) */
++}
++/* Hooks written after the constructors. TOTK Online installs more of them later (its renderer once NVN is up, the Python plugins'
++   code patcher once the server sent them, the player puppets' syncs): those sites kept running their old bytes until the lines
++   happened to leave the instruction cache, minutes later or never — players without hair or clothes at first, gliding and
++   teleporting, no name tags, map icons or A+B list. As nxnative does for the same mod (a sync every 250 ms), a thread compares
++   the code with the snapshot every 250 ms in 16 KiB chunks; a changed chunk is taken once it has stayed the same for a whole
++   period (a hook is never exposed half written), then its changed words are invalidated at their executable addresses.
++   The runtime's own patches of main at run time (settings panel) go through the same path, harmlessly. TOTK_HOOK_WATCH=0 turns it off. */
++#define HW_CHUNK 16384u
++static uint64_t *hw_pending[MAX_MODULES];   /* per chunk: a hash of the changed content seen last time, 0 = none */
++static uint64_t hw_hash(const uint8_t *p,size_t n){uint64_t h=1469598103934665603ull;for(size_t k=0;k<n;k+=8){uint64_t w;memcpy(&w,p+k,8);h=(h^w)*1099511628211ull;}return h|1;}
++static void *hook_watch(void *arg){
++ (void)arg;pthread_set_qos_class_self_np(QOS_CLASS_UTILITY,0);
++ unsigned long lines=0;
++ for(;;){usleep(250000);
++  for(unsigned i=0;i<NM;i++){Module *m=&modules[i];if(!code_snapshot[i]||!hw_pending[i])continue;size_t n=page_up(m->text_end);
++   unsigned total=0;
++   for(size_t c=0;c<n;c+=HW_CHUNK){size_t len=n-c<HW_CHUNK?n-c:HW_CHUNK;size_t ci=c/HW_CHUNK;
++    if(!memcmp(code_snapshot[i]+c,m->base+c,len)){hw_pending[i][ci]=0;continue;}
++    uint64_t h=hw_hash(m->base+c,len);
++    if(hw_pending[i][ci]!=h){hw_pending[i][ci]=h;continue;}   /* still changing, or first seen: next period */
++    size_t run_start=0,run_end=0;
++    for(size_t k=c;k<=c+len;k+=4){int changed=k<c+len&&memcmp(code_snapshot[i]+k,m->base+k,4)!=0;
++     if(changed){total++;if(run_end!=k)run_start=k;run_end=k+4;}
++     else if(run_end&&run_end<=k){sys_icache_invalidate(m->base+run_start,run_end-run_start);run_end=0;}}
++    memcpy(code_snapshot[i]+c,m->base+c,len);hw_pending[i][ci]=0;}
++   if(total&&(++lines<=40||lines%100==0))fprintf(stderr,"[totk] mod wrote %u more instruction word(s) in %s after start (a later hook); instruction cache invalidated\n",total,m->name);}
++ }
++ return NULL;
++}
++static void hook_watch_start(void){
++ int mod=0;for(unsigned i=0;i<NM;i++)if(!modules[i].ctor_flag)mod=1;
++ const char *e=getenv("TOTK_HOOK_WATCH");
++ if(!mod||(e&&!strcmp(e,"0"))){for(unsigned i=0;i<NM;i++){free(code_snapshot[i]);code_snapshot[i]=NULL;}return;}
++ for(unsigned i=0;i<NM;i++)if(code_snapshot[i])hw_pending[i]=calloc(page_up(modules[i].text_end)/HW_CHUNK+1,sizeof(uint64_t));
++ pthread_t t;if(pthread_create(&t,NULL,hook_watch,NULL)==0){pthread_detach(t);fprintf(stderr,"[totk] later mod hooks: watched every 250 ms (TOTK_HOOK_WATCH=0 turns it off)\n");}
+ }
+ static void module_inits(void) {
+  fprintf(stderr,"[totk] SDK startup returned; running module constructors\n");
+@@ -691,6 +729,7 @@ static void module_inits(void) {
+  for(unsigned i=0;i<NM;i++){char detail[128];snprintf(detail,sizeof detail,TOTK_UI("运行 %s 游戏模块初始化代码（%u/%u）","Running the %s game module initializers (%u/%u)"),modules[i].name,i+1,(unsigned)NM);runtime_boot_status(TOTK_UI("初始化游戏模块","Initializing game modules"),detail);fprintf(stderr,"[totk] ENTER %s DT_INIT\n",modules[i].name);((void(*)(void))(modules[i].base+modules[i].init))();uint32_t state=2;if(modules[i].ctor_flag){memcpy(&state,modules[i].base+modules[i].ctor_flag,4);need(state==2,"DT_INIT deferred or skipped constructors");}   /* a mod module (ctor_flag 0) has no nnsdk state word */
+  fprintf(stderr,"[totk] RETURN %s DT_INIT state=%u init_array_count=%llu\n",modules[i].name,state,(unsigned long long)(modules[i].init_size/8));}
+  hook_survey(0);
++ hook_watch_start();
+ }
+ void runtime_startup_checkpoint(uintptr_t caller) {
+  if(!getenv("TOTK_VERIFY_STARTUP"))return;

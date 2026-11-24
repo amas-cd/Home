@@ -5,11 +5,12 @@
 # dossier de construction (--seed), toujours sans la ROM.
 #   mng-reconstruire.command <app> [dossier de construction]
 # Journal : /Applications/Home/log/mng-reconstruire.log
+HR="${HOME_RACINE:-/Applications/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 export PATH="$HOME/.homebrew/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Home lance sans le PATH du Terminal : les outils Homebrew (ffmpeg, ffprobe, llvm)
-APP="${1%/}"; GAMES=/Applications/Jeux; MNG="/Applications/Home/MacNativeGames"; LOGD="/Applications/Home/log"; mkdir -p "$LOGD"; LOG="$LOGD/mng-reconstruire.log"
+APP="${1%/}"; GAMES=$JX; MNG="$HR/MacNativeGames"; LOGD="$HR/log"; mkdir -p "$LOGD"; LOG="$LOGD/mng-reconstruire.log"
 WORK="${2%/}"
-if [ -z "$APP" ]; then   # lancé d'un double-clic, sans argument : l'app MacNativeGames de /Applications/Jeux (TOTK Online d'abord)
-  for a in "/Applications/Jeux/The Legend of Zelda - Tears of the Kingdom.app" /Applications/Jeux/*.app; do
+if [ -z "$APP" ]; then   # lancé d'un double-clic, sans argument : l'app MacNativeGames de $JX (TOTK Online d'abord)
+  for a in "$JX/The Legend of Zelda - Tears of the Kingdom.app" "$JX"/*.app; do
     [ -d "$a" ] || continue
     case "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$a/Contents/Info.plist" 2>/dev/null)" in org.macnativegames.*) APP="$a"; break;; esac
   done
@@ -20,8 +21,8 @@ echo "===== $(date '+%d/%m %H:%M') : $(basename "$APP") — moteur MacNativeGame
 [ -d "$APP" ] || { echo "App introuvable : $APP (une première construction demande la ROM)"; fin 1; }
 [ -f "$MNG/update_runtime.py" ] || { echo "MacNativeGames introuvable dans $MNG"; fin 1; }
 if [ -z "$WORK" ]; then   # le dossier de construction : celui que le registre de Home garde pour l'app, sinon d'après son nom
-  WORK="$(/usr/bin/python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get(sys.argv[2]) or {}).get("travail") or "")' /Applications/Home/registre.json "$APP" 2>/dev/null)"
-  [ -z "$WORK" ] && case "$(basename "$APP")" in *TOTK*|*Tears*) WORK="/Applications/Home/constructions/Zelda-Tears-of-the-Kingdom";; *BotW*|*Breath*) WORK="/Applications/Home/constructions/Zelda-Breath-of-the-Wild";; *Ocarina*) WORK="/Applications/Home/constructions/OOT";; esac
+  WORK="$(/usr/bin/python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get(sys.argv[2]) or {}).get("travail") or "")' "$HR/registre.json" "$APP" 2>/dev/null)"
+  [ -z "$WORK" ] && case "$(basename "$APP")" in *TOTK*|*Tears*) WORK="$HR/constructions/Zelda-Tears-of-the-Kingdom";; *BotW*|*Breath*) WORK="$HR/constructions/Zelda-Breath-of-the-Wild";; *Ocarina*) WORK="$HR/constructions/OOT";; esac
 fi
 [ -n "$WORK" ] && [ ! -d "$WORK" ] && WORK=""
 pgrep -x TOTK >/dev/null && { echo "Quitte d'abord le jeu (⌘Q)."; fin 1; }
