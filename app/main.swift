@@ -922,39 +922,48 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Sons de Home", detail: (config.sons ?? true) ? "Activés" : "Coupés", icon: (config.sons ?? true) ? "speaker.wave.2" : "speaker.slash", tint: .purple, action: { self.toggleSounds(); self.openSoundSettings() }),
         ], hero: "speaker.wave.2.fill", back: { self.menu = self.plusMenu() })
     }
+    /// Avancé : cinq choix seulement, chacun ouvre un petit menu de sa famille (Home, Images, Jeux Switch) ou agit tout de suite
     func openAdvancedSettings() {
-        // rangé par catégorie (le nom de la catégorie du choix visé s'affiche à côté du titre) : Home, Images, Jeux Switch, Jeux PC, Aide
-        let veilleOff = salonRoot.appendingPathComponent("veille-off"), ici: () -> Void = { self.openAdvancedSettings() }
-        menu = SalonMenu(title: "Avancé", subtitle: nil, items: [
-            SalonMenuItem(label: "Ouverture à la manette : \(FileManager.default.fileExists(atPath: veilleOff.path) ? "non" : "oui")", detail: "Home s'ouvre quand une manette se connecte", icon: "gamecontroller.fill", section: "Home", tint: .green, action: {
+        menu = SalonMenu(title: "Avancé", items: [
+            SalonMenuItem(label: "Home", detail: "Démarrage, animations", icon: "house.fill", tint: .purple, action: { self.openAvanceHome() }),
+            SalonMenuItem(label: "Images", detail: "Jaquettes, fonds et logos", icon: "photo.fill", tint: .blue, action: { self.openAvanceImages() }),
+            SalonMenuItem(label: "Jeux Switch", detail: "Clés, construction, place", icon: "logo:switch", tint: .red, action: { self.openAvanceSwitch() }),
+            SalonMenuItem(label: "Lancement direct Epic", detail: "Un jeu Obelisk sans ouvrir Obelisk", icon: "bolt.fill", tint: .yellow, action: { self.menu = nil; Atelier.terminal("rocket-league-direct.command") }),
+            SalonMenuItem(label: "Journaux", detail: "Les copie pour Claude", icon: "doc.text.magnifyingglass", tint: .gray, action: { self.menu = nil; self.lancer("journaux.command", titre: "Copie des journaux") }),
+        ].filter { i in (self.modeNintendo || i.label != "Jeux Switch") && (self.modePC || i.label != "Lancement direct Epic") }, hero: "gearshape.fill", back: { self.menu = self.plusMenu() })
+    }
+    func openAvanceHome() {
+        let veilleOff = salonRoot.appendingPathComponent("veille-off"), reduit = animationsReduites, ici: () -> Void = { self.openAvanceHome() }
+        menu = SalonMenu(title: "Home", items: [
+            SalonMenuItem(label: "Ouverture à la manette : \(FileManager.default.fileExists(atPath: veilleOff.path) ? "non" : "oui")", detail: "Home s'ouvre quand une manette se connecte", icon: "gamecontroller.fill", tint: .green, action: {
                 if FileManager.default.fileExists(atPath: veilleOff.path) { try? FileManager.default.removeItem(at: veilleOff) } else { FileManager.default.createFile(atPath: veilleOff.path, contents: nil) }
                 ici() }),
-            SalonMenuItem(label: "Animations", detail: "Écran de démarrage, mouvements", icon: "sparkles", section: "Home", tint: .purple, action: { self.openAnimations() }),
-            SalonMenuItem(label: "Clé SteamGridDB", detail: SteamGridDB.key() == nil ? "Absente : pas de jaquettes" : "Enregistrée", icon: "key.fill", section: "Images", action: { self.menu = nil; self.askKey() }),
-            SalonMenuItem(label: "Dossier des images", detail: "Jaquettes, fonds et logos", icon: "folder.fill", section: "Images", action: { self.menu = nil; NSWorkspace.shared.open(salonRoot) }),
-            SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Ton fichier prod.keys", icon: "key.fill", section: "Jeux Switch", tint: .yellow, action: {
+            SalonMenuItem(label: "Écran de démarrage : \((config.ouverture ?? true) ? "oui" : "non")", detail: "L'intro et son jingle", icon: "play.rectangle.fill", tint: .purple, action: {
+                self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); ici() }),
+            SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", detail: "Des fondus courts à la place des mouvements", icon: reduit ? "tortoise.fill" : "hare.fill", tint: .teal, action: {
+                UserDefaults.standard.set(!reduit, forKey: "animationsReduites"); ici() }),
+        ], hero: "house.fill", back: { self.openAdvancedSettings() })
+    }
+    func openAvanceImages() {
+        menu = SalonMenu(title: "Images", items: [
+            SalonMenuItem(label: "Clé SteamGridDB", detail: SteamGridDB.key() == nil ? "Absente : pas de jaquettes" : "Enregistrée", icon: "key.fill", tint: .blue, action: { self.menu = nil; self.askKey() }),
+            SalonMenuItem(label: "Dossier des images", detail: "L'ouvre dans le Finder", icon: "folder.fill", tint: .orange, action: { self.menu = nil; NSWorkspace.shared.open(salonRoot) }),
+        ], hero: "photo.fill", back: { self.openAdvancedSettings() })
+    }
+    func openAvanceSwitch() {
+        let ici: () -> Void = { self.openAvanceSwitch() }
+        menu = SalonMenu(title: "Jeux Switch", items: [
+            SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Ton fichier prod.keys", icon: "key.fill", tint: .yellow, action: {
                 let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
                 p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
                 if p.runModal() == .OK, let u = p.url { self.config.cles = u.path; self.saveConfig() }
                 ici() }),
-            SalonMenuItem(label: "Construction silencieuse : \((config.discret ?? true) ? "oui" : "non")", detail: (config.discret ?? true) ? "Plus lente, le Mac reste frais" : "Plus rapide, le Mac chauffe", icon: "thermometer.medium", section: "Jeux Switch", tint: .teal, action: {
+            SalonMenuItem(label: "Construction silencieuse : \((config.discret ?? true) ? "oui" : "non")", detail: (config.discret ?? true) ? "Plus lente, le Mac reste frais" : "Plus rapide, le Mac chauffe", icon: "thermometer.medium", tint: .teal, action: {
                 self.config.discret = !(self.config.discret ?? true); self.saveConfig(); ici() }),
-            SalonMenuItem(label: "Garder les caches : \((self.config.garderCaches ?? true) ? "oui" : "non")", detail: (self.config.garderCaches ?? true) ? "Reconstructions courtes" : "Moins de place, reconstructions longues", icon: "externaldrive.fill", section: "Jeux Switch", tint: .orange, action: {
+            SalonMenuItem(label: "Garder les caches : \((self.config.garderCaches ?? true) ? "oui" : "non")", detail: (self.config.garderCaches ?? true) ? "Reconstructions courtes" : "Moins de place, reconstructions longues", icon: "externaldrive.fill", tint: .orange, action: {
                 self.config.garderCaches = !(self.config.garderCaches ?? true); self.saveConfig(); ici() }),
-            SalonMenuItem(label: "Libérer de la place", detail: "Allège les dossiers de construction", icon: "externaldrive.badge.minus", section: "Jeux Switch", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }),
-            SalonMenuItem(label: "Lancement direct Epic", detail: "Un jeu Obelisk sans ouvrir Obelisk", icon: "bolt.fill", section: "Jeux PC", action: { self.menu = nil; Atelier.terminal("rocket-league-direct.command") }),
-            SalonMenuItem(label: "Journaux", detail: "Les copie pour Claude", icon: "doc.text.magnifyingglass", section: "Aide", tint: .gray, action: { self.menu = nil; self.lancer("journaux.command", titre: "Copie des journaux") }),
-        ], hero: "gearshape.fill", back: { self.menu = self.plusMenu() })
-    }
-    /// Avancé → Animations : l'écran de démarrage (l'intro et son jingle) et les mouvements de l'interface
-    func openAnimations() {
-        let reduit = animationsReduites
-        menu = SalonMenu(title: "Animations", items: [
-            SalonMenuItem(label: "Écran de démarrage : \((config.ouverture ?? true) ? "oui" : "non")", icon: "play.rectangle.fill", tint: .purple, action: {
-                self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); self.openAnimations() }),
-            SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", icon: reduit ? "tortoise.fill" : "hare.fill", tint: .teal, action: {
-                UserDefaults.standard.set(!reduit, forKey: "animationsReduites"); self.openAnimations() }),
-        ], hero: "sparkles", back: { self.openAdvancedSettings() })
+            SalonMenuItem(label: "Libérer de la place", detail: "Allège les dossiers de construction", icon: "externaldrive.badge.minus", tint: .orange, action: { self.menu = nil; self.lancer("alleger-build.sh", titre: "Allègement des dossiers de construction") }),
+        ], hero: "hammer.fill", back: { self.openAdvancedSettings() })
     }
     func openCategoryMenu(_ g: Game) {
         var items = categories.filter { $0 != Library.all }.map { c in SalonMenuItem(label: c, detail: c == g.category ? "Catégorie actuelle" : nil, icon: c == g.category ? "checkmark.circle.fill" : "circle", action: { self.menu = nil; self.setCategory(g, c) }) }
@@ -1744,7 +1753,57 @@ enum BGM {
 /// Le remplissage automatique de macOS, à la demande : macOS ajoute au menu Édition un sous-menu « Remplissage automatique » avec
 /// « Mots de passe… » (Touch ID, puis choix du compte), qui remplit le champ où se trouve le curseur — y compris dans une page web
 /// affichée par Home. On retrouve cette commande dans le menu et on la déclenche ; si macOS ne l'a pas mise, on le dit.
-final class RemplirSteam: NSObject { static let shared = RemplirSteam(); @objc func remplir() { if !MotsDePasse.remplir() { NSSound.beep() } } }
+/// La fenêtre de connexion à Steam : une petite page web dessinée par Home (pas une invite de macOS), avec le nom du compte et le mot
+/// de passe, ou le code Steam Guard. Ce qui est tapé revient par un message de la page, jamais par une adresse, et n'est écrit nulle part.
+final class FormulaireSteam: NSObject, WKScriptMessageHandler, NSWindowDelegate {
+    static var enCours: FormulaireSteam?
+    private var fenetre: NSWindow?; private var fin: (([String]?) -> Void)?; private weak var web: WKWebView?
+    /// code == nil : nom du compte et mot de passe (fin reçoit [nom, mot de passe]) ; sinon le texte qui demande le code (fin reçoit [code])
+    static func ouvrir(code: String? = nil, _ fin: @escaping ([String]?) -> Void) {
+        enCours?.terminer(nil)
+        let c = FormulaireSteam(); c.fin = fin; enCours = c
+        let conf = WKWebViewConfiguration(); conf.userContentController.add(c, name: "home")
+        let h: CGFloat = code == nil ? 560 : 440
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 460, height: h), configuration: conf); c.web = web
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: h), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        w.title = "Connexion à Steam"; w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden; w.appearance = NSAppearance(named: .darkAqua); w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.09, alpha: 1)
+        w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating; w.center(); c.fenetre = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); w.makeFirstResponder(web)
+        let logo = (Bundle.main.resourceURL?.appendingPathComponent("logos/steam.png")).flatMap { try? Data(contentsOf: $0) }.map { "<img src='data:image/png;base64,\($0.base64EncodedString())'>" } ?? ""
+        let texte = (code ?? "").replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+        let champs = code == nil
+            ? "<input id='a' name='username' autocomplete='username' placeholder='Nom du compte' autofocus><input id='b' name='password' type='password' autocomplete='current-password' placeholder='Mot de passe'><a onmousedown='event.preventDefault()' onclick=\"webkit.messageHandlers.home.postMessage(['cle'])\">Mes mots de passe</a>"
+            : "<p>\(texte)</p><input id='a' name='code' autocomplete='one-time-code' placeholder='Code' autofocus style='text-align:center;letter-spacing:6px;text-transform:uppercase'>"
+        web.loadHTMLString("""
+        <html><head><meta charset='utf-8'><style>
+        *{box-sizing:border-box;font-family:-apple-system,system-ui;-webkit-user-select:none}
+        body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;padding:0 54px;
+          background:radial-gradient(circle at 80% 0%,#1b4f9c 0%,transparent 55%),radial-gradient(circle at 0% 100%,#3a1d6e 0%,transparent 50%),#0a0d17}
+        img{width:84px;height:84px;border-radius:50%;margin-bottom:6px}
+        h1{margin:0 0 12px;font-size:22px;font-weight:900;letter-spacing:2px;font-stretch:expanded;text-transform:uppercase}
+        p{margin:0 0 4px;text-align:center;opacity:.7;font-size:14px;line-height:1.4}
+        input{width:100%;height:50px;border-radius:25px;border:1.5px solid rgba(255,255,255,.18);background:rgba(0,0,0,.45);color:#fff;font-size:16px;padding:0 22px;outline:none;-webkit-user-select:text}
+        input:focus{border-color:#fff}
+        button{width:100%;height:50px;border-radius:25px;border:0;background:#fff;color:#000;font-size:16px;font-weight:700;margin-top:8px}
+        button:active{opacity:.8}
+        a{font-size:13px;opacity:.65;cursor:default;text-decoration:underline}
+        </style></head><body><form onsubmit="event.preventDefault();var v=[document.getElementById('a').value];var b=document.getElementById('b');if(b)v.push(b.value);if(v.every(function(x){return x.length>0}))webkit.messageHandlers.home.postMessage(['ok'].concat(v))" style='display:contents'>
+        \(logo)<h1>Steam</h1>\(champs)<button type='submit'>\(code == nil ? "Se connecter" : "Valider")</button></form></body></html>
+        """, baseURL: nil)
+    }
+    func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
+        guard let t = m.body as? [String], let quoi = t.first else { return }
+        if quoi == "cle" { fenetre?.makeFirstResponder(web); if !MotsDePasse.remplir() { NSSound.beep() } }
+        else if quoi == "ok" { terminer(Array(t.dropFirst())) }
+    }
+    func windowWillClose(_ n: Notification) { terminer(nil) }
+    private func terminer(_ v: [String]?) {
+        guard let f = fin else { return }; fin = nil
+        web?.configuration.userContentController.removeScriptMessageHandler(forName: "home")
+        fenetre?.delegate = nil; fenetre?.close(); fenetre = nil; FormulaireSteam.enCours = nil
+        f(v)
+    }
+}
 enum MotsDePasse {
     @discardableResult static func remplir() -> Bool {
         guard let edition = NSApp.mainMenu?.items.compactMap({ $0.submenu }).first(where: { m in m.items.contains { $0.action == #selector(NSText.paste(_:)) } }) else { return false }
@@ -2422,7 +2481,6 @@ struct MenuView: View {
                     roue
                 }.padding(.leading, 60)
                 HStack(spacing: 18) {
-                    Text(String(format: "%02d / %02d", vise + 1, menu.items.count)).font(.system(size: 17, weight: .black).width(.expanded).monospacedDigit()).opacity(0.45)
                     Text(Date(), format: .dateTime.hour().minute()).font(.system(size: 24, weight: .semibold, design: .rounded).monospacedDigit())
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.trailing, 96).padding(.top, 66)
                 // un trait fin sous le haut de l'écran, qui s'efface vers la droite
@@ -4493,19 +4551,16 @@ extension Library {
             retour()
         }
     }
-    /// Connexion directe : une fenêtre avec le nom du compte et le mot de passe (champs marqués pour le remplissage automatique de macOS :
-    /// Édition → Remplissage automatique → Mots de passe…), puis Steam Guard — validation dans l'app Steam, ou code à saisir.
+    /// Connexion directe : une fenêtre web de Home demande le nom du compte et le mot de passe, puis Steam Guard — validation dans
+    /// l'app Steam, ou code à saisir dans la même fenêtre.
     func connexionSteamIdentifiants(retour: @escaping () -> Void) {
         menu = nil
-        let a = NSAlert(); a.messageText = "Connexion à Steam"; a.informativeText = "Ton nom de compte Steam et ton mot de passe. Clique dans un champ, puis « Mes mots de passe »."
-        let nom = NSTextField(frame: NSRect(x: 0, y: 34, width: 340, height: 24)); nom.placeholderString = "Nom du compte Steam"; nom.contentType = .username
-        let mdp = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24)); mdp.placeholderString = "Mot de passe"; mdp.contentType = .password
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 100)); nom.frame.origin.y = 76; mdp.frame.origin.y = 42
-        v.addSubview(nom); v.addSubview(mdp); nom.nextKeyView = mdp; mdp.nextKeyView = nom
-        let cle = MotsDePasse.bouton(cible: RemplirSteam.shared, action: #selector(RemplirSteam.remplir)); cle.frame = NSRect(x: 0, y: 0, width: 210, height: 32); v.addSubview(cle)
-        a.accessoryView = v; a.window.initialFirstResponder = nom
-        a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
-        guard a.runModal() == .alertFirstButtonReturn, !nom.stringValue.isEmpty, !mdp.stringValue.isEmpty else { retour(); return }
+        FormulaireSteam.ouvrir { v in
+            guard let v, v.count == 2 else { retour(); return }
+            self.connexionSteamAvec(v[0], v[1], retour: retour)
+        }
+    }
+    private func connexionSteamAvec(_ nom: String, _ mdp: String, retour: @escaping () -> Void) {
         toast = "Connexion à Steam…"
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [Atelier.outils.appendingPathComponent("steam.command").path, "connexion-identifiants"]
         p.environment = ProcessInfo.processInfo.environment.merging(Dossiers.env, uniquingKeysWith: { $1 })
@@ -4524,12 +4579,8 @@ extension Library {
                     case "telephone": self.toast = "Valide la connexion dans l'app Steam de ton téléphone"
                     case "email": self.toast = "Valide la connexion dans l'e-mail que Steam vient d'envoyer"
                     case "code":
-                        let c = NSAlert(); c.messageText = "Steam Guard"
-                        c.informativeText = (j["par"] as? String) == "email" ? "Steam a envoyé un code par e-mail\((j["vers"] as? String).flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""). Saisis-le ici." : "Saisis le code affiché par l'app Steam (Steam Guard)."
-                        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24)); f.contentType = .oneTimeCode; c.accessoryView = f; c.window.initialFirstResponder = f
-                        c.addButton(withTitle: "Valider"); c.addButton(withTitle: "Annuler")
-                        let code = c.runModal() == .alertFirstButtonReturn ? f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : ""
-                        entree.fileHandleForWriting.write(Data((code + "\n").utf8))
+                        let texte = (j["par"] as? String) == "email" ? "Steam a envoyé un code par e-mail\((j["vers"] as? String).flatMap { $0.isEmpty ? nil : " (\($0))" } ?? "")." : "Le code affiché par l'app Steam (Steam Guard)."
+                        FormulaireSteam.ouvrir(code: texte) { v in entree.fileHandleForWriting.write(Data(((v?.first ?? "").trimmingCharacters(in: .whitespacesAndNewlines) + "\n").utf8)) }
                     case "connecte": conclure("Connecté à Steam : \(j["compte"] as? String ?? "")")
                     default: if j["absent"] != nil { conclure("L'outil Steam n'est pas encore préparé") }
                     }
@@ -4540,7 +4591,7 @@ extension Library {
         guard (try? p.run()) != nil else { conclure("L'outil Steam ne démarre pas"); return }
         ObeliskDirect.gardes.removeAll { !$0.isRunning }; ObeliskDirect.gardes.append(p)
         // le nom et le mot de passe passent par l'entrée de l'outil (jamais par sa ligne de commande), puis sont oubliés ici
-        entree.fileHandleForWriting.write(Data((nom.stringValue + "\n" + mdp.stringValue + "\n").utf8)); mdp.stringValue = ""
+        entree.fileHandleForWriting.write(Data((nom + "\n" + mdp + "\n").utf8))
     }
     /// La bibliothèque Steam du compte, avec la compatibilité de chaque jeu : un jeu bloqué montre sa raison, les autres s'installent
     /// (steam.command installer, le circuit d'Obelisk piloté par home-steam)
