@@ -23,7 +23,8 @@ Ouvre la dernière [release](https://github.com/amas-cd/Home/releases/latest).
 
 Chaque fichier est accompagné de son `.sha256` pour vérifier le téléchargement.
 
-En option sur Mac : [Background Music](https://github.com/kyleneideck/BackgroundMusic), pour régler le volume de chaque jeu.
+Le volume de chaque jeu se règle dans Home sans rien installer d'autre (macOS 14.2 ou plus récent) : Home fait passer le son du jeu par lui.
+macOS demande une fois l'autorisation d'enregistrer le son du système.
 
 ## Contenu du dépôt
 

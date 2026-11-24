@@ -24,6 +24,7 @@ import ApplicationServices
 import Carbon.HIToolbox
 import ScreenCaptureKit
 import AudioToolbox
+import CoreAudio
 import IOKit
 import IOKit.hid
 import WebKit
@@ -1397,8 +1398,8 @@ final class Library: ObservableObject {
     var gameVolumeFile: URL { appSupport.appendingPathComponent("nxnative/volume.txt") }
     @Published var volumeFlash: Date = .distantPast     // la barre de volume du Salon s'affiche 1,5 s après un réglage
     var volumeTarget: Game? { running ?? current }
-    enum VolumeSource { case engine, bgm, mac }
-    var volumeSource: VolumeSource { if let g = volumeTarget, g.titleID != nil, engineVolume(g) { return .engine }; return BGM.available ? .bgm : .mac }
+    enum VolumeSource { case engine, mixeur, bgm, mac }
+    var volumeSource: VolumeSource { if let g = volumeTarget, g.titleID != nil, engineVolume(g) { return .engine }; return Mixeur.disponible ? .mixeur : BGM.available ? .bgm : .mac }
     /// Le moteur du jeu lit-il ~/Library/Application Support/nxnative/volume.txt ? (patch 0070 de notre nxnative ; pas les forks comme kid-with-sword, ni MNG) — sinon Background Music
     private var engineVolCache: [String: Bool] = [:]
     func engineVolume(_ g: Game) -> Bool {
@@ -1407,14 +1408,14 @@ final class Library: ObservableObject {
         for f in (try? FileManager.default.contentsOfDirectory(at: g.url.appendingPathComponent("Contents/MacOS"), includingPropertiesForKeys: nil)) ?? [] {
             if let d = try? Data(contentsOf: f, options: .alwaysMapped), d.range(of: needle) != nil { ok = true; break }
         }
-        engineVolCache[g.url.path] = ok; log("\(g.name) : volume \(ok ? "par le moteur (volume.txt)" : "par Background Music")"); return ok
+        engineVolCache[g.url.path] = ok; log("\(g.name) : volume \(ok ? "par le moteur (volume.txt)" : Mixeur.disponible ? "par le mélangeur de Home" : "par Background Music")"); return ok
     }
     var bgmApplied: Set<pid_t> = []
     func savedVolume(_ g: Game) -> Float { config.volume ?? config.volumes?.values.first ?? 1.0 }   // volume général des jeux : le même pour toutes les apps
     /// Au lancement : le volume mémorisé du jeu est appliqué (moteur tout de suite ; Background Music dès que ses processus existent) et les sons du Salon le suivent
     func applySavedVolume(_ g: Game) { volume = savedVolume(g); Sounds.shared.gain = volume; writeVolume(volume, save: false) }
     var usesGameVolume: Bool { volumeSource != .mac }
-    var volumeLabel: String { switch volumeSource { case .engine: return "Volume du jeu"; case .bgm: return "Volume du jeu (BGM)"; case .mac: return "Volume de Home" } }
+    var volumeLabel: String { switch volumeSource { case .engine, .mixeur: return "Volume du jeu"; case .bgm: return "Volume du jeu (BGM)"; case .mac: return "Volume de Home" } }
     /// Les processus qui jouent le son du jeu en cours : l'app surveillée, le lanceur d'un jeu PC et ses processus (wine)
     func gamePids() -> [pid_t] {
         var p: [pid_t] = []
@@ -1423,7 +1424,12 @@ final class Library: ObservableObject {
             let out = Commande.run("/usr/bin/pgrep", ["-f", g.url.path + "/Contents/"], timeout: 3)
             p += out.split(separator: "\n").compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
         }
-        if let d = direct, d.isRunning { p.append(d.processIdentifier) }
+        if let d = direct, d.isRunning {
+            p.append(d.processIdentifier)
+            var parents: [pid_t: [pid_t]] = [:]
+            for l in Commande.run("/bin/ps", ["-axo", "pid=,ppid="], timeout: 3).split(separator: "\n") { let c = l.split(separator: " ").compactMap { pid_t($0) }; if c.count == 2 { parents[c[1], default: []].append(c[0]) } }
+            var file = [d.processIdentifier]; while let x = file.popLast() { for e in parents[x] ?? [] where !p.contains(e) { p.append(e); file.append(e) } }
+        }
         if let g = running, g.pc {
             let exe = g.name
             let out = Commande.run("/usr/bin/pgrep", ["-f", "\(exe)|obelisk-apps/.*\(g.name.prefix(6))"], timeout: 3)
@@ -1437,6 +1443,7 @@ final class Library: ObservableObject {
         if save { config.volume = c; saveConfig() }
         switch volumeSource {
         case .engine: try? FileManager.default.createDirectory(at: gameVolumeFile.deletingLastPathComponent(), withIntermediateDirectories: true); try? String(Int((c * 100).rounded())).write(to: gameVolumeFile, atomically: true, encoding: .utf8)
+        case .mixeur: if running != nil { Mixeur.shared.suivre(gain: c) { [weak self] in self?.gamePids() ?? [] } }
         case .bgm: if running != nil { BGM.set(Int32((c * 50).rounded()), pids: cachedPids(), bundleID: watchedApp?.bundleIdentifier) }
         case .mac: break   // ni le moteur du jeu ni Background Music ne règlent ce jeu : seuls les sons de Home suivent, le volume du Mac n'est pas touché
         }
@@ -1604,6 +1611,7 @@ final class Library: ObservableObject {
         var s = stats[g.id] ?? Stat(lastPlayed: nil, minutes: 0)
         s.lastPlayed = Date(); if let t = startedAt { s.minutes += Int(Date().timeIntervalSince(t) / 60) }
         stats[g.id] = s; saveStats(); closeQuick(); running = nil; startedAt = nil; overlay = false; watchedApp = nil; direct = nil; bgmApplied = []; Sounds.shared.play("ouvrir")
+        if !garde { Mixeur.shared.arreter() }   // le jeu fermé : plus rien à mélanger ; gardé ouvert derrière Home, il garde son volume
         if !garde { stopTotkServer() }   // le jeu gardé ouvert a encore besoin de son serveur
         Recorder.shared.stop()
         NotificationCenter.default.post(name: .salonShow, object: nil)
@@ -1737,6 +1745,105 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
 }
 
 // Volume de sortie du Mac (CoreAudio), pour le régler depuis le HUD sans quitter le jeu
+// MARK: - Mélangeur audio de Home
+// Le volume d'un jeu sans rien installer d'autre (ni Background Music, ni pilote) : depuis macOS 14.2, une app peut capter le son
+// d'un processus, le couper à la source, et le rejouer elle-même. Home capte le son des processus du jeu et le rejoue sur la sortie
+// du Mac, multiplié par le volume choisi. Rien d'autre n'est touché : ni le volume du Mac, ni le son des autres apps.
+// Sécurité : un jeu n'est jamais rendu muet par erreur. Home écoute d'abord sans rien couper ; il ne coupe le son d'origine (pour le
+// rejouer à sa place) qu'après avoir vraiment reçu du son — si macOS refuse la capture, le jeu garde simplement son volume normal.
+final class Mixeur {
+    static let shared = Mixeur()
+    static var disponible: Bool { if #available(macOS 14.2, *) { return true }; return false }
+    private static var autorise = false                 // on a déjà reçu du son d'un jeu : la capture est permise, inutile de réécouter d'abord
+    private let gain = UnsafeMutablePointer<Float>.allocate(capacity: 1)     // lus par le fil audio : de simples cases mémoire, pas de verrou
+    private let pic = UnsafeMutablePointer<Float>.allocate(capacity: 1)
+    private let rejoue = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+    private var tap = AudioObjectID(kAudioObjectUnknown), appareil = AudioObjectID(kAudioObjectUnknown), proc: AudioDeviceIOProcID?
+    private var objets: [AudioObjectID] = [], coupe = false
+    private var suivi: Timer?, pids: (() -> [pid_t])?, debut = Date(), ecoute: Timer?, sortieSuivie = false
+    private init() { gain.pointee = 1; pic.pointee = 0; rejoue.pointee = false }
+    /// Le jeu en cours joue à ce volume (1 = son volume normal). `pids` donne ses processus : ils changent pendant qu'il démarre.
+    func suivre(gain g: Float, pids p: @escaping () -> [pid_t]) {
+        gain.pointee = max(0, min(1, g)); pids = p
+        if suivi == nil { debut = Date(); actualiser()
+            suivi = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] t in
+                guard let self else { t.invalidate(); return }
+                if Date().timeIntervalSince(self.debut) > 90, Int(Date().timeIntervalSince(self.debut)) % 9 >= 3 { return }   // passé le démarrage : toutes les 9 s
+                self.actualiser() }
+        }
+        if !sortieSuivie { sortieSuivie = true   // un casque branché, une autre sortie choisie : le mélangeur se refait sur la nouvelle
+            var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, .main) { [weak self] _, _ in guard let self, !self.objets.isEmpty else { return }; self.monter(self.objets, couper: self.coupe) }
+        }
+    }
+    func arreter() { suivi?.invalidate(); suivi = nil; ecoute?.invalidate(); ecoute = nil; pids = nil; demonter(); objets = [] }
+    private func actualiser() {
+        guard #available(macOS 14.2, *), let pids else { return }
+        let o = Array(Set(pids().compactMap { Mixeur.objet($0) })).sorted()
+        guard o != objets else { return }
+        if o.isEmpty { demonter(); objets = []; return }      // le jeu n'a pas (encore) de son
+        monter(o, couper: Mixeur.autorise)
+    }
+    /// Le processus vu par Core Audio (rien tant qu'il n'a pas ouvert de son)
+    private static func objet(_ pid: pid_t) -> AudioObjectID? {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var o = AudioObjectID(kAudioObjectUnknown); var n = UInt32(MemoryLayout<AudioObjectID>.size); var p = pid
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &a, UInt32(MemoryLayout<pid_t>.size), &p, &n, &o) == noErr, o != kAudioObjectUnknown else { return nil }
+        return o
+    }
+    private func demonter() {
+        if appareil != kAudioObjectUnknown { if let proc { AudioDeviceStop(appareil, proc); AudioDeviceDestroyIOProcID(appareil, proc) }; AudioHardwareDestroyAggregateDevice(appareil) }
+        if tap != kAudioObjectUnknown, #available(macOS 14.2, *) { AudioHardwareDestroyProcessTap(tap) }
+        appareil = AudioObjectID(kAudioObjectUnknown); tap = AudioObjectID(kAudioObjectUnknown); proc = nil; rejoue.pointee = false
+    }
+    /// Capte ces processus. couper == false : on écoute seulement (le jeu joue lui-même, Home ne rejoue rien) ; dès que du son arrive,
+    /// on recommence en coupant le son d'origine et en le rejouant au volume voulu.
+    private func monter(_ o: [AudioObjectID], couper: Bool) {
+        guard #available(macOS 14.2, *) else { return }
+        demonter(); objets = o; coupe = couper; pic.pointee = 0; ecoute?.invalidate(); ecoute = nil
+        let desc = CATapDescription(stereoMixdownOfProcesses: o); desc.uuid = UUID(); desc.isPrivate = true; desc.name = "Home"
+        desc.muteBehavior = couper ? .mutedWhenTapped : .unmuted
+        guard AudioHardwareCreateProcessTap(desc, &tap) == noErr else { log("Mélangeur : macOS refuse de capter le son du jeu (son volume reste celui du Mac)"); tap = AudioObjectID(kAudioObjectUnknown); return }
+        var sa = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var sortie = AudioObjectID(kAudioObjectUnknown); var n = UInt32(MemoryLayout<AudioObjectID>.size)
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &sa, 0, nil, &n, &sortie)
+        var ua = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var ref: Unmanaged<CFString>? = nil; var un = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(sortie, &ua, 0, nil, &un, &ref) == noErr, let uid = ref?.takeRetainedValue() as String? else { demonter(); return }
+        let reglages: [String: Any] = [kAudioAggregateDeviceNameKey: "Home", kAudioAggregateDeviceUIDKey: UUID().uuidString, kAudioAggregateDeviceMainSubDeviceKey: uid,
+            kAudioAggregateDeviceIsPrivateKey: true, kAudioAggregateDeviceIsStackedKey: false, kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: uid]],
+            kAudioAggregateDeviceTapListKey: [[kAudioSubTapDriftCompensationKey: true, kAudioSubTapUIDKey: desc.uuid.uuidString]]]
+        guard AudioHardwareCreateAggregateDevice(reglages as CFDictionary, &appareil) == noErr else { log("Mélangeur : appareil de mélange refusé"); appareil = AudioObjectID(kAudioObjectUnknown); demonter(); return }
+        let gain = gain, pic = pic, rejoue = rejoue; rejoue.pointee = couper
+        // le fil audio : le dernier tampon d'entrée est le son capté (les premiers sont les entrées de l'appareil de sortie, s'il en a)
+        let e = AudioDeviceCreateIOProcIDWithBlock(&proc, appareil, DispatchQueue(label: "fr.anas.salon.mixeur", qos: .userInteractive)) { _, entree, _, sortie, _ in
+            let i = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: entree)), o = UnsafeMutableAudioBufferListPointer(sortie)
+            for b in o { if let d = b.mData { memset(d, 0, Int(b.mDataByteSize)) } }
+            guard let b = i.last, let src = b.mData?.assumingMemoryBound(to: Float.self) else { return }
+            let ci = max(1, Int(b.mNumberChannels)), fi = Int(b.mDataByteSize) / 4 / ci
+            var m: Float = 0; var x = 0; while x < fi * ci { let v = abs(src[x]); if v > m { m = v }; x += 16 }
+            if m > pic.pointee { pic.pointee = m }
+            guard rejoue.pointee else { return }
+            let g = gain.pointee
+            if o.count == 1, let ob = o.first, let dst = ob.mData?.assumingMemoryBound(to: Float.self) {            // sortie entrelacée
+                let co = max(1, Int(ob.mNumberChannels)), f = min(fi, Int(ob.mDataByteSize) / 4 / co)
+                for k in 0..<f { for c in 0..<min(co, 2) { dst[k * co + c] = src[k * ci + min(c, ci - 1)] * g } }
+            } else {                                                                                               // un tampon par canal
+                for (c, ob) in o.enumerated().prefix(2) { guard let dst = ob.mData?.assumingMemoryBound(to: Float.self) else { continue }
+                    let f = min(fi, Int(ob.mDataByteSize) / 4); for k in 0..<f { dst[k] = src[k * ci + min(c, ci - 1)] * g } }
+            }
+        }
+        guard e == noErr, let proc, AudioDeviceStart(appareil, proc) == noErr else { log("Mélangeur : démarrage refusé"); demonter(); return }
+        if couper { log("Mélangeur : le son du jeu passe par Home (\(o.count) processus)") }
+        else {   // on écoute sans rien couper : dès que du son arrive vraiment, la capture est permise et on prend la main
+            ecoute = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] t in
+                guard let self else { t.invalidate(); return }
+                if self.pic.pointee > 0.0008 { t.invalidate(); self.ecoute = nil; Mixeur.autorise = true; self.monter(self.objets, couper: true) }
+            }
+        }
+    }
+}
 enum SystemVolume {
     private static func device() -> AudioDeviceID? {
         var id = AudioDeviceID(0); var size = UInt32(MemoryLayout<AudioDeviceID>.size)

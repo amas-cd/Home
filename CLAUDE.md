@@ -96,12 +96,16 @@ Les sections sont marquées `// MARK:`. Cherche-les par nom, les numéros de lig
 - **`Library`** (ObservableObject, le cœur) :
   - l'état de l'interface ;
   - `launch()` / `openGame()` : lancement d'un jeu et variables d'environnement données au jeu (`TOTK_*` pour MacNativeGames) ;
-  - le volume : `writeVolume`, `volumeSource` (`.engine` = volume.txt de nxnative, `.bgm` = Background Music, `.mac`) ;
+  - le volume : un seul, celui de Home et de ses jeux (jamais celui du Mac). `writeVolume`, `volumeSource` : `.engine` = volume.txt de
+    nxnative, `.mixeur` = le mélangeur de Home (macOS 14.2+), `.bgm` = Background Music sur un macOS plus ancien, `.mac` = rien à régler ;
   - le menu rapide (`quickItems`, `quickAct`) ;
   - le jeu en ligne : `enLigne()`, `joueursConnectes()`, `rafraichirJournalDistant()` ;
   - les menus d'options, de réglages et d'apparence.
 - **`Recorder`** : capture continue (ScreenCaptureKit) pour « Enregistrer les 15 dernières secondes ».
-- **`SystemVolume`, `BGM`** : volume général, volume par app via le périphérique Background Music. Échelle 0–100, 50 = normal.
+- **`Mixeur`** : le mélangeur audio de Home. Il capte le son des processus du jeu (process tap de Core Audio), le coupe à la source et le
+  rejoue au volume voulu. Il écoute d'abord sans rien couper, et ne prend la main qu'après avoir reçu du son : un jeu n'est jamais muet
+  par erreur. Demande l'autorisation « enregistrement audio du système » (`NSAudioCaptureUsageDescription`).
+- **`SystemVolume`, `BGM`** : anciens chemins (volume du Mac, Background Music) ; `BGM` ne sert plus que sous macOS 14.0 et 14.1.
 - **`Commande`** : `run()` pour lancer une commande et lire ce qu'elle écrit.
 - **Vues** : `Screen`, `MenuView`, `TacheView` (avancement des scripts lancés dans le Terminal), `HUDView` (au-dessus du jeu), `JoueursView`.
 - **Manette** : `PadBattery`, `PadSeize` (saisie exclusive pendant le menu rapide).
