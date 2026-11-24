@@ -3,6 +3,10 @@
 //!
 //!   home-steam etat                      {"compte": "nom" | null}
 //!   home-steam connexion                 {"ev":"qr","url":…} à montrer en QR code, puis {"ev":"connecte","compte":…}
+//!   home-steam connexion-identifiants    connexion directe : lit sur l'entrée « nom du compte », puis « mot de passe » (une ligne chacun) ;
+//!                                        {"ev":"telephone"} = à valider dans l'app Steam, ou {"ev":"code","par":"email"|"app"} = un code Steam
+//!                                        Guard attendu sur l'entrée ; puis {"ev":"connecte","compte":…}. Le mot de passe part chiffré
+//!                                        vers Steam (clé RSA de Steam) et n'est ni gardé ni écrit nulle part.
 //!   home-steam deconnexion               oublie le compte (trousseau)
 //!   home-steam bibliotheque              [{"app": 730, "nom": "…", "windows": true}, …]
 //!   home-steam installer APP             télécharge le jeu Windows (et, s'ils manquent, le moteur Voile et les composants de Valve) ;
@@ -49,6 +53,9 @@ fn clair(cle: &str) -> String {
     let c = cle.to_string();
     let t = match cle {
         k if k.contains("gameNotOwned") => "ce jeu n'est pas dans ta bibliothèque Steam",
+        k if k.contains("credentialsRejected") || k.contains("invalidCredentialsInput") => "nom de compte ou mot de passe refusé par Steam",
+        k if k.contains("guardRejected") => "code Steam Guard refusé",
+        k if k.contains("unsupportedConfirmation") => "Steam demande une confirmation que Home ne sait pas faire : utilise le QR code",
         k if k.contains("auth.expired") => "le QR code a expiré : recommence la connexion",
         k if k.contains("auth.network") || k.contains("network") => "Steam est injoignable (connexion ?)",
         k if k.contains("rateLimited") => "trop d'essais : Steam demande d'attendre un peu",
@@ -156,6 +163,56 @@ async fn connexion() {
         if debut.elapsed() > Duration::from_secs(300) {
             echec("personne n'a validé la connexion (5 minutes) : recommence");
         }
+    }
+}
+
+fn ligne() -> String {
+    let mut l = String::new();
+    let _ = std::io::stdin().read_line(&mut l);
+    l.trim_end_matches(['\n', '\r']).to_owned()
+}
+
+/// Connexion directe, sans QR code : nom du compte et mot de passe, puis Steam Guard (validation dans l'app, ou code)
+async fn connexion_identifiants() {
+    use steam_kit::auth::GuardType;
+    let (nom, mot_de_passe) = (ligne(), ligne());
+    let http = http_client().unwrap_or_else(|e| echec(&e.to_string()));
+    let auth = AuthClient::new(http);
+    let mut session = auth.begin_credentials(&nom, &mot_de_passe).await.unwrap_or_else(|e| echec(&clair(&e.to_string())));
+    drop(mot_de_passe);
+    let moyens: Vec<GuardType> = session.allowed_confirmations().iter().map(|c| c.kind).collect();
+    if moyens.contains(&GuardType::DeviceConfirmation) {
+        dire(serde_json::json!({"ev": "telephone"}));
+    } else if let Some(kind) = moyens.iter().copied().find(|k| matches!(k, GuardType::DeviceCode | GuardType::EmailCode)) {
+        let vers = session.allowed_confirmations().iter().find(|c| c.kind == kind).map(|c| c.message.clone()).unwrap_or_default();
+        dire(serde_json::json!({"ev": "code", "par": if kind == GuardType::EmailCode { "email" } else { "app" }, "vers": vers}));
+        let code = tokio::task::spawn_blocking(ligne).await.unwrap_or_default();
+        if code.trim().is_empty() {
+            echec("connexion annulée");
+        }
+        auth.submit_guard(&session, code.trim(), kind).await.unwrap_or_else(|e| echec(&clair(&e.to_string())));
+    } else if moyens.contains(&GuardType::EmailConfirmation) {
+        dire(serde_json::json!({"ev": "email"}));
+    } else if !moyens.is_empty() && !moyens.contains(&GuardType::None) {
+        echec("Steam demande une confirmation que Home ne sait pas faire : utilise le QR code");
+    }
+    let debut = Instant::now();
+    loop {
+        match auth.poll(&mut session).await {
+            Ok(Some(tokens)) => {
+                if !garder(&tokens) {
+                    echec("le trousseau de macOS a refusé d'enregistrer la session Steam");
+                }
+                dire(serde_json::json!({"ev": "connecte", "compte": tokens.account_name}));
+                return;
+            }
+            Ok(None) => {}
+            Err(e) => echec(&clair(&e.to_string())),
+        }
+        if debut.elapsed() > Duration::from_secs(300) {
+            echec("la connexion n'a pas été validée (5 minutes) : recommence");
+        }
+        tokio::time::sleep(session.polling_interval().max(Duration::from_secs(1))).await;
     }
 }
 
@@ -382,6 +439,7 @@ async fn main() {
     match a.first().map(String::as_str) {
         Some("etat") => dire(serde_json::json!({"compte": compte().map(|t| t.account_name)})),
         Some("connexion") => connexion().await,
+        Some("connexion-identifiants") => connexion_identifiants().await,
         Some("deconnexion") => {
             oublier();
             dire(serde_json::json!({"compte": null}));

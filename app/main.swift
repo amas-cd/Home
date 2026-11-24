@@ -370,6 +370,7 @@ final class Library: ObservableObject {
     @Published var running: Game? = nil
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
+    @Published var accueil: AccueilEtat? = nil   // l'écran d'accueil (mode d'utilisation), par-dessus tout le reste
     var apresTache: (() -> Void)? = nil   // ce que l'assistant fait une fois la tâche en cours réussie (se connecter, ajouter un jeu…)
     @Published var tache: Tache? = nil { didSet { majDock() } }   // la construction / mise à jour en cours, avec sa barre de progression
     /// Ferme la notification d'une tâche terminée (bouton Fermer, B / Échap) : fondu flouté ; une tâche en cours reste affichée
@@ -1768,6 +1769,7 @@ enum Compat {
 // Jeux Obelisk : installations, recette de lancement direct, Legendary
 enum ObeliskDirect {
     static var disabledOnce = false
+    static var gardes: [Process] = []   // des processus suivis par leurs seuls tubes (connexion Steam) : gardés en vie jusqu'à leur fin
     static let dir = Dossiers.home.appendingPathComponent("moteur/obelisk")
     static let support = appSupport.appendingPathComponent("com.zagrios.obelisk")
     struct Installation { let store: String; let appName: String; let name: String; let directory: String; var folder: String { (directory as NSString).lastPathComponent } }
@@ -1924,6 +1926,99 @@ struct Hint: View {
             else { Text(k.text).font(.system(size: 12, weight: .bold)).padding(.horizontal, 7).frame(minWidth: 24, minHeight: 24).overlay(Capsule().stroke(.white.opacity(0.7), lineWidth: 1.5)) }
             Text(t)
         }.font(.system(size: 16, weight: .medium, design: .rounded)).opacity(0.8)
+    }
+}
+
+// MARK: - Écran d'accueil (premier lancement, mode d'utilisation)
+// Un mélange voulu de trois consoles : le fond sombre et vivant et la grande typo fine de la PS5, les grandes tuiles à halo de la Xbox
+// Series, les pastilles rondes, les couleurs franches et l'aide des boutons en bas de la Switch 2. Les trois couleurs sont celles des
+// cartes de l'icône de Home (orange, bleu, violet).
+struct AccueilEtat { var etape = 0; var index = 0; var mode = "tout"; var moteurs = "tout"; var premier = false }
+struct AccueilChoix { let cle: String; let titre: String; let detail: String; let symbole: String; let teinte: [Color]; var badge: String? = nil }
+struct AccueilView: View {
+    @ObservedObject var lib: Library
+    let etat: AccueilEtat
+    var fige = false   // pour l'aperçu en image : tout est déjà en place, sans animation
+    @State private var derive = false
+    @State private var arrive = false
+    var body: some View {
+        let choix = lib.accueilChoix(etat); let titres = lib.accueilTitres(etat)
+        ZStack {
+            // le fond : une nuit bleutée, et les trois lueurs de l'icône qui dérivent lentement
+            LinearGradient(colors: [Color(red: 0.06, green: 0.07, blue: 0.14), Color(red: 0.01, green: 0.01, blue: 0.03)], startPoint: .top, endPoint: .bottom)
+            GeometryReader { g in
+                let w = g.size.width, h = g.size.height
+                ZStack {
+                    Circle().fill(Library.violet[0]).frame(width: w * 0.55).offset(x: derive ? -w * 0.30 : -w * 0.22, y: derive ? -h * 0.34 : -h * 0.22)
+                    Circle().fill(Library.bleu[1]).frame(width: w * 0.50).offset(x: derive ? w * 0.34 : w * 0.26, y: derive ? h * 0.10 : -h * 0.06)
+                    Circle().fill(Library.orange[1]).frame(width: w * 0.40).offset(x: derive ? -w * 0.10 : w * 0.02, y: derive ? h * 0.44 : h * 0.52)
+                }.frame(width: w, height: h).blur(radius: 150).opacity(0.42)
+            }
+            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 14) {
+                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 46, height: 46)
+                    Text("Home").font(.system(size: 22, weight: .semibold, design: .rounded))
+                    Spacer()
+                    HStack(spacing: 8) { ForEach(0..<3, id: \.self) { i in Capsule().fill(.white.opacity(i == etat.etape ? 0.95 : 0.25)).frame(width: i == etat.etape ? 34 : 10, height: 10) } }
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: etat.etape)
+                }
+                Spacer(minLength: 20)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(titres.0).font(.system(size: 72, weight: .thin)).tracking(-1.5)
+                    Text(titres.1).font(.system(size: 25, weight: .regular)).opacity(0.72)
+                }.id("titre-\(etat.etape)").transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
+                HStack(alignment: .center, spacing: 26) {
+                    ForEach(Array(choix.enumerated()), id: \.element.cle) { i, c in
+                        tuile(c, vise: i == etat.index)
+                            .onTapGesture { if var e = lib.accueil { e.index = i; lib.accueil = e; lib.accueilValider() } }
+                            .onHover { dedans in if dedans, var e = lib.accueil, e.index != i { e.index = i; withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { lib.accueil = e } } }
+                    }
+                }.padding(.top, 54).id("tuiles-\(etat.etape)").transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
+                Spacer(minLength: 20)
+                HStack(spacing: 14) {
+                    aide(lib.hints.ok, "Choisir"); aide(lib.hints.back, etat.etape == 0 ? (etat.premier ? "Plus tard" : "Fermer") : "Retour")
+                    Spacer()
+                    Text("Tu pourras changer d'avis dans Menu → Mode d'utilisation").font(.system(size: 15)).opacity(0.5)
+                }
+            }.padding(.horizontal, 96).padding(.top, 58).padding(.bottom, 52)
+             .opacity(arrive || fige ? 1 : 0).offset(y: arrive || fige ? 0 : 18)
+        }
+        .foregroundStyle(.white).ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.7).delay(0.1)) { arrive = true }
+            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { derive = true }
+        }
+    }
+    /// Une tuile : sa couleur en dégradé, un grand symbole, son nom ; visée, elle grandit, s'éclaire et prend un liseré blanc
+    func tuile(_ c: AccueilChoix, vise: Bool) -> some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 36, style: .continuous).fill(LinearGradient(colors: c.teinte, startPoint: .topLeading, endPoint: .bottomTrailing))
+            RoundedRectangle(cornerRadius: 36, style: .continuous).fill(LinearGradient(colors: [.white.opacity(0.18), .clear, .black.opacity(0.38)], startPoint: .top, endPoint: .bottom))
+            Image(systemName: c.symbole).font(.system(size: 210, weight: .regular)).foregroundStyle(.white.opacity(0.10)).rotationEffect(.degrees(-12))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing).offset(x: 56, y: -6)   // le même symbole, immense et discret, qui déborde à droite
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Image(systemName: c.symbole).font(.system(size: 46, weight: .medium)).frame(width: 84, height: 84).background(.white.opacity(0.18), in: Circle())
+                    Spacer()
+                    if let b = c.badge { Text(b.uppercased()).font(.system(size: 12, weight: .heavy, design: .rounded)).tracking(1).padding(.horizontal, 12).padding(.vertical, 7).background(.black.opacity(0.28), in: Capsule()) }
+                }
+                Spacer()
+                Text(c.titre).font(.system(size: 31, weight: .bold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.7)
+                Text(c.detail).font(.system(size: 17, weight: .medium)).opacity(0.85).lineLimit(3).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
+            }.padding(28)
+        }
+        .frame(maxWidth: .infinity).frame(height: 400)
+        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 36, style: .continuous).strokeBorder(.white.opacity(vise ? 0.95 : 0), lineWidth: 4))
+        .shadow(color: c.teinte[0].opacity(vise ? 0.65 : 0), radius: 44, y: 14)
+        .shadow(color: .black.opacity(0.45), radius: 18, y: 12)
+        .scaleEffect(vise ? 1.06 : 0.96).saturation(vise ? 1 : 0.75).opacity(vise ? 1 : 0.62)
+        .animation(.spring(response: 0.35, dampingFraction: 0.72), value: vise)
+    }
+    /// L'aide d'un bouton, en pastille
+    func aide(_ k: Key, _ texte: String) -> some View {
+        Hint(k: k, t: texte).font(.system(size: 17, weight: .semibold, design: .rounded)).padding(.horizontal, 18).padding(.vertical, 11).background(.white.opacity(0.12), in: Capsule())
     }
 }
 
@@ -2391,7 +2486,7 @@ struct Screen: View {
         ZStack {
             Group { if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(g?.id ?? "salon-plus")
                 .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 1.04)), removal: .opacity)).animation(.easeInOut(duration: 0.7), value: g?.id)
-            let veiled = lib.menu != nil || lib.picker != nil
+            let veiled = lib.menu != nil || lib.picker != nil || lib.accueil != nil
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 6) {
                     ForEach(Array(lib.categories.enumerated()), id: \.offset) { i, c in
@@ -2483,6 +2578,7 @@ struct Screen: View {
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { Color.black.opacity(0.6).ignoresSafeArea(); PickerView(lib: lib) }
+            if let e = lib.accueil { AccueilView(lib: lib, etat: e).transition(.opacity).zIndex(5) }
             if let t = lib.tache {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 64).padding(.bottom, 92)
                     .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .flou))
@@ -2799,6 +2895,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var lastX = 0, lastY = 0, heldX = 0, heldY = 0, prev: [String: Bool] = [:]
     var qLastX = 0, qLastY = 0, qHeldX = 0, qHeldY = 0   // menu rapide en jeu : ses propres compteurs (ceux du Salon sont remis à 0 à chaque tour)
     func applicationDidFinishLaunching(_ n: Notification) {
+        // Aperçu pour le développement : HOME_APERCU=<dossier> dessine les trois étapes de l'écran d'accueil en PNG (1920×1080) et quitte,
+        // sans rien charger ni installer
+        if let dossier = ProcessInfo.processInfo.environment["HOME_APERCU"] {
+            for (i, mode) in [(0, "tout"), (1, "tout"), (2, "tout")] {
+                var e = AccueilEtat(); e.etape = i; e.mode = mode; e.premier = true; e.index = i == 2 ? 1 : 0
+                let r = ImageRenderer(content: AccueilView(lib: lib, etat: e, fige: true).frame(width: 1920, height: 1080)); r.scale = 1
+                if let img = r.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
+                    try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("accueil-\(i + 1).png")) }
+            }
+            exit(0)
+        }
         Atelier.installerEmbarque()
         lib.load()
         if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil, self.lib.running == nil { self.lib.openModeUtilisation(premier: true) } } }   // premier lancement : choisir le mode d'utilisation
@@ -2808,7 +2915,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sub.addItem(withTitle: "Espace plein écran / fenêtre bureau", action: #selector(toggleSpace), keyEquivalent: "f")
         sub.addItem(withTitle: "Écran suivant", action: #selector(nextScreen), keyEquivalent: "e")
         sub.addItem(.separator()); sub.addItem(withTitle: "Quitter Home", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = sub; NSApp.mainMenu = menu
+        appItem.submenu = sub
+        // Édition : sans ce menu, ⌘V / ⌘C / ⌘A n'arrivent pas aux champs de texte ni à la page de connexion ; macOS y ajoute aussi
+        // « Remplissage automatique → Mots de passe… »
+        let edItem = NSMenuItem(); let ed = NSMenu(title: "Édition")
+        ed.addItem(withTitle: "Annuler", action: Selector(("undo:")), keyEquivalent: "z")
+        ed.addItem(.separator())
+        ed.addItem(withTitle: "Couper", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        ed.addItem(withTitle: "Copier", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        ed.addItem(withTitle: "Coller", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        ed.addItem(withTitle: "Tout sélectionner", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edItem.submenu = ed; menu.addItem(edItem)
+        NSApp.mainMenu = menu
         let frame = (NSScreen.screens.first ?? NSScreen.main)?.frame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)   // écran principal (barre des menus), pas celui du Finder
         // Le Salon est un « bureau » : une fenêtre noire sans bordure qui couvre tout l'écran, barre des menus et Dock masqués.
         // Ce n'est pas un Space plein écran macOS : les jeux s'ouvrent donc PAR-DESSUS, sur ce fond noir, et le HUD reste visible.
@@ -2896,6 +3014,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     func nav(_ k: String) {
+        if lib.accueil != nil { lib.accueilNav(k); return }
         if let p = lib.picker {
             switch k { case "left": if lib.pickIndex > 0 { lib.pickIndex -= 1; Sounds.shared.play("deplacer") }; case "right": if lib.pickIndex < p.items.count - 1 { lib.pickIndex += 1; Sounds.shared.play("deplacer") }
             case "ok": Sounds.shared.play("valider"); lib.pickCandidate(); case "back", "options": lib.closeMenu(); default: break }
@@ -3717,38 +3836,88 @@ extension Library {
         let e = !modeNintendo || config.mode == nil ? "" : config.moteurs == "mng" ? " · MacNativeGames seul" : config.moteurs == "nxnative" ? " · nxnative seul" : ""
         return m + e
     }
-    /// L'assistant du premier lancement, qu'on retrouve dans Menu → Mode d'utilisation : 1. à quoi sert Home ici, 2. les moteurs Nintendo
-    /// (tout, recommandé ; ou un seul, avancé), 3. par où commencer côté PC. À la fin, Home télécharge ce qui manque pour ce mode.
+    /// L'assistant du premier lancement, qu'on retrouve dans Menu → Mode d'utilisation : un écran à lui (AccueilView), en trois temps —
+    /// 1. à quoi sert Home ici, 2. les moteurs Nintendo (tout, recommandé ; ou un seul, avancé), 3. par où commencer côté PC.
+    /// À la fin, Home télécharge ce qui manque pour ce mode.
     func openModeUtilisation(premier: Bool = false) {
-        let retour: (() -> Void)? = premier ? nil : { self.menu = self.plusMenu() }
-        func choix(_ label: String, _ detail: String, _ icone: String, _ mode: String, recommande: Bool = false) -> SalonMenuItem {
-            SalonMenuItem(label: label, detail: (recommande ? "Recommandé — " : "") + detail + (!premier && (config.mode ?? "") == mode ? " (actuel)" : ""), icon: icone, tint: recommande ? .green : nil, action: {
-                if mode == "pc" { self.etapePC(mode: mode, moteurs: "tout", premier: premier) } else { self.etapeMoteurs(mode: mode, premier: premier) } })
+        menu = nil; Sounds.shared.play("ouvrir")
+        var e = AccueilEtat(); e.premier = premier
+        if !premier { e.mode = config.mode ?? "tout"; e.moteurs = config.moteurs ?? "tout"; e.index = ["tout", "nintendo", "pc"].firstIndex(of: e.mode) ?? 0 }
+        withAnimation(.easeInOut(duration: 0.45)) { accueil = e }
+    }
+    static let orange = [Color(red: 1.0, green: 0.70, blue: 0.23), Color(red: 1.0, green: 0.42, blue: 0.24)]
+    static let bleu = [Color(red: 0.19, green: 0.78, blue: 0.80), Color(red: 0.16, green: 0.38, blue: 1.0)]
+    static let violet = [Color(red: 0.58, green: 0.40, blue: 0.98), Color(red: 0.33, green: 0.17, blue: 0.80)]
+    static let gris = [Color(white: 0.36), Color(white: 0.20)]
+    /// Les tuiles de l'étape en cours
+    func accueilChoix(_ e: AccueilEtat) -> [AccueilChoix] {
+        switch e.etape {
+        case 0: return [
+            AccueilChoix(cle: "tout", titre: "Tout", detail: "Jeux Nintendo et jeux PC, au même endroit", symbole: "square.grid.2x2.fill", teinte: Library.violet, badge: "Recommandé"),
+            AccueilChoix(cle: "nintendo", titre: "Jeux Nintendo", detail: "Switch et Switch 2, à partir de tes propres dumps", symbole: "gamecontroller.fill", teinte: Library.orange),
+            AccueilChoix(cle: "pc", titre: "Jeux PC", detail: "Epic Games, Steam, ou des jeux Windows que tu as déjà", symbole: "desktopcomputer", teinte: Library.bleu)]
+        case 1: return [
+            AccueilChoix(cle: "tout", titre: "Tout installer", detail: "Home choisit le bon moteur pour chaque jeu", symbole: "sparkles", teinte: Library.violet, badge: "Recommandé"),
+            AccueilChoix(cle: "mng", titre: "MacNativeGames", detail: "Zelda Tears of the Kingdom, Breath of the Wild, Ocarina of Time", symbole: "leaf.fill", teinte: Library.orange, badge: "Avancé"),
+            AccueilChoix(cle: "nxnative", titre: "nxnative", detail: "Les autres jeux Switch et Switch 2 — demande Xcode entier", symbole: "cpu.fill", teinte: Library.bleu, badge: "Avancé")]
+        default: return [
+            AccueilChoix(cle: "epic", titre: "Epic Games", detail: "Ta bibliothèque Epic, connexion sur le site d'Epic", symbole: "person.crop.circle.fill.badge.plus", teinte: Library.violet),
+            AccueilChoix(cle: "steam", titre: "Steam", detail: "QR code avec ton téléphone, ou identifiant et mot de passe", symbole: "qrcode", teinte: Library.bleu),
+            AccueilChoix(cle: "local", titre: "Un jeu que j'ai déjà", detail: "Un .exe dans son dossier, ou un installateur", symbole: "shippingbox.fill", teinte: Library.orange),
+            AccueilChoix(cle: "tard", titre: "Plus tard", detail: "Seul le moteur Windows est installé", symbole: "moon.zzz.fill", teinte: Library.gris)]
         }
-        menu = SalonMenu(title: premier ? "Bienvenue dans Home" : "Mode d'utilisation", subtitle: "À quoi Home va-t-il servir sur ce Mac ?", items: [
-            choix("Jeux Nintendo et jeux PC", "Home installe tout ce qu'il faut pour les deux", "square.grid.2x2.fill", "tout", recommande: true),
-            choix("Jeux Nintendo", "Tes jeux Switch et Switch 2, construits à partir de tes propres dumps", "gamecontroller.fill", "nintendo"),
-            choix("Jeux PC", "Epic Games, Steam, ou des jeux Windows que tu as déjà", "desktopcomputer", "pc"),
-        ] + (premier ? [SalonMenuItem(label: "Plus tard", detail: "Rien n'est installé ; à retrouver dans Menu → Mode d'utilisation", icon: "arrow.right.circle", tint: .gray, action: { self.config.mode = "tout"; self.saveConfig(); self.menu = nil })] : []),
-        hero: "house.fill", text: "Tu pourras changer d'avis dans le menu : Home téléchargera alors ce qui manque.", step: 1, steps: 3, back: retour)
     }
-    private func etapeMoteurs(mode: String, premier: Bool) {
-        let suite: (String) -> Void = { m in if mode == "tout" { self.etapePC(mode: mode, moteurs: m, premier: premier) } else { self.appliquerMode(mode: mode, moteurs: m, ensuite: nil) } }
-        menu = SalonMenu(title: "Jeux Nintendo", subtitle: "Quels moteurs installer ?", items: [
-            SalonMenuItem(label: "Tout installer", detail: "Recommandé — Home choisit le bon moteur pour chaque jeu", icon: "checkmark.seal.fill", tint: .green, action: { suite("tout") }),
-            SalonMenuItem(label: "MacNativeGames seulement", detail: "Avancé — Zelda Tears of the Kingdom, Breath of the Wild, Ocarina of Time", icon: "leaf.fill", section: "Avancé", tint: .gray, action: { suite("mng") }),
-            SalonMenuItem(label: "nxnative seulement", detail: "Avancé — les autres jeux Switch et Switch 2 ; demande Xcode entier", icon: "cpu", section: "Avancé", tint: .gray, action: { suite("nxnative") }),
-        ], hero: "gamecontroller.fill", text: "Les moteurs transforment tes jeux en apps Mac. Il faut les outils d'Apple et Homebrew : Home te dit quoi faire s'ils manquent.", step: 2, steps: 3, back: { self.openModeUtilisation(premier: premier) })
+    func accueilTitres(_ e: AccueilEtat) -> (String, String) {
+        switch e.etape {
+        case 0: return (e.premier ? "Bienvenue." : "Mode d'utilisation", "À quoi Home va-t-il servir sur ce Mac ?")
+        case 1: return ("Jeux Nintendo", "Quels moteurs installer pour transformer tes jeux en apps Mac ?")
+        default: return ("Jeux PC", "Home installe le moteur Windows. Par où veux-tu commencer ?")
+        }
     }
-    private func etapePC(mode: String, moteurs: String, premier: Bool) {
-        let fin: ((() -> Void)?) -> Void = { e in self.appliquerMode(mode: mode, moteurs: moteurs, ensuite: e) }
-        menu = SalonMenu(title: "Jeux PC", subtitle: "Par où veux-tu commencer ?", items: [
-            SalonMenuItem(label: "Me connecter à Epic Games", detail: "Ta bibliothèque Epic ; connexion sur le site d'Epic, dans une fenêtre", icon: "person.crop.circle.badge.plus", action: { fin({ self.connexionEpic(retour: { self.openPC() }) }) }),
-            SalonMenuItem(label: "Me connecter à Steam", detail: "Un QR code à scanner avec l'app Steam du téléphone", icon: "qrcode", action: { fin({ self.apresTache = { self.connexionSteam(retour: { self.openPC() }) }; if PCHome.steamPret { let a = self.apresTache; self.apresTache = nil; a?() } else { self.lancer("preparer-steam.command", titre: "Préparation de Steam") } }) }),
-            SalonMenuItem(label: "Installer un jeu que j'ai déjà", detail: "Un .exe dans son dossier, ou un installateur (setup)", icon: "shippingbox.fill", action: { fin({ self.openAddMenu() }) }),
-            SalonMenuItem(label: "Plus tard", detail: "Seul le moteur Windows est installé ; le reste est dans la case +", icon: "arrow.right.circle", tint: .gray, action: { fin(nil) }),
-        ], hero: "desktopcomputer", text: "Home installe d'abord le moteur Windows (Voile, 500 Mo à télécharger), puis fait ce que tu choisis ici.", step: 3, steps: 3,
-        back: { if mode == "pc" { self.openModeUtilisation(premier: premier) } else { self.etapeMoteurs(mode: mode, premier: premier) } })
+    /// Manette et clavier sur l'écran d'accueil : gauche / droite, valider, retour
+    func accueilNav(_ k: String) {
+        guard var e = accueil else { return }
+        let n = accueilChoix(e).count
+        switch k {
+        case "left": if e.index > 0 { e.index -= 1; Sounds.shared.play("deplacer"); withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { accueil = e } }
+        case "right": if e.index < n - 1 { e.index += 1; Sounds.shared.play("deplacer"); withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { accueil = e } }
+        case "ok": accueilValider()
+        case "back":
+            Sounds.shared.play("retour")
+            if e.etape == 0 {
+                if e.premier { config.mode = "tout"; saveConfig() }   // « plus tard » : rien n'est installé, l'écran ne revient pas tout seul
+                withAnimation(.easeInOut(duration: 0.35)) { accueil = nil }
+                if !e.premier { menu = plusMenu() }
+            } else {
+                e.etape = e.etape == 2 && e.mode != "pc" ? 1 : 0
+                e.index = e.etape == 0 ? (["tout", "nintendo", "pc"].firstIndex(of: e.mode) ?? 0) : (["tout", "mng", "nxnative"].firstIndex(of: e.moteurs) ?? 0)
+                withAnimation(.easeInOut(duration: 0.35)) { accueil = e }
+            }
+        default: break
+        }
+    }
+    func accueilValider() {
+        guard var e = accueil else { return }
+        let c = accueilChoix(e); guard c.indices.contains(e.index) else { return }
+        let cle = c[e.index].cle; Sounds.shared.play("valider")
+        func fermer(_ ensuite: (() -> Void)?) { withAnimation(.easeInOut(duration: 0.4)) { accueil = nil }; appliquerMode(mode: e.mode, moteurs: e.moteurs, ensuite: ensuite) }
+        switch e.etape {
+        case 0:
+            e.mode = cle; e.etape = cle == "pc" ? 2 : 1; e.index = 0; if cle == "pc" { e.moteurs = "tout" }
+            withAnimation(.easeInOut(duration: 0.35)) { accueil = e }
+        case 1:
+            e.moteurs = cle
+            if e.mode == "tout" { e.etape = 2; e.index = 0; withAnimation(.easeInOut(duration: 0.35)) { accueil = e } } else { fermer(nil) }
+        default:
+            switch cle {
+            case "epic": fermer({ self.connexionEpic(retour: { self.openPC() }) })
+            case "steam": fermer({
+                self.apresTache = { self.connexionSteam(retour: { self.openPC() }) }
+                if PCHome.steamPret { let a = self.apresTache; self.apresTache = nil; a?() } else if !self.lancer("preparer-steam.command", titre: "Préparation de Steam") { self.apresTache = nil } })
+            case "local": fermer({ self.openAddMenu() })
+            default: fermer(nil)
+            }
+        }
     }
     /// Enregistre le mode et télécharge ce qui lui manque ; « ensuite » se fait quand tout est installé
     private func appliquerMode(mode: String, moteurs: String, ensuite: (() -> Void)?) {
@@ -3844,35 +4013,52 @@ extension Library {
         }
     }
     /// Connexion Epic : la page de connexion d'Epic s'ouvre dans le navigateur et affiche un code (authorizationCode) à coller ici
+    /// Se connecter à Epic : dans une fenêtre de Home (rien à copier), ou dans ton navigateur (il a tes mots de passe enregistrés)
     func connexionEpic(retour: @escaping () -> Void) {
-        menu = nil; toast = "Connecte-toi dans la fenêtre d'Epic Games"
-        ConnexionEpic.ouvrir { code in
-            guard let code else { self.connexionEpicParCode(retour: retour); return }   // fenêtre fermée sans connexion : l'ancienne méthode en secours
-            self.toast = "Connexion à Epic…"
-            DispatchQueue.global().async {
-                let s = PCHome.run(["connexion", code], timeout: 60)
-                DispatchQueue.main.async { self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
-            }
-        }
+        menu = SalonMenu(title: "Connexion à Epic Games", subtitle: "Où veux-tu te connecter ?", items: [
+            SalonMenuItem(label: "Dans mon navigateur", detail: "Avec le remplissage automatique de tes mots de passe ; à la fin, ⌘A puis ⌘C et Home fait le reste", icon: "safari.fill", action: { self.connexionEpicNavigateur(retour: retour) }),
+            SalonMenuItem(label: "Dans Home", detail: "Une fenêtre d'Epic s'ouvre ici ; rien à copier, mais pas de remplissage automatique", icon: "macwindow", action: { self.connexionEpicFenetre(retour: retour) }),
+        ], hero: "person.crop.circle.badge.plus", text: "Dans les deux cas, tu te connectes sur le site d'Epic : Home ne voit jamais ton mot de passe.", back: retour)
     }
-    /// En secours (la fenêtre de connexion a été fermée, ou Epic n'a pas voulu s'y afficher) : la page s'ouvre dans le navigateur et
-    /// montre un code (authorizationCode) à coller ici
-    func connexionEpicParCode(retour: @escaping () -> Void) {
-        let q = NSAlert(); q.messageText = "Connexion à Epic Games"; q.informativeText = "La fenêtre a été fermée avant la fin de la connexion. Tu peux te connecter dans ton navigateur à la place : Epic affichera un code à coller ici."
-        q.addButton(withTitle: "Ouvrir le navigateur"); q.addButton(withTitle: "Annuler")
-        guard q.runModal() == .alertFirstButtonReturn else { retour(); return }
-        NSWorkspace.shared.open(URL(string: "https://legendary.gl/epiclogin")!)
-        let a = NSAlert(); a.messageText = "Connexion à Epic Games"
-        a.informativeText = "Connecte-toi dans la page qui vient de s'ouvrir : elle affiche ensuite un texte avec « authorizationCode ». Copie ce code (ou tout le texte) et colle-le ici."
-        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24)); a.accessoryView = f; a.window.initialFirstResponder = f
-        a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
-        guard a.runModal() == .alertFirstButtonReturn else { retour(); return }
-        let code = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); guard !code.isEmpty else { retour(); return }
+    private func finirEpic(_ code: String, retour: @escaping () -> Void) {
         toast = "Connexion à Epic…"
         DispatchQueue.global().async {
             let s = PCHome.run(["connexion", code], timeout: 60)
             DispatchQueue.main.async { self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
         }
+    }
+    func connexionEpicFenetre(retour: @escaping () -> Void) {
+        menu = nil; toast = "Connecte-toi dans la fenêtre d'Epic Games"
+        ConnexionEpic.ouvrir { code in
+            guard let code else { retour(); return }
+            self.finirEpic(code, retour: retour)
+        }
+    }
+    /// La page d'Epic s'ouvre dans le navigateur (qui remplit identifiant et mot de passe tout seul). Elle finit sur un texte qui contient
+    /// « authorizationCode » : dès qu'il est copié (⌘A, ⌘C), Home le repère dans le presse-papiers et termine. On peut aussi le coller ici.
+    func connexionEpicNavigateur(retour: @escaping () -> Void) {
+        menu = nil
+        let avant = NSPasteboard.general.changeCount
+        NSWorkspace.shared.open(URL(string: "https://legendary.gl/epiclogin")!)
+        let a = NSAlert(); a.messageText = "Connexion à Epic Games"
+        a.informativeText = "Connecte-toi dans la page qui vient de s'ouvrir. Elle affiche ensuite un texte avec « authorizationCode » : fais ⌘A puis ⌘C dans cette page, Home le repère tout seul. Tu peux aussi coller le code ici (⌘V)."
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24)); f.placeholderString = "Le code, ou tout le texte de la page"; a.accessoryView = f; a.window.initialFirstResponder = f
+        a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
+        func codeDans(_ t: String) -> String? {
+            guard let m = t.range(of: #""authorizationCode"\s*:\s*"[0-9a-fA-F]+""#, options: .regularExpression) else { return nil }
+            return t[m].components(separatedBy: "\"").dropLast().last
+        }
+        // le presse-papiers n'est lu que pendant cette fenêtre, et seulement s'il a changé depuis son ouverture
+        let veille = Timer(timeInterval: 0.6, repeats: true) { _ in
+            guard NSPasteboard.general.changeCount != avant, let t = NSPasteboard.general.string(forType: .string), let c = codeDans(t) else { return }
+            f.stringValue = c; NSApp.stopModal(withCode: .alertFirstButtonReturn)
+        }
+        RunLoop.main.add(veille, forMode: .modalPanel)
+        let r = a.runModal(); veille.invalidate(); a.window.orderOut(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        let saisi = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard r == .alertFirstButtonReturn, !saisi.isEmpty else { retour(); return }
+        finirEpic(codeDans(saisi) ?? saisi, retour: retour)
     }
     /// Un nom pour la tuile d'un jeu ajouté à la main
     private func demanderNom(_ propose: String, _ message: String) -> String? {
@@ -3927,12 +4113,66 @@ extension Library {
             }
         }
     }
+    /// Se connecter à Steam : par QR code (rien à taper), ou directement avec le nom du compte et le mot de passe
     func connexionSteam(retour: @escaping () -> Void) {
+        menu = SalonMenu(title: "Connexion à Steam", subtitle: "Comment veux-tu te connecter ?", items: [
+            SalonMenuItem(label: "QR code", detail: "À scanner avec l'app Steam du téléphone : rien à taper", icon: "qrcode", tint: .blue, action: { self.connexionSteamQR(retour: retour) }),
+            SalonMenuItem(label: "Identifiant et mot de passe", detail: "Directement ici, avec le remplissage automatique de macOS", icon: "key.fill", action: { self.connexionSteamIdentifiants(retour: retour) }),
+        ], hero: "person.crop.circle.badge.plus", text: "Ton mot de passe part chiffré vers Steam et n'est gardé nulle part. Seule la session est rangée dans le trousseau de macOS.", back: retour)
+    }
+    func connexionSteamQR(retour: @escaping () -> Void) {
         menu = nil; toast = "Scanne le QR code avec l'app Steam de ton téléphone"
         ConnexionSteam.ouvrir { compte, erreur in
             if let compte { self.toast = "Connecté à Steam : \(compte)" } else if let erreur { self.toast = erreur }
             retour()
         }
+    }
+    /// Connexion directe : une fenêtre avec le nom du compte et le mot de passe (champs marqués pour le remplissage automatique de macOS :
+    /// Édition → Remplissage automatique → Mots de passe…), puis Steam Guard — validation dans l'app Steam, ou code à saisir.
+    func connexionSteamIdentifiants(retour: @escaping () -> Void) {
+        menu = nil
+        let a = NSAlert(); a.messageText = "Connexion à Steam"; a.informativeText = "Ton nom de compte Steam et ton mot de passe. ⌘V colle ; le menu Édition → Remplissage automatique propose tes mots de passe enregistrés."
+        let nom = NSTextField(frame: NSRect(x: 0, y: 34, width: 340, height: 24)); nom.placeholderString = "Nom du compte Steam"; nom.contentType = .username
+        let mdp = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24)); mdp.placeholderString = "Mot de passe"; mdp.contentType = .password
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 58)); v.addSubview(nom); v.addSubview(mdp); nom.nextKeyView = mdp; mdp.nextKeyView = nom
+        a.accessoryView = v; a.window.initialFirstResponder = nom
+        a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
+        guard a.runModal() == .alertFirstButtonReturn, !nom.stringValue.isEmpty, !mdp.stringValue.isEmpty else { retour(); return }
+        toast = "Connexion à Steam…"
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/bash"); p.arguments = [Atelier.outils.appendingPathComponent("steam.command").path, "connexion-identifiants"]
+        p.environment = ProcessInfo.processInfo.environment.merging(Dossiers.env, uniquingKeysWith: { $1 })
+        let entree = Pipe(), sortie = Pipe(); p.standardInput = entree; p.standardOutput = sortie; p.standardError = FileHandle.nullDevice
+        var tampon = Data(); var fini = false
+        let conclure: (String) -> Void = { message in if fini { return }; fini = true; self.toast = message; retour() }
+        sortie.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; guard !d.isEmpty else { return }
+            DispatchQueue.main.async {
+                tampon.append(d)
+                while let r = tampon.firstIndex(of: 0x0a) {
+                    let ligne = String(decoding: tampon[tampon.startIndex..<r], as: UTF8.self); tampon.removeSubrange(tampon.startIndex...r)
+                    if ligne.hasPrefix("ÉCHEC : ") { conclure(String(ligne.dropFirst(8))); continue }
+                    guard let j = (try? JSONSerialization.jsonObject(with: Data(ligne.utf8))) as? [String: Any] else { continue }
+                    switch j["ev"] as? String {
+                    case "telephone": self.toast = "Valide la connexion dans l'app Steam de ton téléphone"
+                    case "email": self.toast = "Valide la connexion dans l'e-mail que Steam vient d'envoyer"
+                    case "code":
+                        let c = NSAlert(); c.messageText = "Steam Guard"
+                        c.informativeText = (j["par"] as? String) == "email" ? "Steam a envoyé un code par e-mail\((j["vers"] as? String).flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""). Saisis-le ici." : "Saisis le code affiché par l'app Steam (Steam Guard)."
+                        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24)); f.contentType = .oneTimeCode; c.accessoryView = f; c.window.initialFirstResponder = f
+                        c.addButton(withTitle: "Valider"); c.addButton(withTitle: "Annuler")
+                        let code = c.runModal() == .alertFirstButtonReturn ? f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                        entree.fileHandleForWriting.write(Data((code + "\n").utf8))
+                    case "connecte": conclure("Connecté à Steam : \(j["compte"] as? String ?? "")")
+                    default: if j["absent"] != nil { conclure("L'outil Steam n'est pas encore préparé") }
+                    }
+                }
+            }
+        }
+        p.terminationHandler = { _ in DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { sortie.fileHandleForReading.readabilityHandler = nil; conclure("Connexion à Steam interrompue") } }
+        guard (try? p.run()) != nil else { conclure("L'outil Steam ne démarre pas"); return }
+        ObeliskDirect.gardes.removeAll { !$0.isRunning }; ObeliskDirect.gardes.append(p)
+        // le nom et le mot de passe passent par l'entrée de l'outil (jamais par sa ligne de commande), puis sont oubliés ici
+        entree.fileHandleForWriting.write(Data((nom.stringValue + "\n" + mdp.stringValue + "\n").utf8)); mdp.stringValue = ""
     }
     /// La bibliothèque Steam du compte, avec la compatibilité de chaque jeu : un jeu bloqué montre sa raison, les autres s'installent
     /// (steam.command installer, le circuit d'Obelisk piloté par home-steam)

@@ -53,7 +53,7 @@ Le dépôt est **amas-cd/Home**, privé : Anas et quelques amis invités.
 | `moteur/compat/pc.json` | Liste de compatibilité PC, avec sources : `bloque` (jamais lancé), `verifie`, `linux`. Un jeu absent n'est jamais bloqué |
 | `moteur/.upstream-ref`, `moteur/mng/` | Versions figées : commit de nxnative ; commit de MacNativeGames + les commits d'Anas en patchs |
 | `scripts/installer-local.sh` | Recopie le dépôt dans `/Applications/Home/moteur`, puis compile et installe Home sur ce Mac |
-| `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home.zip` pour un tag `v*` ou pour « Run workflow » avec une version |
+| `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home.dmg` pour un tag `v*` ou pour « Run workflow » avec une version |
 | `.claude/` | Ce contexte : le hook Stop qui te rappelle de demander l'envoi de la mise à jour |
 
 **Jamais dans le dépôt** : jeux, ROM, NSP/XCI, clés (`prod.keys`, `title.keys`), fichiers système, clé SteamGridDB, clé SSH du
@@ -150,7 +150,7 @@ ne se teste pas sur Mac.
 
 Le workflow compile `windows/` sur `windows-latest` (job `windows`), puis fabrique `Home-Setup.exe` avec Inno Setup
 (`windows/installeur.iss` : installation pour l'utilisateur seul dans `%LOCALAPPDATA%\Programs\Home`). La release contient
-`Home.zip` et `Home-Setup.exe` ; elle ne sort que si les deux compilent.
+`Home.dmg` et `Home-Setup.exe` ; elle ne sort que si les deux compilent.
 
 **Mises à jour sur Windows** (`MiseAJour.cs`) : ce dépôt est privé, donc le workflow recopie le setup dans le dépôt public
 **amas-cd/Home-releases** (rien d'autre n'y va : ni code, ni app Mac). Home y lit la dernière version au démarrage, sans jeton,
@@ -215,7 +215,7 @@ Anas t'utilise surtout depuis l'**onglet Code** de l'app Claude. Regarde d'abord
 - **Installer sur le Mac d'Anas** pour qu'il teste (demande-lui avant : Home se ferme et se relance) :
   `bash scripts/installer-local.sh`. Ajoute `--sans-compiler` si seuls des scripts ont changé. Depuis le cloud, donne-lui plutôt
   la commande à coller dans son Terminal : `cd ~/Home && git pull && bash scripts/installer-local.sh`. Ou, s'il ne veut pas de
-  clone, il installe la release : `Home.zip` de la page Releases.
+  clone, il installe la release : `Home.dmg` de la page Releases.
 - **Compatibilité** : la cible est macOS 14 ; GitHub compile avec Xcode 26 / Swift 6.3. Le Mac d'Anas a un SDK plus récent :
   une API de macOS 27 compile chez lui mais casse la release. Vérifie le résultat du workflow après chaque push.
 - **Signature** : avec le certificat local « Salon Dev », macOS garde les autorisations de Home (Accessibilité, Enregistrement
@@ -282,7 +282,7 @@ Décidé avec Anas pour Home autonome (pour lui et ses amis) :
    - Fait aussi : un .exe déjà installé devient une tuile (`pc.py ajouter-exe`), installation depuis un setup (`pc.py setup`, moteur Rosetta
      de Voile, 32 bits et .NET), connexion Epic dans une fenêtre de Home sans code à copier (`ConnexionEpic`), accueil au premier lancement.
    - Fait aussi : mode d'utilisation choisi au premier lancement et dans Menu → Mode d'utilisation (`Config.mode` : tout / nintendo / pc ;
-     `Config.moteurs` : tout / mng / nxnative ; les scripts reçoivent `HOME_MOTEURS` et `HOME_AUSSI_PC`). Icône dessinée par `app/icone.swift`.
+     `Config.moteurs` : tout / mng / nxnative ; les scripts reçoivent `HOME_MOTEURS` et `HOME_AUSSI_PC`). Icône dessinée par `app/icone.swift`. L'écran du mode d'utilisation est `AccueilView` (mélange PS5 / Xbox / Switch 2) ; `HOME_APERCU=<dossier> Home.app/Contents/MacOS/Salon` en écrit trois PNG sans rien lancer.
    - Steam sans Obelisk : `moteur/steam` (outil Rust `home-steam`) pilote `obelisk-bridge`, la porte d'entrée de l'app Obelisk : connexion
      par QR code, bibliothèque, téléchargement, préfixe, hôte Steam (`obelisk-steam-host`, la bibliothèque de Valve), lancement, Steam Cloud.
      `preparer-steam.command` installe rustup (cible Intel, dans `<Home>/moteur/.rustup`), clone Obelisk au commit de `moteur/steam/OBELISK-REF`

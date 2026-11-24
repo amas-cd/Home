@@ -1,5 +1,5 @@
 # Construit Home.app sur un Mac de GitHub, Home pour Windows sur un PC de GitHub, et publie une release avec les deux.
-# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home.zip (Mac) et Home-Setup.exe (Windows),
+# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home.dmg (Mac) et Home-Setup.exe (Windows),
 #   que Home télécharge pour se mettre à jour. Un tag v* poussé fait pareil.
 # - Un push sur main, ou Run workflow sans version : construction seule, l'app est gardée 7 jours dans les artefacts du run.
 name: Construire Home
@@ -54,19 +54,20 @@ jobs:
         if: always()
         run: '[ -f app/compilation.log ] && grep -E "error:|warning: unre" app/compilation.log | head -100 || true'
 
-      - name: Archive
+      - name: Image disque (.dmg)
         run: |
-          cd dist
-          ditto -c -k --keepParent Home.app Home.zip
-          shasum -a 256 Home.zip | tee Home.zip.sha256
+          # Home.app et un raccourci vers Applications : on ouvre le .dmg et on glisse l'app dedans
+          mkdir -p dist/dmg && cp -R dist/Home.app dist/dmg/Home.app && ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "Home" -srcfolder dist/dmg -fs HFS+ -format UDZO -ov dist/Home.dmg
+          cd dist && shasum -a 256 Home.dmg | tee Home.dmg.sha256
 
       - name: Garder l'app (artefact)
         uses: actions/upload-artifact@v4
         with:
           name: Home-${{ steps.version.outputs.version }}
           path: |
-            dist/Home.zip
-            dist/Home.zip.sha256
+            dist/Home.dmg
+            dist/Home.dmg.sha256
           retention-days: 7
 
   # Home pour Windows (dossier windows/, C# / Avalonia) : même numéro de version que l'app Mac. Autonome : .NET est dans le zip.
@@ -125,7 +126,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.construire.outputs.version }}
         run: |
-          gh release create "v${VERSION}" dist/Home.zip dist/Home.zip.sha256 dist/Home-Setup.exe dist/Home-Setup.exe.sha256 \
+          gh release create "v${VERSION}" dist/Home.dmg dist/Home.dmg.sha256 dist/Home-Setup.exe dist/Home-Setup.exe.sha256 \
             --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "Home ${VERSION}" --generate-notes
 
       # Ce dépôt est privé : Home pour Windows lit ses mises à jour dans un dépôt public qui ne reçoit que le setup.
