@@ -1036,7 +1036,7 @@ final class Library: ObservableObject {
         if running == nil, !showOptions, picker == nil, current == nil, selected >= visible.count { openAddMenu(); return }   // la case +
         guard running == nil, !showOptions, picker == nil, let g = current else { return }
         if g.pc, let b = Compat.bloque(g) { openBloque(g.name, b); return }   // un jeu que son éditeur refuse sur Mac et Linux : pas lancé, la raison affichée
-        running = g; startedAt = Date(); Sounds.shared.play("lancer"); overlay = true; lastInput = Date(); applySavedVolume(g)
+        running = g; startedAt = Date(); Sounds.shared.play("valider"); overlay = true; lastInput = Date(); applySavedVolume(g)
         if config.capture ?? true {
             if CGPreflightScreenCaptureAccess() { Recorder.shared.start() }
             else if !captureWarned { captureWarned = true; toast = "Capture des 15 s inactive : macOS ne reconnaît pas l'autorisation Enregistrement d'écran de cette version de Home (voir X → Réglages → Capture en jeu)" }
