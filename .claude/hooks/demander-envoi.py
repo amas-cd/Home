@@ -27,6 +27,14 @@ def prochaine_version():
         except ValueError:
             return (-1,)
     tags = [t for t in tags if cle(t) != (-1,)]
+    if not tags:   # clone superficiel (onglet Code dans le cloud) : les tags ne sont pas là, on demande la dernière release à GitHub
+        try:
+            r = subprocess.run(["gh", "api", "repos/amas-cd/home/releases", "--jq", ".[0].tag_name"], capture_output=True, text=True, timeout=15)
+            t = r.stdout.strip() if r.returncode == 0 else ""
+            if t.startswith("v") and cle(t) != (-1,):
+                tags = [t]
+        except Exception:
+            pass
     if not tags:
         return "0.1.0"
     a = list(max(tags, key=cle)[1:].split("."))
@@ -48,7 +56,10 @@ def main():
             return 0
         statut = git("status", "--porcelain") or ""
         diff = git("diff", "HEAD") or ""
-        en_avance = (git("rev-list", "--count", "@{u}..HEAD") or "0").strip()
+        # commits pas encore sur GitHub : par rapport à la branche suivie, sinon (branche de session jamais poussée) ceux
+        # qu'aucune branche distante connue ne contient
+        distantes = (git("for-each-ref", "--count=1", "refs/remotes") or "").strip()   # aucune branche distante connue : on ne peut pas savoir
+        en_avance = (git("rev-list", "--count", "@{u}..HEAD") or (distantes and git("rev-list", "--count", "HEAD", "--not", "--remotes")) or "0").strip()
         if not statut.strip() and en_avance in ("", "0"):
             return 0   # rien à envoyer
         tete = (git("rev-parse", "HEAD") or "").strip()

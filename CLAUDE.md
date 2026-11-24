@@ -131,15 +131,34 @@ Home les lance dans le Terminal, sans le PATH du Terminal (ajoute Homebrew au PA
   - La liste des joueurs vient du journal du serveur, lu par SSH toutes les 5 s (`journalctl -u totk`) avec `serveurs/totk-cle.pem`.
 - **Super Mario Odyssey Online** (CraftyBoss / Sanae6, pas Kirbymimi) : serveur local `smoo-server.sh`, port 1027, via Tailscale.
 
+## Où tu tournes : deux cas
+
+Anas t'utilise surtout depuis l'**onglet Code** de l'app Claude. Regarde d'abord où tu es (`uname -s`) :
+
+- **Dans le cloud** (Linux, dépôt cloné depuis GitHub ; c'est le cas par défaut de l'onglet Code) :
+  - pas de macOS, donc pas de `swiftc` ni de `/Applications/Home` : tu ne peux ni compiler Home toi-même, ni l'installer
+    sur son Mac. **La compilation est vérifiée par GitHub Actions**, après un push ;
+  - pousser un tag est refusé (erreur 403) : publie les releases avec `gh workflow run` (voir « Envoyer une mise à jour ») ;
+  - `gh` marche avec l'API REST (`gh api repos/amas-cd/home/...`, `gh run list`, `gh run watch`, `gh workflow run`), mais pas
+    avec GraphQL : `gh release list` et `gh pr ...` échouent. Utilise `gh api repos/amas-cd/home/releases` ;
+  - si la session est reliée à son Mac (outils `mcp__remote-devices__*`), tu peux recopier des fichiers ou lancer
+    `scripts/installer-local.sh` là-bas, mais seulement s'il le demande.
+- **Sur son Mac** (Darwin, l'onglet Code en local ou `claude` dans le Terminal, dans son clone du dépôt) : tu peux compiler,
+  installer et pousser des tags.
+
 ## Compiler et tester
 
-- **Vérifier que ça compile, sans rien installer** (à faire après chaque changement de `app/`) :
+- **Vérifier que ça compile, sans rien installer** (sur le Mac, après chaque changement de `app/`) :
   ```bash
   HOME_BUILD_ONLY="$TMPDIR/home-test" bash app/salon-construire.command < /dev/null
   ```
   Ça doit finir par « Home.app construit ». Sinon, lis les erreurs dans `app/compilation.log`.
+  Dans le cloud, relis soigneusement ton Swift (types, optionnels, accolades), puis fie-toi au workflow après le push. S'il
+  échoue, lis l'erreur (`gh run view <id> --log-failed`), corrige et repousse avant toute release.
 - **Installer sur le Mac d'Anas** pour qu'il teste (demande-lui avant : Home se ferme et se relance) :
-  `bash scripts/installer-local.sh`. Ajoute `--sans-compiler` si seuls des scripts ont changé.
+  `bash scripts/installer-local.sh`. Ajoute `--sans-compiler` si seuls des scripts ont changé. Depuis le cloud, donne-lui plutôt
+  la commande à coller dans son Terminal : `cd ~/Home && git pull && bash scripts/installer-local.sh`. Ou, s'il ne veut pas de
+  clone, il installe la release : `Home.zip` de la page Releases.
 - **Compatibilité** : la cible est macOS 14 ; GitHub compile avec Xcode 26 / Swift 6.3. Le Mac d'Anas a un SDK plus récent :
   une API de macOS 27 compile chez lui mais casse la release. Vérifie le résultat du workflow après chaque push.
 - **Signature** : avec le certificat local « Salon Dev », macOS garde les autorisations de Home (Accessibilité, Enregistrement
@@ -151,7 +170,8 @@ Home les lance dans le Terminal, sans le PATH du Terminal (ajoute Homebrew au PA
 sans son accord explicite pour cette fois-ci.** Le hook Stop (`.claude/hooks/demander-envoi.py`) te le rappelle s'il reste des
 modifications pas envoyées.
 
-1. Vérifie que ça compile (commande ci-dessus) et relis `git status` / `git diff` (pas de secret, pas de fichier de jeu).
+1. Sur le Mac, vérifie que ça compile (commande ci-dessus). Partout, relis `git status` / `git diff` (pas de secret, pas de
+   fichier de jeu).
 2. Commit en français, sous le nom d'Anas :
    `git -c user.name=Anas -c user.email=assosbs9@gmail.com commit`
    Le titre dit ce qui change pour lui ; le corps dit pourquoi.
@@ -160,14 +180,22 @@ modifications pas envoyées.
    - **Pousser sans release** ;
    - **Garder en local**.
 4. Selon la réponse :
-   - **Publier** : `git push origin main`, puis `git fetch --tags` et `git tag vX.Y.Z && git push origin vX.Y.Z`. Le tag déclenche la
-     release ; `gh workflow run "Construire Home" -f version=X.Y.Z` fait pareil. Suis le run (`gh run watch`, ou
-     https://github.com/amas-cd/Home/actions). Quand il est fini, donne le lien de la release : https://github.com/amas-cd/Home/releases.
+   - **Publier** :
+     1. `git push origin main` (si la session travaille sur une autre branche, pousse celle-ci, puis fusionne-la dans `main`
+        avec son accord, avant de publier).
+     2. Lance la release : `gh workflow run "Construire Home" --ref main -f version=X.Y.Z`. Ça marche partout. Sur le Mac,
+        pousser un tag (`git tag vX.Y.Z && git push origin vX.Y.Z`) fait pareil.
+     3. Suis le run : `gh run list --workflow "Construire Home" --limit 1`, puis `gh run watch <id> --exit-status`.
+     4. Quand il est fini, vérifie que la release existe (`gh api repos/amas-cd/home/releases --jq '.[0].tag_name'`), puis donne
+        le lien : https://github.com/amas-cd/Home/releases. Si le run échoue, il n'y a pas de release : lis l'erreur, corrige,
+        repousse, recommence.
    - **Pousser** : `git push origin main` (le workflow vérifie la compilation).
    - **Garder** : rien.
-5. Si `app/` ou `moteur/` a changé et qu'il veut s'en servir tout de suite sur son Mac, propose `bash scripts/installer-local.sh`.
+5. Si `app/` ou `moteur/` a changé et qu'il veut s'en servir tout de suite sur son Mac, propose `bash scripts/installer-local.sh`
+   (sur le Mac), ou donne-lui la commande à coller (depuis le cloud).
 
-Numéro de version `X.Y.Z` (dernière release : `git tag --list 'v*'` après `git fetch --tags`) :
+Numéro de version `X.Y.Z` (dernière release : `gh api repos/amas-cd/home/releases --jq '.[0].tag_name'`, ou
+`git tag --list 'v*'` après `git fetch --tags`) :
 - **Z + 1** : corrections ;
 - **Y + 1** : nouvelle fonction ;
 - **X + 1** : gros changement (Home autonome = 1.0.0).
