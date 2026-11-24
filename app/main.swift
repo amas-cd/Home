@@ -1035,6 +1035,8 @@ final class Library: ObservableObject {
     func launch() {
         if running == nil, !showOptions, picker == nil, current == nil, selected >= visible.count { openAddMenu(); return }   // la case +
         guard running == nil, !showOptions, picker == nil, let g = current else { return }
+        if enFond(g) { Sounds.shared.play("valider"); reprendre(); return }   // il tourne encore derrière : on y retourne
+        if let f = fond, f.jeu.id != g.id, f.app?.isTerminated == false || f.direct?.isRunning == true { toast = "\(f.jeu.name) est encore ouvert : ferme-le d'abord"; Sounds.shared.play("retour"); return }   // jamais deux jeux à la fois
         if g.pc, let b = Compat.bloque(g) { openBloque(g.name, b); return }   // un jeu que son éditeur refuse sur Mac et Linux : pas lancé, la raison affichée
         running = g; startedAt = Date(); Sounds.shared.play("valider"); overlay = true; lastInput = Date(); applySavedVolume(g)
         if config.capture ?? true {
@@ -1436,14 +1438,51 @@ final class Library: ObservableObject {
         }
     }
     /// Le Salon redevient actif alors qu'un jeu tourne : on reprend la main sans attendre la fin du jeu
-    func backToSalon() { guard let g = running else { return }; gameEnded(g, comeBack: false) }
-    private func gameEnded(_ g: Game, comeBack: Bool) {
-        log("Fin de session \(g.name) (retour auto : \(comeBack))")
+    /// « Retour à Home » ne ferme pas le jeu : il reste ouvert derrière. Home garde de quoi le retrouver (son app, son processus), et dès
+    /// qu'il repasse devant — par sa tuile, par ⌘Tab, par le Dock — la session reprend, avec le menu rapide et le volume (reprendre()).
+    private var fond: (jeu: Game, app: NSRunningApplication?, direct: Process?)?
+    func backToSalon() {
+        guard let g = running else { return }
+        let app = watchedApp, d = direct
+        gameEnded(g, comeBack: false, garde: true)
+        if app?.isTerminated == false || d?.isRunning == true { fond = (g, app, d); log("\(g.name) : laissé ouvert derrière Home") }
+    }
+    /// Le jeu laissé derrière est-il celui-ci ? (encore en vie)
+    func enFond(_ g: Game) -> Bool { guard let f = fond, f.jeu.id == g.id else { return false }; return f.app?.isTerminated == false || f.direct?.isRunning == true }
+    /// L'app qui vient de passer devant est-elle le jeu laissé derrière ? Alors la session reprend.
+    func appActivee(_ a: NSRunningApplication) {
+        guard running == nil, let f = fond else { return }
+        let lui = f.app.map { $0.processIdentifier == a.processIdentifier || ($0.bundleIdentifier != nil && $0.bundleIdentifier == a.bundleIdentifier) } ?? false
+        let direct = f.direct?.isRunning == true && (a.bundleIdentifier ?? "").hasPrefix("com.zagrios.obelisk.game.")
+        if lui || direct { reprendre(app: a) }
+    }
+    func reprendre(app activee: NSRunningApplication? = nil) {
+        guard running == nil, let f = fond else { return }
+        fond = nil
+        guard f.app?.isTerminated == false || f.direct?.isRunning == true else { return }
+        let g = f.jeu, app = activee ?? f.app
+        running = g; startedAt = Date(); overlay = true; lastInput = Date(); watchedApp = app; direct = f.direct; applySavedVolume(g)
+        if config.capture ?? true, CGPreflightScreenCaptureAccess() { Recorder.shared.start() }
+        NotificationCenter.default.post(name: .salonHide, object: nil)
+        log("\(g.name) : session reprise (le jeu était resté ouvert)")
+        if activee == nil { app?.activate() }
+        // la fin du jeu : son app qui se ferme (un jeu lancé par un processus de Home a déjà son propre signal de fin)
+        watch?.invalidate()
+        if let app, f.direct == nil {
+            watch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                guard let self, self.running?.id == g.id else { self?.watch?.invalidate(); return }
+                if app.isTerminated { log("\(g.name) : processus terminé"); self.gameEnded(g, comeBack: true) }
+            }
+        }
+    }
+    private func gameEnded(_ g: Game, comeBack: Bool, garde: Bool = false) {
+        log("Fin de session \(g.name) (retour auto : \(comeBack)\(garde ? ", jeu gardé ouvert" : ""))")
+        if !garde, fond?.jeu.id == g.id { fond = nil }
         watch?.invalidate(); watch = nil
         var s = stats[g.id] ?? Stat(lastPlayed: nil, minutes: 0)
         s.lastPlayed = Date(); if let t = startedAt { s.minutes += Int(Date().timeIntervalSince(t) / 60) }
         stats[g.id] = s; saveStats(); closeQuick(); running = nil; startedAt = nil; overlay = false; watchedApp = nil; direct = nil; bgmApplied = []; Sounds.shared.play("ouvrir")
-        stopTotkServer()
+        if !garde { stopTotkServer() }   // le jeu gardé ouvert a encore besoin de son serveur
         Recorder.shared.stop()
         NotificationCenter.default.post(name: .salonShow, object: nil)
         if comeBack { NSApp.activate(ignoringOtherApps: true) }
@@ -2620,7 +2659,7 @@ struct Screen: View {
                         if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 560, maxHeight: 180, alignment: .leading).shadow(radius: 12) }
                         else { Text(g.name).font(.system(size: 72, weight: .thin)).tracking(-1.5).lineLimit(1).minimumScaleFactor(0.5).shadow(radius: 12) }
                         HStack(spacing: 16) {
-                            HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running == nil ? "Jouer" : "En cours…").font(.system(size: 20, weight: .semibold, design: .rounded)) }
+                            HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running != nil ? "En cours…" : lib.enFond(g) ? "Reprendre" : "Jouer").font(.system(size: 20, weight: .semibold, design: .rounded)) }
                                 .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white.opacity(lib.running == nil ? 1 : 0.5)))
                                 .shadow(color: .white.opacity(pulse ? 0.45 : 0.1), radius: pulse ? 22 : 8).scaleEffect(pulse ? 1.02 : 1.0)
                                 .onAppear { withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true } }
@@ -3099,7 +3138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         pad = Timer.scheduledTimer(withTimeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in self?.pollPad() }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
-            guard let self, let a = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, a.processIdentifier == ProcessInfo.processInfo.processIdentifier else { return }
+            guard let self, let a = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            // une autre app passe devant : si c'est le jeu laissé ouvert derrière Home, sa session reprend (menu rapide, volume)
+            guard a.processIdentifier == ProcessInfo.processInfo.processIdentifier else { self.lib.appActivee(a); return }
             // Pendant les 40 premières secondes d'un jeu, macOS peut nous réactiver un instant (écran de démarrage, anti-triche) : on l'ignore,
             // sinon la session était considérée finie et un 2e appui relançait le jeu (« une seule instance d'Easy Anti-Cheat »).
             if self.lib.running == nil { self.lib.load() }
