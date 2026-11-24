@@ -466,6 +466,8 @@ final class Library: ObservableObject {
 
     var visible: [Game] { let c = categories.indices.contains(categoryIndex) ? categories[categoryIndex] : Library.all; return c == Library.all ? games : games.filter { $0.category == c } }
     var current: Game? { let v = visible; return v.indices.contains(selected) ? v[selected] : nil }
+    /// Les jeux d'une catégorie (par son rang dans la barre du haut)
+    func jeux(categorie i: Int) -> [Game] { let c = categories.indices.contains(i) ? categories[i] : Library.all; return c == Library.all ? games : games.filter { $0.category == c } }
 
     func load() {
         let fm = FileManager.default
@@ -2026,6 +2028,30 @@ struct Tile: View {
         .animation(coule, value: selected)
     }
 }
+/// Une rangée de jeux : celle d'une catégorie. Seule la rangée en cours a un jeu visé et suit ce jeu en défilant.
+struct RangeeJeux: View {
+    @ObservedObject var lib: Library
+    let categorie: Int
+    var body: some View {
+        let jeux = lib.jeux(categorie: categorie), active = categorie == lib.categoryIndex
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .bottom, spacing: 22) {
+                    ForEach(Array(jeux.enumerated()), id: \.element.id) { i, game in
+                        Tile(image: lib.cover(game), selected: active && i == lib.selected, isIcon: lib.art[game.id]?.cover == nil)
+                            .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: active && i == lib.selected) } }
+                            .overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }
+                            .id(game.id).onTapGesture { guard active else { return }; if lib.selected == i { lib.launch() } else { lib.selected = i } }
+                    }
+                    AddTile(selected: active && lib.selected >= jeux.count).id("salon-plus")
+                        .onTapGesture { guard active else { return }; if lib.selected >= jeux.count { lib.openAddMenu() } else { lib.selected = jeux.count; Sounds.shared.play("deplacer") } }
+                }
+                .padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 90)   // la place de la tuile agrandie, qui dépasse vers le haut
+            }.scrollClipDisabled().scrollDisabled(!active)
+             .onChange(of: lib.selected) { _, _ in guard active else { return }; withAnimation(coule) { if jeux.indices.contains(lib.selected) { proxy.scrollTo(jeux[lib.selected].id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
+        }
+    }
+}
 struct Hint: View {
     let k: Key; let t: String
     init(k: Key, t: String) { self.k = k; self.t = t }
@@ -2235,8 +2261,8 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let st = menu.step, let n = menu.steps, n > 0 { HStack(spacing: 8) { ForEach(1...n, id: \.self) { k in Capsule().fill(.white.opacity(k == st ? 0.95 : 0.25)).frame(width: k == st ? 34 : 10, height: 10) } } }
             HStack(spacing: 12) {
-                Text(menu.title.uppercased()).font(.system(size: 19, weight: .heavy, design: .rounded)).tracking(2.5)
-                if let suite { Text("·").opacity(0.5); Text(suite.uppercased()).font(.system(size: 19, weight: .heavy, design: .rounded)).tracking(2.5).opacity(0.55).lineLimit(1).id(suite).transition(.opacity) }
+                Text(menu.title.uppercased()).font(.system(size: 21, weight: .black).width(.expanded)).tracking(1.5)
+                if let suite { Text("·").opacity(0.5); Text(suite.uppercased()).font(.system(size: 21, weight: .black).width(.expanded)).tracking(1.5).opacity(0.55).lineLimit(1).id(suite).transition(.opacity) }
             }
         }
     }
@@ -2249,7 +2275,7 @@ struct MenuView: View {
                     let sel = d == 0 && !it.info
                     let y: CGFloat = d == 0 ? 0 : CGFloat(d > 0 ? 1 : -1) * (74 + CGFloat(e - 1) * 50)
                     HStack(spacing: 16) {
-                        Text(nomEtat(it).0).font(.system(size: 50, weight: .heavy, design: .rounded)).lineLimit(1).fixedSize()
+                        Text(nomEtat(it).0).font(.system(size: 50, weight: .bold).width(.expanded)).tracking(-0.5).lineLimit(1).fixedSize()
                         if sel, let etat = nomEtat(it).1 { Text(etat).font(.system(size: 22, weight: .heavy, design: .rounded)).padding(.horizontal, 14).padding(.vertical, 6).background(Capsule().fill(.white.opacity(0.18))).transition(.opacity) }
                     }
                     .foregroundStyle(it.destructive ? MenuView.rouge : .white)
@@ -2366,8 +2392,20 @@ struct MenuView: View {
                     }
                     roue
                 }.padding(.leading, 60)
-                Text(String(format: "%02d / %02d", vise + 1, menu.items.count)).font(.system(size: 17, weight: .heavy, design: .rounded).monospacedDigit()).tracking(2).opacity(0.45)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.trailing, 96).padding(.top, 72)
+                HStack(spacing: 18) {
+                    Text(String(format: "%02d / %02d", vise + 1, menu.items.count)).font(.system(size: 17, weight: .black).width(.expanded).monospacedDigit()).opacity(0.45)
+                    Text(Date(), format: .dateTime.hour().minute()).font(.system(size: 24, weight: .semibold, design: .rounded).monospacedDigit())
+                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(.trailing, 96).padding(.top, 66)
+                // un trait fin sous le haut de l'écran, qui s'efface vers la droite
+                LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.06)], startPoint: .leading, endPoint: .trailing).frame(height: 1.5)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.horizontal, 96).padding(.top, 116)
+                // deux anneaux autour du symbole, comme une cible
+                ZStack {
+                    Circle().stroke(.white.opacity(0.10), lineWidth: 1.5).frame(width: 440, height: 440)
+                    Circle().stroke(.white.opacity(0.05), lineWidth: 1.5).frame(width: 580, height: 580)
+                    Circle().trim(from: 0, to: CGFloat(vise + 1) / CGFloat(max(1, menu.items.count))).stroke(.white.opacity(0.55), style: StrokeStyle(lineWidth: 3, lineCap: .round)).frame(width: 440, height: 440).rotationEffect(.degrees(-90))
+                        .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.3), value: index)
+                }.offset(y: -65).frame(width: 600).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing).padding(.trailing, 150).allowsHitTesting(false)
                 apercuChoix.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing).padding(.trailing, 150)
                 aides.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(.leading, 96).padding(.bottom, 44)
             }
@@ -2682,8 +2720,8 @@ struct PickerView: View {
                 LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0.25), .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 12) {
-                        Text(p.slot.rawValue.uppercased()).font(.system(size: 19, weight: .heavy, design: .rounded)).tracking(2.5)
-                        Text("·").opacity(0.5); Text(p.game.name.uppercased()).font(.system(size: 19, weight: .heavy, design: .rounded)).tracking(2.5).opacity(0.55).lineLimit(1)
+                        Text(p.slot.rawValue.uppercased()).font(.system(size: 21, weight: .black).width(.expanded)).tracking(1.5)
+                        Text("·").opacity(0.5); Text(p.game.name.uppercased()).font(.system(size: 21, weight: .black).width(.expanded)).tracking(1.5).opacity(0.55).lineLimit(1)
                         if lib.pickerLoading { ProgressView().controlSize(.small).tint(.white).padding(.leading, 6) }
                     }
                     Spacer(minLength: 0)
@@ -2829,25 +2867,19 @@ struct Screen: View {
                     }.padding(.horizontal, 84).padding(.bottom, 22).foregroundStyle(.white)
                      .id("info-plus").transition(.opacity)
                 }
-                // tous les jeux restent visibles ; la rangée défile en douceur pour suivre le jeu visé, qui grandit et se soulève
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .bottom, spacing: 22) {
-                            ForEach(Array(lib.visible.enumerated()), id: \.element.id) { i, game in
-                                Tile(image: lib.cover(game), selected: i == lib.selected, isIcon: lib.art[game.id]?.cover == nil)
-                                    .overlay { if let t = lib.tache, !t.fini, t.jeux.contains(game.id) { EnMiseAJour(fraction: t.fraction, grand: i == lib.selected) } }.overlay(alignment: .bottomTrailing) { if lib.loading.contains(game.id) { ProgressView().controlSize(.small).tint(.white).padding(10) } }.id(game.id).onTapGesture { if lib.selected == i { lib.launch() } else { lib.selected = i } }
-                            }
-                            AddTile(selected: lib.selected >= lib.visible.count).id("salon-plus")
-                                .onTapGesture { if lib.selected >= lib.visible.count { lib.openAddMenu() } else { lib.selected = lib.visible.count; Sounds.shared.play("deplacer") } }
+                // les catégories sont des rangées posées l'une sous l'autre : en changer fait monter ou descendre toute la pile, chaque jeu
+                // restant dans sa colonne ; la rangée d'après se devine en bas de l'écran
+                ZStack(alignment: .topLeading) {
+                    ForEach(Array(lib.categories.enumerated()), id: \.offset) { c, _ in
+                        let d = c - lib.categoryIndex
+                        if abs(d) <= 1 {
+                            RangeeJeux(lib: lib, categorie: c)
+                                .offset(y: CGFloat(d) * 236).opacity(d == 0 ? 1 : d == 1 ? 0.34 : 0)
+                                .allowsHitTesting(d == 0).transition(.opacity).zIndex(d == 0 ? 1 : 0)
                         }
-                        .padding(.horizontal, 84).padding(.bottom, 24).padding(.top, 90)   // la place de la tuile agrandie, qui dépasse vers le haut
-                        .id("categorie-\(lib.categoryIndex)")
-                        .transition(.asymmetric(insertion: .offset(y: 70 * CGFloat(lib.sensCategorie)).combined(with: .opacity), removal: .offset(y: -70 * CGFloat(lib.sensCategorie)).combined(with: .opacity)))
-                        .animation(.timingCurve(0.16, 0.9, 0.2, 1, duration: 0.32), value: lib.categoryIndex)
-                    }.scrollClipDisabled()
-                     .onChange(of: lib.selected) { _, _ in withAnimation(coule) { if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } } }
-                     .onChange(of: lib.categoryIndex) { _, _ in if let g = lib.current { proxy.scrollTo(g.id, anchor: .center) } else { proxy.scrollTo("salon-plus", anchor: .center) } }
+                    }
                 }
+                .frame(height: 294, alignment: .top).animation(coule, value: lib.categoryIndex)
                 .offset(y: appeared ? 0 : 36).opacity(appeared ? 1 : 0).animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.45), value: appeared)
                 .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { appeared = true } }
                 HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: lib.current == nil ? "Ajouter" : "Jouer"); if lib.current != nil { Pilule(k: lib.hints.options, t: "Options") }; Pilule(k: lib.hints.plus, t: "Menu"); Pilule(k: lib.hints.cat, t: "Catégorie"); Spacer() }
@@ -3316,7 +3348,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.lib.running == nil { self.lib.load() }
         }
     }
+    let demarrage = Date()
     func nav(_ k: String) {
+        // pendant la première seconde et demie, rien n'est pris en compte : un bouton tenu ou pressé au moment où Home (re)démarre
+        // lançait le premier jeu de la liste sans qu'on le veuille
+        if Date().timeIntervalSince(demarrage) < 1.5 { if lib.ouverture, Date().timeIntervalSince(demarrage) > 0.4 { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false } }; return }
         if lib.ouverture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false }; return }   // n'importe quelle touche ou bouton passe l'ouverture
         if lib.accueil != nil { lib.accueilNav(k); return }
         if let p = lib.picker {
