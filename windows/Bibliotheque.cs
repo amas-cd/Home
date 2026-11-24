@@ -44,6 +44,18 @@ public sealed class Bibliotheque
     public List<Jeu> JeuxDe(int categorie) => Jeux.Where(j => !Config.Masques.Contains(j.Id) && (categorie == 0 || j.Categorie == Categories.ElementAtOrDefault(categorie)))
         .OrderByDescending(j => Stats.TryGetValue(j.Id, out var s) ? s.DernierePartie ?? DateTime.MinValue : DateTime.MinValue).ThenBy(j => j.Nom, StringComparer.CurrentCultureIgnoreCase).ToList();
     public Jeu? Courant { get { var v = Visibles; return Selection < v.Count ? v[Selection] : null; } }
+    /// D'où vient un jeu, pour l'afficher à côté de son nom : la console d'origine d'un recomp, ou la boutique. L'icône est un logo
+    /// (« logo:switch », « logo:steam », « logo:epic » : les images de app/logos) ou un symbole.
+    public (string nom, string icone) ConsoleDe(Jeu j)
+    {
+        if (j.Origine == Origine.Steam) return ("Steam", "logo:steam");
+        if (j.Origine == Origine.Epic) return ("Epic Games", "logo:epic");
+        if (j.Origine == Origine.App) return ("App Windows", "pc");
+        var origine = RecompDe(j) is { } r ? Catalogue.Par(r.Id)?.Origine : null;
+        if (string.IsNullOrEmpty(origine)) return ("Recomp", "gamecontroller");
+        var nom = Catalogue.NomOrigine(origine); var cle = (origine + " " + nom).ToLowerInvariant();
+        return (nom, cle.Contains("switch") ? "logo:switch" : "gamecontroller");
+    }
     public RecompInstalle? RecompDe(Jeu j) => j.Origine == Origine.Recomp ? Recomps.FirstOrDefault(r => "recomp:" + r.Id == j.Id) : null;
 
     public void Recharger(string? selectionner = null)

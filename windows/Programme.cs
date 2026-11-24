@@ -64,7 +64,7 @@ sealed class Fenetre : Window
             if (Icones.Inconnues().ToList() is { Count: > 0 } inconnues) Journal.Ecrire("icônes inconnues : " + string.Join(", ", inconnues));
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
-            if (Bibliotheque.Demo) await lib.ChargerDemo(); else _ = Catalogue.Charger();   // le catalogue sert aussi à proposer les mises à jour des recomps
+            if (Bibliotheque.Demo) await lib.ChargerDemo(); else _ = Catalogue.Charger().ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(lib.Signaler));   // le catalogue sert aussi à proposer les mises à jour des recomps
             Scenario();
             // Une fois par démarrage, sans rien installer : le menu propose la mise à jour, c'est le joueur qui la lance
             if (OperatingSystem.IsWindows() && await MiseAJour.Verifier()) lib.Dire($"Home {MiseAJour.Version} est disponible : Menu → Mettre à jour Home");

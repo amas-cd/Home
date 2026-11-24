@@ -105,6 +105,22 @@ static class U
         var forme = new Avalonia.Controls.Shapes.Path { Data = trace, Fill = couleur ?? Brushes.White, Width = 100, Height = 100, Stretch = Stretch.None, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative), RenderTransform = new ScaleTransform(taille / 100, taille / 100) };
         return new Canvas { Width = taille, Height = taille, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Children = { forme } };
     }
+    static readonly Dictionary<string, Bitmap?> logos = new();
+    /// La pastille d'une console ou d'une boutique (`Symbole` sur Mac) : son logo sur un disque à sa couleur (le rouge de la Switch, le
+    /// bleu nuit de Steam), ou un symbole sur un disque sombre
+    public static Control Console(string icone, double taille)
+    {
+        var disque = new Border { Width = taille, Height = taille, CornerRadius = new CornerRadius(taille / 2), ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(icone == "logo:switch" ? Color.FromRgb(230, 0, 18) : icone == "logo:steam" ? Color.FromRgb(8, 20, 51) : Color.FromRgb(31, 31, 31)) };
+        if (!icone.StartsWith("logo:")) { disque.Child = Icone(icone, taille * 0.58); return disque; }
+        if (!logos.TryGetValue(icone, out var logo))
+        {
+            var f = Path.Combine(AppContext.BaseDirectory, "logos", icone[5..] + ".png");
+            try { logos[icone] = logo = File.Exists(f) ? new Bitmap(f) : null; } catch { logos[icone] = logo = null; }
+        }
+        var image = new Image { Source = logo, Stretch = Stretch.Uniform, Margin = new Thickness(taille * (icone == "logo:steam" ? 0 : 0.2)) }; RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.HighQuality);
+        disque.Child = logo != null ? image : Icone("gamecontroller", taille * 0.58); return disque;
+    }
     public static LinearGradientBrush Degrade(Color a, Color b, bool diagonale = true) => new()
     {
         StartPoint = new RelativePoint(diagonale ? 0 : 0.5, 0, RelativeUnit.Relative), EndPoint = new RelativePoint(diagonale ? 1 : 0.5, 1, RelativeUnit.Relative),
@@ -614,7 +630,8 @@ public sealed class Ecran : Panel
     /// Le jeu visé : sa catégorie en petites capitales, son logo (ou son nom dans l'écriture de Home), « Jouer » et les options
     void Infos(Jeu? j, Art? art)
     {
-        var cle = (j?.Id ?? "+") + (art?.Logo != null) + lib.Aides.Ok;
+        var console = j != null ? lib.ConsoleDe(j) : default;
+        var cle = (j?.Id ?? "+") + (art?.Logo != null) + lib.Aides.Ok + console.nom;
         if (cle == cleInfos) return;
         cleInfos = cle; foreach (var b in boucles) b.Cancel(); boucles.Clear();
         Control Jouer(string texte, Action action)
@@ -640,7 +657,8 @@ public sealed class Ecran : Panel
         }
         else
         {
-            bloc.Children.Add(new TextBlock { Text = j.Categorie.ToUpper(), FontSize = 15, FontWeight = FontWeight.ExtraBold, FontFamily = U.Police, LetterSpacing = 2, Foreground = Brushes.White, Opacity = 0.8 });
+            // d'où vient le jeu : la pastille de sa console (ou de sa boutique), puis son nom en petites capitales
+            bloc.Children.Add(U.Ligne(10, U.Console(console.icone, 30), new TextBlock { Text = console.nom.ToUpper(), FontSize = 15, FontWeight = FontWeight.ExtraBold, FontFamily = U.Police, LetterSpacing = 2, Foreground = Brushes.White, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center }));
             if (art?.Logo != null) bloc.Children.Add(new Image { Source = art.Logo, MaxWidth = 560, MaxHeight = 180, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left });
             else bloc.Children.Add(U.Titre(j.Nom, 52, 1, place: 1500));
             var options = new Border { Width = 54, Height = 54, CornerRadius = new CornerRadius(27), Background = U.Noir(0.4), BorderBrush = U.Blanc(0.24), BorderThickness = new Thickness(1.5), Child = U.Icone("ellipsis", 22), VerticalAlignment = VerticalAlignment.Center };
