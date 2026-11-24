@@ -588,7 +588,7 @@ final class Library: ObservableObject {
         let cache = salonRoot.appendingPathComponent("cache").appendingPathComponent(safeName(g.name))
         var dirs = [media, cache]
         if let t = g.titleID { dirs += [nxlib.appendingPathComponent("artwork-picks").appendingPathComponent(safeName(t)), nxlib.appendingPathComponent("artwork").appendingPathComponent(safeName(t))] }
-        func find(_ names: [String]) -> NSImage? { for d in dirs { if let f = firstFile(d, names), let i = NSImage(contentsOf: f) { return i } }; return nil }
+        func find(_ names: [String]) -> NSImage? { for d in dirs { if let f = firstFile(d, names), let i = NSImage(contentsOf: f) { Library.decoder(i); return i } }; return nil }
         var a = Art()
         a.cover = find(["cover.jpg", "cover.png", "jaquette.jpg", "jaquette.png", "square.png", "square.jpg", "boxart.jpg", "boxart.png"])
         a.background = find(["fond.jpg", "fond.png", "background.jpg", "background.png", "hero.jpg", "hero.png"])
@@ -643,6 +643,7 @@ final class Library: ObservableObject {
                 }
             }
             if got.background == nil, a.background == nil, let t = g.storeID, let d = try? await URLSession.shared.data(from: URL(string: "https://api.nlib.cc/nx/\(t)/banner")!).0, let i = NSImage(data: d) { try? d.write(to: cache.appendingPathComponent("hero.jpg")); got.background = i }   // dernier recours : bannière nlib (1280 px)
+            for i in [got.cover, got.background, got.logo] { Library.decoder(i) }   // décodées ici, hors du fil principal
             await MainActor.run {
                 var cur = self.art[g.id] ?? Art()
                 if cur.cover == nil { cur.cover = got.cover }; if cur.background == nil { cur.background = got.background }; if cur.logo == nil { cur.logo = got.logo }
@@ -650,6 +651,8 @@ final class Library: ObservableObject {
             }
         }
     }
+    /// Force le décodage d'une image (macOS ne le fait sinon qu'au premier affichage, d'où un temps mort en arrivant sur un jeu)
+    nonisolated static func decoder(_ i: NSImage?) { for r in i?.representations ?? [] { if let b = r as? NSBitmapImageRep { _ = b.bitmapData } } }
     func cover(_ g: Game) -> NSImage { art[g.id]?.cover ?? vignette(g) }
     /// La tuile d'un jeu qui n'a pas (encore) de jaquette : ses initiales sur un dégradé de Home, jamais l'icône de l'app Mac ni un dossier
     private var vignettes: [String: NSImage] = [:]
@@ -2133,7 +2136,8 @@ struct Hint: View {
     var body: some View {
         HStack(spacing: 8) {
             if let sym = k.symbol { Image(systemName: sym).font(.system(size: 22, weight: .medium)) }
-            else { Text(k.text).font(.system(size: 12, weight: .bold)).padding(.horizontal, 7).frame(minWidth: 24, minHeight: 24).overlay(Capsule().stroke(.white.opacity(0.7), lineWidth: 1.5)) }
+            else { HStack(spacing: 4) { ForEach(k.text.split(separator: " ").map(String.init), id: \.self) { m in   // une touche par mot : « L1 » « R1 »
+                Text(m).font(.system(size: 12, weight: .heavy)).padding(.horizontal, 6).frame(minWidth: 24, minHeight: 22).background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(.white.opacity(0.9))).foregroundStyle(.black) } } }
             Text(t)
         }.font(.system(size: 16, weight: .medium, design: .rounded)).opacity(0.8)
     }
@@ -3131,10 +3135,23 @@ struct Screen: View {
                     }.padding(.horizontal, 18).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.top, 90); Spacer() }
                 .opacity(barreVolume ? 1 : 0).offset(y: barreVolume ? 0 : -16).animation(.easeInOut(duration: 0.5), value: barreVolume).allowsHitTesting(false)
                 .zIndex(30)   // par-dessus tous les menus : sans rang, certains la recouvraient
-            if let t = lib.toast {
-                VStack { Spacer(); Text(t).font(.system(size: 18, weight: .medium, design: .rounded)).padding(.horizontal, 20).padding(.vertical, 12).background(.black.opacity(0.6), in: Capsule()).overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1)).foregroundStyle(.white).padding(.bottom, 130) }
-                    .transition(.opacity).onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if lib.toast == t { lib.toast = nil } } }.zIndex(31)
+            // les messages (« déjà à jour », « clé enregistrée »…) : une pastille en bas à droite, à la marge de l'écran et sur la ligne des aides,
+            // au-dessus de la pastille d'avancement quand il y en a une ; elle monte en fondu et repart en fondu
+            ZStack(alignment: .bottomTrailing) {
+                if let t = lib.toast {
+                    HStack(spacing: 12) {
+                        Circle().fill(.white).frame(width: 8, height: 8).shadow(color: .white.opacity(0.7), radius: 5)
+                        Text(t).font(.system(size: 16, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 22).frame(minHeight: 52).frame(maxWidth: 640, alignment: .leading).fixedSize(horizontal: true, vertical: false)
+                    .background(.ultraThinMaterial, in: Capsule()).background(Capsule().fill(Color.black.opacity(0.5)))
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.16), lineWidth: 1)).shadow(color: .black.opacity(0.4), radius: 22, y: 10).foregroundStyle(.white)
+                    .id(t).transition(.asymmetric(insertion: .offset(y: 14).combined(with: .opacity), removal: .opacity))
+                }
             }
+            .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.4), value: lib.toast)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, lib.tache != nil ? 112 : 38)
+            .animation(.easeInOut(duration: 0.3), value: lib.tache != nil).allowsHitTesting(false).zIndex(31)
         }
         // chaque réglage la montre (ou la garde) ; 2 s après le dernier, elle repart vers le haut en fondu, comme elle est venue
         .task(id: lib.volumeFlash) {
@@ -3479,6 +3496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var t3 = Tache(titre: "Mise à jour de Home", log: URL(fileURLWithPath: "/tmp/x.log")); t3.fini = true; t3.etape = "Terminé"
             rendre(ZStack { Color(white: 0.08); VStack(alignment: .trailing, spacing: 40) { TacheView(lib: lib, t: t1); TacheView(lib: lib, t: t2); TacheView(lib: lib, t: t3) } }, "tache.png")
             rendre(BienvenueView(lib: lib, apercu: true), "bienvenue.png")
+            rendre(ZStack { Color(white: 0.16); HStack(spacing: 12) { Pilule(k: Key(symbol: "xmark.circle", text: "X"), t: "Jouer"); Pilule(k: Key(text: "L1 R1"), t: "Catégorie"); Pilule(k: Key(text: "Échap"), t: "Fermer"); Pilule(k: Key(text: "⏎"), t: "Choisir") }.foregroundStyle(.white) }, "touches.png")
             // l'écran de démarrage réel (couches Core Animation), dans son état d'arrivée
             let oc = OuvertureCouches(frame: NSRect(x: 0, y: 0, width: 1920, height: 1080)); oc.layout()
             if let l = oc.layer, let ctx = CGContext(data: nil, width: 1920, height: 1080, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
