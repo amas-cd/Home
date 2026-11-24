@@ -3001,7 +3001,8 @@ struct Screen: View {
                 // restant dans sa colonne ; la rangée d'après se devine en bas de l'écran
                 ZStack(alignment: .topLeading) {
                     ForEach(Array(lib.categories.enumerated()), id: \.offset) { c, _ in
-                        let d = c - lib.categoryIndex
+                        // la pile fait le tour : après la dernière catégorie vient la première, qui monte d'en dessous comme les autres
+                        let n = lib.categories.count, r = ((c - lib.categoryIndex) % n + n) % n, d = r > n / 2 ? r - n : r
                         if abs(d) <= 1 {
                             RangeeJeux(lib: lib, categorie: c)
                                 .offset(y: CGFloat(d) * 236).opacity(d == 0 ? 1 : d == 1 ? 0.45 : 0).blur(radius: d == 0 ? 0 : 14)
