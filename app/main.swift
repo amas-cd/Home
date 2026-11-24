@@ -1787,42 +1787,52 @@ enum BGM {
 // Connexion à Epic Games dans une fenêtre de Home : la page de connexion d'Epic (la vraie, chargée depuis son site) s'affiche dans
 // une vue web ; une fois connecté, Epic renvoie une page qui contient le code de connexion, que Home lit tout seul — rien à copier.
 // Home ne lit ni l'identifiant ni le mot de passe : seule cette dernière page est regardée.
-/// La fenêtre de connexion à Steam : une fenêtre sombre de Home, avec de vrais champs de macOS marqués « nom de compte » et « mot de
-/// passe » — c'est dans ces champs-là que macOS propose lui-même ses mots de passe enregistrés (la clé qui apparaît dans le champ),
-/// comme sur un site. Ce qui est tapé n'est écrit nulle part.
-final class FormulaireSteam: NSObject, NSWindowDelegate {
+/// La fenêtre de connexion à Steam : une petite page web dessinée par Home (pas une invite de macOS), avec le nom du compte et le mot
+/// de passe, ou le code Steam Guard. Ce qui est tapé revient par un message de la page, jamais par une adresse, et n'est écrit nulle part.
+final class FormulaireSteam: NSObject, WKScriptMessageHandler, NSWindowDelegate {
     static var enCours: FormulaireSteam?
-    private var fenetre: NSWindow?; private var fin: (([String]?) -> Void)?; private var champs: [NSTextField] = []
+    private var fenetre: NSWindow?; private var fin: (([String]?) -> Void)?; private weak var web: WKWebView?
     /// code == nil : nom du compte et mot de passe (fin reçoit [nom, mot de passe]) ; sinon le texte qui demande le code (fin reçoit [code])
     static func ouvrir(code: String? = nil, _ fin: @escaping ([String]?) -> Void) {
         enCours?.terminer(nil)
         let c = FormulaireSteam(); c.fin = fin; enCours = c
-        let l: CGFloat = 440, h: CGFloat = code == nil ? 470 : 400
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: l, height: h), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
-        w.title = "Connexion à Steam"; w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden; w.appearance = NSAppearance(named: .darkAqua); w.isMovableByWindowBackground = true
-        w.backgroundColor = NSColor(red: 0.05, green: 0.08, blue: 0.16, alpha: 1)
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: l, height: h)); var y = h - 150
-        if let i = Symbole.logo("steam") { let iv = NSImageView(frame: NSRect(x: (l - 84) / 2, y: h - 130, width: 84, height: 84)); iv.image = i; iv.imageScaling = .scaleProportionallyUpOrDown; iv.wantsLayer = true; iv.layer?.cornerRadius = 42; iv.layer?.masksToBounds = true; v.addSubview(iv) }
-        let titre = NSTextField(labelWithString: "STEAM"); titre.font = NSFont.systemFont(ofSize: 22, weight: .black); titre.alignment = .center; titre.frame = NSRect(x: 0, y: y - 34, width: l, height: 30); v.addSubview(titre); y -= 54
-        if let code { let t = NSTextField(wrappingLabelWithString: code); t.alignment = .center; t.textColor = .secondaryLabelColor; t.font = .systemFont(ofSize: 14); t.frame = NSRect(x: 50, y: y - 44, width: l - 100, height: 44); v.addSubview(t); y -= 56 }
-        func champ(_ f: NSTextField, _ invite: String, _ type: NSTextContentType) { f.placeholderString = invite; f.contentType = type; f.font = .systemFont(ofSize: 16); f.controlSize = .large; f.bezelStyle = .roundedBezel; f.frame = NSRect(x: 50, y: y - 34, width: l - 100, height: 34); v.addSubview(f); c.champs.append(f); y -= 48 }
-        if code == nil { champ(NSTextField(), "Nom du compte", .username); champ(NSSecureTextField(), "Mot de passe", .password) }
-        else { let f = NSTextField(); f.alignment = .center; champ(f, "Code", .oneTimeCode) }
-        if c.champs.count == 2 { c.champs[0].nextKeyView = c.champs[1]; c.champs[1].nextKeyView = c.champs[0] }
-        let b = NSButton(title: code == nil ? "Se connecter" : "Valider", target: c, action: #selector(FormulaireSteam.valider)); b.bezelStyle = .rounded; b.controlSize = .large; b.keyEquivalent = "\r"
-        b.frame = NSRect(x: 50, y: y - 46, width: l - 100, height: 36); v.addSubview(b)
-        w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = v; w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating; w.center(); c.fenetre = w
-        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); w.makeFirstResponder(c.champs.first)
+        let conf = WKWebViewConfiguration(); conf.userContentController.add(c, name: "home")
+        let h: CGFloat = code == nil ? 520 : 440
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 460, height: h), configuration: conf); c.web = web
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: h), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        w.title = "Connexion à Steam"; w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden; w.appearance = NSAppearance(named: .darkAqua); w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.09, alpha: 1)
+        w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating; w.center(); c.fenetre = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); w.makeFirstResponder(web)
+        let logo = (Bundle.main.resourceURL?.appendingPathComponent("logos/steam.png")).flatMap { try? Data(contentsOf: $0) }.map { "<img src='data:image/png;base64,\($0.base64EncodedString())'>" } ?? ""
+        let texte = (code ?? "").replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+        let champs = code == nil
+            ? "<input id='a' name='username' autocomplete='username' placeholder='Nom du compte' autofocus><input id='b' name='password' type='password' autocomplete='current-password' placeholder='Mot de passe'>"
+            : "<p>\(texte)</p><input id='a' name='code' autocomplete='one-time-code' placeholder='Code' autofocus style='text-align:center;letter-spacing:6px;text-transform:uppercase'>"
+        web.loadHTMLString("""
+        <html><head><meta charset='utf-8'><style>
+        *{box-sizing:border-box;font-family:-apple-system,system-ui;-webkit-user-select:none}
+        body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;padding:0 54px;
+          background:radial-gradient(circle at 80% 0%,#1b4f9c 0%,transparent 55%),radial-gradient(circle at 0% 100%,#3a1d6e 0%,transparent 50%),#0a0d17}
+        img{width:84px;height:84px;border-radius:50%;margin-bottom:6px}
+        h1{margin:0 0 12px;font-size:22px;font-weight:900;letter-spacing:2px;font-stretch:expanded;text-transform:uppercase}
+        p{margin:0 0 4px;text-align:center;opacity:.7;font-size:14px;line-height:1.4}
+        input{width:100%;height:50px;border-radius:25px;border:1.5px solid rgba(255,255,255,.18);background:rgba(0,0,0,.45);color:#fff;font-size:16px;padding:0 22px;outline:none;-webkit-user-select:text}
+        input:focus{border-color:#fff}
+        button{width:100%;height:50px;border-radius:25px;border:0;background:#fff;color:#000;font-size:16px;font-weight:700;margin-top:8px}
+        button:active{opacity:.8}
+        a{font-size:13px;opacity:.65;cursor:default;text-decoration:underline}
+        </style></head><body><form onsubmit="event.preventDefault();var v=[document.getElementById('a').value];var b=document.getElementById('b');if(b)v.push(b.value);if(v.every(function(x){return x.length>0}))webkit.messageHandlers.home.postMessage(['ok'].concat(v))" style='display:contents'>
+        \(logo)<h1>Steam</h1>\(champs)<button type='submit'>\(code == nil ? "Se connecter" : "Valider")</button></form></body></html>
+        """, baseURL: nil)
     }
-    @objc func valider() {
-        let v = champs.map { $0.stringValue }
-        guard v.allSatisfy({ !$0.isEmpty }) else { NSSound.beep(); return }
-        terminer(v.count == 1 ? [v[0].trimmingCharacters(in: .whitespacesAndNewlines)] : v)
+    func userContentController(_ u: WKUserContentController, didReceive m: WKScriptMessage) {
+        guard let t = m.body as? [String], let quoi = t.first else { return }
+        if quoi == "ok" { terminer(Array(t.dropFirst())) }
     }
     func windowWillClose(_ n: Notification) { terminer(nil) }
     private func terminer(_ v: [String]?) {
         guard let f = fin else { return }; fin = nil
-        champs.forEach { $0.stringValue = "" }; champs = []
+        web?.configuration.userContentController.removeScriptMessageHandler(forName: "home")
         fenetre?.delegate = nil; fenetre?.close(); fenetre = nil; FormulaireSteam.enCours = nil
         f(v)
     }
@@ -4422,7 +4432,7 @@ extension Library {
     /// là, et le script qui installe le reste (preparer-moteurs.command). L'état est lu par le même script (--etat), hors du fil principal.
     func openPreparation(bienvenue: Bool = false, back: (() -> Void)? = nil) {
         let titre = bienvenue ? "Bienvenue dans Home" : "Préparer ce Mac"
-        menu = SalonMenu(title: titre, subtitle: "Vérification des outils…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "wrench.and.screwdriver.fill", back: back)
+        menu = SalonMenu(title: titre, items: [SalonMenuItem(label: "Vérification…", icon: "hourglass", info: true, action: {})], back: back ?? { self.menu = self.plusMenu() }, roue: true)
         DispatchQueue.global().async {
             setenv("HOME_MOTEURS", self.moteursVoulus, 1)   // l'état de ce que le mode d'utilisation demande
             let brut = ObeliskDirect.run("/bin/bash", [Atelier.outils.appendingPathComponent("preparer-moteurs.command").path, "--etat"], timeout: 60)
@@ -4430,27 +4440,29 @@ extension Library {
             for l in brut.split(separator: "\n") { let p = l.split(separator: "=", maxSplits: 1).map(String.init); if p.count == 2 { e[p[0]] = p[1] } }
             DispatchQueue.main.async {
                 guard self.menu?.title == titre else { return }   // le menu a été quitté entre-temps
-                func ligne(_ nom: String, _ cle: String, _ icone: String, manque: String) -> SalonMenuItem {
-                    let v = e[cle] ?? "manque"; let ok = v == "ok"
-                    return SalonMenuItem(label: nom, detail: ok ? "Prêt" : v == "outils" ? "Outils en ligne de commande seulement — Xcode entier nécessaire pour nxnative" : v.hasPrefix("manque:") ? "Manque :" + v.dropFirst(7) : manque, icon: ok ? "checkmark.circle.fill" : icone, tint: ok ? .green : .orange, info: true, action: {})
+                // une roue où tout se parcourt : d'abord l'action, puis chaque outil avec ce à quoi il sert et s'il est là
+                let outils: [(String, String, String, String)] = [   // clé, nom, à quoi ça sert, comment il arrive s'il manque
+                    ("xcode", "Xcode", "L'outil d'Apple qui fabrique les apps", "À installer depuis l'App Store"),
+                    ("metal", "Metal", "Prépare les graphismes des jeux", "Téléchargé par Home"),
+                    ("brew", "Homebrew", "Installe les autres outils", "À installer depuis brew.sh"),
+                    ("formules", "Outils Homebrew", "Petits programmes dont les moteurs ont besoin", "Installés par Home"),
+                    ("dotnet", ".NET", "Sert à lire les fichiers des jeux", "Installé par Home"),
+                    ("python", "Python", "Fait tourner les scripts de nxnative", "Installé par Home"),
+                    ("nxnative", "nxnative", "Le moteur des jeux Switch", "Téléchargé par Home"),
+                    ("mng", "MacNativeGames", "Le moteur des Zelda", "Téléchargé par Home"),
+                ].filter { e[$0.0] != "ignore" }   // ce que le mode d'utilisation ne demande pas n'est pas montré
+                let manquants = outils.filter { e[$0.0] != "ok" }
+                let pret = manquants.isEmpty
+                var items = [SalonMenuItem(label: pret ? "Tout est prêt" : "Tout installer", detail: pret ? "Ce Mac peut construire les jeux Switch" : "Il manque : " + manquants.map { $0.1 }.joined(separator: ", ") + " (10 à 20 min)", icon: pret ? "checkmark.seal.fill" : "arrow.down.circle.fill", tint: .green, action: {
+                    self.menu = nil; if !pret { self.lancer("preparer-moteurs.command", titre: "Préparation de ce Mac") } })]
+                items += outils.map { o in
+                    let v = e[o.0] ?? "manque", ok = v == "ok"
+                    let quoi = ok ? "Prêt" : v == "outils" ? "Xcode entier nécessaire" : v.hasPrefix("manque:") ? "Manque :" + v.dropFirst(7) : o.3
+                    return SalonMenuItem(label: o.1, detail: o.2 + " — " + quoi, icon: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill", tint: ok ? .green : .orange, action: {
+                        if o.0 == "brew", !ok { NSWorkspace.shared.open(URL(string: "https://brew.sh")!) }
+                        else if o.0 == "xcode", !ok { NSWorkspace.shared.open(URL(string: "macappstore://apps.apple.com/app/xcode/id497799835")!) } })
                 }
-                var items = [
-                    ligne("Xcode", "xcode", "hammer.fill", manque: "À installer depuis l'App Store"),
-                    ligne("Compilateur Metal", "metal", "cube.fill", manque: "Téléchargé par « Préparer »"),
-                    ligne("Homebrew", "brew", "shippingbox.fill", manque: "À installer : brew.sh"),
-                    ligne("Outils Homebrew", "formules", "shippingbox.fill", manque: "Installés par « Préparer »"),
-                    ligne(".NET", "dotnet", "square.stack.3d.up.fill", manque: "brew install --cask dotnet-sdk"),
-                    ligne("Python de nxnative", "python", "chevron.left.forwardslash.chevron.right", manque: "Installé par « Préparer »"),
-                    ligne("nxnative", "nxnative", "cpu", manque: "Téléchargé par « Préparer »"),
-                    ligne("MacNativeGames", "mng", "leaf.fill", manque: "Téléchargé par « Préparer »"),
-                ]
-                let cles = ["xcode", "metal", "brew", "formules", "dotnet", "python", "nxnative", "mng"]
-                items = zip(cles, items).filter { e[$0.0] != "ignore" }.map { $0.1 }   // ce que le mode d'utilisation ne demande pas n'est pas montré
-                let pret = cles.allSatisfy { e[$0] == "ok" || e[$0] == "ignore" }
-                if e["brew"] != "ok" { items.append(SalonMenuItem(label: "Ouvrir brew.sh", detail: "Dans le Terminal", icon: "safari.fill", section: " ", action: { NSWorkspace.shared.open(URL(string: "https://brew.sh")!) })) }
-                items.append(SalonMenuItem(label: pret ? "Tout est prêt" : "Préparer maintenant", detail: pret ? "Ajoute un jeu Switch avec la case +" : "Télécharge et installe ce qui manque (10 à 20 min)", icon: pret ? "checkmark.seal.fill" : "arrow.down.circle.fill", section: " ", tint: .green, action: {
-                    self.menu = nil; if !pret { self.lancer("preparer-moteurs.command", titre: "Préparation des moteurs") } }))
-                self.menu = SalonMenu(title: titre, subtitle: pret ? "Ce Mac peut construire les jeux Switch" : "Ce qu'il faut pour construire les jeux Switch à partir de tes dumps", items: items, hero: "wrench.and.screwdriver.fill", back: back)
+                self.menu = SalonMenu(title: titre, items: items, back: back ?? { self.menu = self.plusMenu() }, roue: true)
             }
         }
     }
