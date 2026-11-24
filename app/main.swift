@@ -1724,16 +1724,48 @@ enum BGM {
 // Connexion à Epic Games dans une fenêtre de Home : la page de connexion d'Epic (la vraie, chargée depuis son site) s'affiche dans
 // une vue web ; une fois connecté, Epic renvoie une page qui contient le code de connexion, que Home lit tout seul — rien à copier.
 // Home ne lit ni l'identifiant ni le mot de passe : seule cette dernière page est regardée.
+/// Le remplissage automatique de macOS, à la demande : macOS ajoute au menu Édition un sous-menu « Remplissage automatique » avec
+/// « Mots de passe… » (Touch ID, puis choix du compte), qui remplit le champ où se trouve le curseur — y compris dans une page web
+/// affichée par Home. On retrouve cette commande dans le menu et on la déclenche ; si macOS ne l'a pas mise, on le dit.
+final class RemplirSteam: NSObject { static let shared = RemplirSteam(); @objc func remplir() { if !MotsDePasse.remplir() { NSSound.beep() } } }
+enum MotsDePasse {
+    @discardableResult static func remplir() -> Bool {
+        guard let edition = NSApp.mainMenu?.items.compactMap({ $0.submenu }).first(where: { m in m.items.contains { $0.action == #selector(NSText.paste(_:)) } }) else { return false }
+        edition.update()
+        for it in edition.items {
+            guard let sous = it.submenu else { continue }
+            sous.update()
+            for x in sous.items {
+                let t = x.title.lowercased()
+                if let a = x.action, t.contains("passe") || t.contains("password") { log("Remplissage automatique : « \(it.title) → \(x.title) »"); return NSApp.sendAction(a, to: x.target, from: x) }
+            }
+        }
+        log("Remplissage automatique : pas de commande « Mots de passe » dans le menu Édition (\(edition.items.map { $0.title }.filter { !$0.isEmpty }.joined(separator: ", ")))")
+        return false
+    }
+    /// Un bouton « Mes mots de passe » pour une fenêtre de connexion
+    static func bouton(cible: AnyObject, action: Selector) -> NSButton {
+        let b = NSButton(title: "  Mes mots de passe", target: cible, action: action)
+        b.image = NSImage(systemSymbolName: "key.fill", accessibilityDescription: nil); b.imagePosition = .imageLeading; b.bezelStyle = .rounded; b.controlSize = .large
+        return b
+    }
+}
 final class ConnexionEpic: NSObject, WKNavigationDelegate, NSWindowDelegate {
     static var enCours: ConnexionEpic?
-    private var fenetre: NSWindow?; private var fin: ((String?) -> Void)?
+    private var fenetre: NSWindow?; private var fin: ((String?) -> Void)?; private weak var web: WKWebView?
+    @objc func remplir() { fenetre?.makeFirstResponder(web); if !MotsDePasse.remplir() { NSSound.beep() } }
     static func ouvrir(_ fin: @escaping (String?) -> Void) {
         enCours?.terminer(nil)
         let c = ConnexionEpic(); c.fin = fin; enCours = c
-        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 760)); web.navigationDelegate = c
+        let vue = NSView(frame: NSRect(x: 0, y: 0, width: 540, height: 820))
+        let web = WKWebView(frame: NSRect(x: 0, y: 60, width: 540, height: 760)); web.navigationDelegate = c; web.autoresizingMask = [.width, .height]; vue.addSubview(web)
         web.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 760), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        w.title = "Connexion à Epic Games"; w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c
+        // sous la page : le remplissage automatique de macOS, à portée de clic (clique d'abord dans le champ à remplir)
+        let cle = MotsDePasse.bouton(cible: c, action: #selector(ConnexionEpic.remplir)); cle.frame = NSRect(x: 16, y: 14, width: 210, height: 32); vue.addSubview(cle)
+        let aide = NSTextField(labelWithString: "Clique dans un champ, puis ici."); aide.frame = NSRect(x: 236, y: 20, width: 290, height: 18); aide.textColor = .secondaryLabelColor; aide.font = .systemFont(ofSize: 12); vue.addSubview(aide)
+        c.web = web
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 540, height: 820), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.title = "Connexion à Epic Games"; w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = vue; w.isReleasedWhenClosed = false; w.delegate = c
         w.level = .floating; w.center(); c.fenetre = w
         NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
         web.load(URLRequest(url: URL(string: "https://legendary.gl/epiclogin")!))
@@ -4356,13 +4388,9 @@ extension Library {
             }
         }
     }
-    /// Se connecter à Epic : dans une fenêtre de Home (rien à copier), ou dans ton navigateur (il a tes mots de passe enregistrés)
-    func connexionEpic(retour: @escaping () -> Void) {
-        menu = SalonMenu(title: "Connexion à Epic Games", subtitle: "Où veux-tu te connecter ?", items: [
-            SalonMenuItem(label: "Dans mon navigateur", detail: "Avec tes mots de passe enregistrés", icon: "safari.fill", action: { self.connexionEpicNavigateur(retour: retour) }),
-            SalonMenuItem(label: "Dans Home", detail: "Rien à copier", icon: "macwindow", action: { self.connexionEpicFenetre(retour: retour) }),
-        ], hero: "person.crop.circle.badge.plus", text: "Dans les deux cas, tu te connectes sur le site d'Epic : Home ne voit jamais ton mot de passe.", back: retour)
-    }
+    /// Se connecter à Epic : une fenêtre de Home affiche la page de connexion d'Epic ; le code est lu tout seul à la fin, et le bouton
+    /// « Mes mots de passe » y appelle le remplissage automatique de macOS
+    func connexionEpic(retour: @escaping () -> Void) { connexionEpicFenetre(retour: retour) }
     private func finirEpic(_ code: String, retour: @escaping () -> Void) {
         toast = "Connexion à Epic…"
         DispatchQueue.global().async {
@@ -4376,32 +4404,6 @@ extension Library {
             guard let code else { retour(); return }
             self.finirEpic(code, retour: retour)
         }
-    }
-    /// La page d'Epic s'ouvre dans le navigateur (qui remplit identifiant et mot de passe tout seul). Elle finit sur un texte qui contient
-    /// « authorizationCode » : dès qu'il est copié (⌘A, ⌘C), Home le repère dans le presse-papiers et termine. On peut aussi le coller ici.
-    func connexionEpicNavigateur(retour: @escaping () -> Void) {
-        menu = nil
-        let avant = NSPasteboard.general.changeCount
-        NSWorkspace.shared.open(URL(string: "https://legendary.gl/epiclogin")!)
-        let a = NSAlert(); a.messageText = "Connexion à Epic Games"
-        a.informativeText = "Connecte-toi dans la page qui vient de s'ouvrir. Elle affiche ensuite un texte avec « authorizationCode » : fais ⌘A puis ⌘C dans cette page, Home le repère tout seul. Tu peux aussi coller le code ici (⌘V)."
-        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24)); f.placeholderString = "Le code, ou tout le texte de la page"; a.accessoryView = f; a.window.initialFirstResponder = f
-        a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
-        func codeDans(_ t: String) -> String? {
-            guard let m = t.range(of: #""authorizationCode"\s*:\s*"[0-9a-fA-F]+""#, options: .regularExpression) else { return nil }
-            return t[m].components(separatedBy: "\"").dropLast().last
-        }
-        // le presse-papiers n'est lu que pendant cette fenêtre, et seulement s'il a changé depuis son ouverture
-        let veille = Timer(timeInterval: 0.6, repeats: true) { _ in
-            guard NSPasteboard.general.changeCount != avant, let t = NSPasteboard.general.string(forType: .string), let c = codeDans(t) else { return }
-            f.stringValue = c; NSApp.stopModal(withCode: .alertFirstButtonReturn)
-        }
-        RunLoop.main.add(veille, forMode: .modalPanel)
-        let r = a.runModal(); veille.invalidate(); a.window.orderOut(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        let saisi = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard r == .alertFirstButtonReturn, !saisi.isEmpty else { retour(); return }
-        finirEpic(codeDans(saisi) ?? saisi, retour: retour)
     }
     /// Un nom pour la tuile d'un jeu ajouté à la main
     private func demanderNom(_ propose: String, _ message: String) -> String? {
@@ -4474,10 +4476,12 @@ extension Library {
     /// Édition → Remplissage automatique → Mots de passe…), puis Steam Guard — validation dans l'app Steam, ou code à saisir.
     func connexionSteamIdentifiants(retour: @escaping () -> Void) {
         menu = nil
-        let a = NSAlert(); a.messageText = "Connexion à Steam"; a.informativeText = "Ton nom de compte Steam et ton mot de passe. ⌘V colle ; le menu Édition → Remplissage automatique propose tes mots de passe enregistrés."
+        let a = NSAlert(); a.messageText = "Connexion à Steam"; a.informativeText = "Ton nom de compte Steam et ton mot de passe. Clique dans un champ, puis « Mes mots de passe »."
         let nom = NSTextField(frame: NSRect(x: 0, y: 34, width: 340, height: 24)); nom.placeholderString = "Nom du compte Steam"; nom.contentType = .username
         let mdp = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24)); mdp.placeholderString = "Mot de passe"; mdp.contentType = .password
-        let v = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 58)); v.addSubview(nom); v.addSubview(mdp); nom.nextKeyView = mdp; mdp.nextKeyView = nom
+        let v = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 100)); nom.frame.origin.y = 76; mdp.frame.origin.y = 42
+        v.addSubview(nom); v.addSubview(mdp); nom.nextKeyView = mdp; mdp.nextKeyView = nom
+        let cle = MotsDePasse.bouton(cible: RemplirSteam.shared, action: #selector(RemplirSteam.remplir)); cle.frame = NSRect(x: 0, y: 0, width: 210, height: 32); v.addSubview(cle)
         a.accessoryView = v; a.window.initialFirstResponder = nom
         a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
         guard a.runModal() == .alertFirstButtonReturn, !nom.stringValue.isEmpty, !mdp.stringValue.isEmpty else { retour(); return }
