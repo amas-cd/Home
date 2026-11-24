@@ -133,9 +133,9 @@ func firstFile(_ dir: URL, _ names: [String]) -> URL? {
     return nil
 }
 
-// MARK: - Sons d'interface : banque « Interface Sounds » de Kenney (CC0, sons de jeu/console), embarquée dans l'app.
+// MARK: - Sons d'interface : « UI Utility Pack Vol 1 » de JC Sounds (CC-BY 4.0, crédit dans THIRD_PARTY_NOTICES.md), embarqués dans l'app.
 // Remplaçables par les tiens : ~/Library/Application Support/Salon/sons/<nom>.wav|mp3|aiff (nom = deplacer, onglet, ouvrir, retour, valider, lancer).
-// Les 100 sons de la banque sont dans Salon.app/Contents/Resources/sons/banque pour en choisir d'autres.
+// Une sélection d'autres sons du même pack est dans Home.app/Contents/Resources/sons/banque pour en choisir d'autres.
 final class Sounds {
     static let shared = Sounds()
     var enabled = true

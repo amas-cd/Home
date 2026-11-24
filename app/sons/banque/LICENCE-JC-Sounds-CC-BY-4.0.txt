@@ -1,0 +1,9 @@
+Sons de l'interface de Home : « UI Utility Pack Vol 1 », par JC Sounds.
+https://opengameart.org/content/jc-sounds-ui-utility-pack-vol-1
+Licence : Creative Commons Attribution 4.0 International (CC-BY 4.0) — https://creativecommons.org/licenses/by/4.0/
+
+Les six sons de Home (dossier parent) viennent de ce pack, renommés sans autre modification :
+  deplacer.wav = Set 11 / UI_Single_Set 11_01      onglet.wav  = Set 11 / UI_TwoNote Up_Set 11_01
+  ouvrir.wav   = Set 17 / UI_Flourish Up_Set 17_01  retour.wav  = Set 17 / UI_Flourish Down_Set 17_01
+  valider.wav  = Set 1 / UI_TwoNote_Set 1_01        lancer.wav  = Set 14 / UI_Flourish Up_Set 14_01
+Ce dossier contient une sélection d'autres sons du même pack, sous leur nom d'origine, pour en changer.
