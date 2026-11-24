@@ -4391,6 +4391,7 @@ extension Library {
     func majMoteur() { lancer("mettre-a-jour-et-rebuild.command", env: ["SALON_SANS_VEILLE": "1"], titre: "Mise à jour du moteur nxnative", jeux: Set(games.filter { $0.titleID != nil }.map { $0.id })) }
     /// Les fichiers de ce Mac qui peuvent convenir (par extension, ou par nom exact) : Téléchargements, Bureau, Documents et les disques
     /// branchés, sur trois niveaux de dossiers. Les plus récents d'abord ; ceux dont le nom contient un mot de `priorite` passent devant.
+    nonisolated(unsafe) static var dossiersRefuses: [String] = []   // les dossiers que la dernière recherche n'a pas pu lire
     nonisolated static func fichiersCandidats(ext: [String], noms: [String] = [], priorite: [String] = [], exclus: [URL] = []) -> [URL] {
         let fm = FileManager.default, maison = fm.homeDirectoryForCurrentUser
         var racines = ["Downloads", "Desktop", "Documents"].map { maison.appendingPathComponent($0) }
@@ -4406,6 +4407,21 @@ extension Library {
                 trouves.append((u, (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast))
             }
         }
+        // Spotlight en plus : il connaît les fichiers rangés ailleurs ou plus profond (un dossier « Jeux », un disque), sans rien parcourir
+        let dejaVus = Set(trouves.map { $0.0.standardizedFileURL.path })
+        let filtre = (e.map { "kMDItemFSName == \"*.\($0)\"c" } + n.map { "kMDItemFSName == \"\($0)\"c" }).joined(separator: " || ")
+        var refuses: [String] = []
+        if !filtre.isEmpty {
+            for l in Commande.run("/usr/bin/mdfind", [filtre], timeout: 8).split(separator: "\n") {
+                let u = URL(fileURLWithPath: String(l)); let p = u.standardizedFileURL.path
+                guard l.hasPrefix("/"), !dejaVus.contains(p), !hors.contains(p), !p.contains("/Library/"), !p.contains("/.Trash/"), !p.contains(".app/"), fm.isReadableFile(atPath: p) else { continue }
+                trouves.append((u, (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast))
+            }
+        }
+        // un dossier que macOS refuse de montrer à Home (Réglages → Confidentialité → Fichiers et dossiers) : on le note, Home le dira
+        for r in racines.prefix(3) where (try? fm.contentsOfDirectory(atPath: r.path)) == nil && fm.fileExists(atPath: r.path) { refuses.append(r.lastPathComponent) }
+        Library.dossiersRefuses = refuses
+        log("Recherche de fichiers (\((ext + noms).joined(separator: ", "))) : \(trouves.count) trouvé(s)" + (refuses.isEmpty ? "" : " ; macOS refuse à Home : " + refuses.joined(separator: ", ")))
         func devant(_ u: URL) -> Bool { let t = u.lastPathComponent.lowercased(); return priorite.contains { t.contains($0) } }
         return trouves.sorted { a, b in devant(a.0) != devant(b.0) ? devant(a.0) : a.1 > b.1 }.prefix(40).map { $0.0 }
     }
@@ -4424,7 +4440,12 @@ extension Library {
             let trouves = chercher()
             DispatchQueue.main.async {
                 guard self.menu?.title == titre, self.menu?.items.first?.label == "Recherche…" else { return }   // on est parti entre-temps
-                if trouves.isEmpty { if let u = finder(), !u.isEmpty { puis(u) } else { back() }; return }
+                if trouves.isEmpty {
+                    if !Library.dossiersRefuses.isEmpty {   // rien trouvé parce que macOS cache ces dossiers à Home : on dit comment l'autoriser, puis le Finder s'ouvre
+                        let noms = Library.dossiersRefuses.map { ["Downloads": "Téléchargements", "Desktop": "Bureau"][$0] ?? $0 }.joined(separator: ", ")
+                        self.toast = "macOS cache \(noms) à Home : Réglages → Confidentialité → Fichiers et dossiers → Home"
+                    }
+                    if let u = finder(), !u.isEmpty { puis(u) } else { back() }; return }
                 func montrer(_ choisis: [URL]) {
                     var items: [SalonMenuItem] = []
                     if plusieurs, !choisis.isEmpty { items.append(SalonMenuItem(label: "Continuer", detail: "\(choisis.count) choisi\(choisis.count > 1 ? "s" : "")", icon: "arrow.right.circle.fill", tint: .green, action: { puis(choisis) })) }
@@ -4474,9 +4495,18 @@ extension Library {
         func noms(_ u: [URL]) -> String { u.map { $0.lastPathComponent }.joined(separator: ", ") }
         switch a.etapes[i] {
         case "base":
+            if a.base == nil {   // pas encore de jeu : Home montre tout de suite ceux qu'il trouve sur ce Mac (le Finder reste le dernier choix de la liste)
+                proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.fichiersCandidats(ext: ["nsp", "xci", "nup", "nsz", "xcz"]) },
+                         finder: { self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, .nsz, .xcz, ou le dossier du jeu", plusieurs: false, dossiers: true) },
+                         back: prec) { u in
+                    var b = a; b.base = u[0]
+                    if u[0].pathExtension.lowercased() == "nup" { b.etapes = b.etapes.filter { $0 != "maj" && $0 != "dlc" }; b.updates = []; b.dlc = [] }   // un .nup Switch 2 contient déjà sa mise à jour
+                    suite(b) }
+                return
+            }
             var items = [SalonMenuItem(label: a.base?.lastPathComponent ?? "Choisir le jeu…", detail: a.base == nil ? ".nsp, .xci, .nup, ou le dossier d'un jeu extrait" : "Choisir un autre fichier", icon: "folder.fill.badge.plus", action: {
-                self.proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.fichiersCandidats(ext: ["nsp", "xci", "nup"]) },
-                              finder: { self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, ou le dossier du jeu", plusieurs: false, dossiers: true) },
+                self.proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.fichiersCandidats(ext: ["nsp", "xci", "nup", "nsz", "xcz"]) },
+                              finder: { self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, .nsz, .xcz, ou le dossier du jeu", plusieurs: false, dossiers: true) },
                               back: { self.assistant(a, i, retour: retour) }) { u in
                     var b = a; b.base = u[0]
                     if u[0].pathExtension.lowercased() == "nup" { b.etapes = b.etapes.filter { $0 != "maj" && $0 != "dlc" }; b.updates = []; b.dlc = [] }   // un .nup Switch 2 contient déjà sa mise à jour
@@ -4494,7 +4524,7 @@ extension Library {
             ], hero: "cpu", step: i + 1, steps: n, back: prec)
         case "maj":
             var items = [SalonMenuItem(label: a.updates.isEmpty ? "Choisir la mise à jour…" : noms(a.updates), detail: a.updates.isEmpty ? "Un fichier .nsp" : "Choisir d'autres fichiers", icon: "doc.badge.plus", action: {
-                self.proposer("Quelle mise à jour ?", sousTitre: nom, icone: "arrow.down.circle.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp"], priorite: ["upd", "update", "maj", "patch"], exclus: [a.base].compactMap { $0 } + a.dlc) },
+                self.proposer("Quelle mise à jour ?", sousTitre: nom, icone: "arrow.down.circle.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["upd", "update", "maj", "patch"], exclus: [a.base].compactMap { $0 } + a.dlc) },
                               finder: { self.choisir("Mise à jour de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
                               back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.updates = u; suite(b) } })]
             if !a.updates.isEmpty { items.append(SalonMenuItem(label: "Continuer", icon: "arrow.right.circle.fill", tint: .green, action: { suite(a) })) }
@@ -4503,7 +4533,7 @@ extension Library {
                              step: i + 1, steps: n, back: prec)
         case "dlc":
             var items = [SalonMenuItem(label: a.dlc.isEmpty ? "Choisir les DLC…" : noms(a.dlc), detail: a.dlc.isEmpty ? "Un ou plusieurs fichiers .nsp" : "Choisir d'autres fichiers", icon: "puzzlepiece.extension.fill", action: {
-                self.proposer("Quels DLC ?", sousTitre: nom, icone: "puzzlepiece.extension.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp"], priorite: ["dlc"], exclus: [a.base].compactMap { $0 } + a.updates) },
+                self.proposer("Quels DLC ?", sousTitre: nom, icone: "puzzlepiece.extension.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["dlc"], exclus: [a.base].compactMap { $0 } + a.updates) },
                               finder: { self.choisir("DLC de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
                               back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.dlc = u; suite(b) } })]
             items.append(SalonMenuItem(label: a.dlc.isEmpty ? "Pas de DLC" : "Continuer", icon: "arrow.right.circle\(a.dlc.isEmpty ? "" : ".fill")", tint: a.dlc.isEmpty ? .gray : .green, action: { suite(a) }))
