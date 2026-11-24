@@ -26,6 +26,7 @@ import ScreenCaptureKit
 import AudioToolbox
 import IOKit
 import IOKit.hid
+import WebKit
 
 // MARK: - Modèle
 struct Game: Identifiable, Equatable {
@@ -598,7 +599,7 @@ final class Library: ObservableObject {
         let played = st?.lastPlayed.map { "Dernière partie \($0.formatted(.relative(presentation: .named)))" } ?? "Jamais joué"
         let direct = g.viaObelisk && ObeliskDirect.recipe(for: g) != nil && ObeliskDirect.legendary() != nil
         var items: [SalonMenuItem] = [
-            SalonMenuItem(label: "Jouer", detail: g.viaHome ? "Epic Games, lancé par Home" : g.viaObelisk ? (direct ? "Lancement direct (Epic Games)" : "Lancé par Obelisk") : nil, icon: "play.fill", action: { self.menu = nil; self.launch() }),
+            SalonMenuItem(label: "Jouer", detail: g.viaHome ? (g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows, lancé par Home" : "Epic Games, lancé par Home") : g.viaObelisk ? (direct ? "Lancement direct (Epic Games)" : "Lancé par Obelisk") : nil, icon: "play.fill", action: { self.menu = nil; self.launch() }),
             SalonMenuItem(label: "Apparence", icon: "paintpalette.fill", action: { self.openApparence(g) }),
         ]
         if Atelier.modsPossibles(g) {
@@ -608,8 +609,8 @@ final class Library: ObservableObject {
         switch Atelier.moteurDe(g) {
         case .nxnative, .mng: items.append(SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: { self.openUpdateMenu(g) }))
         case .obelisk: items.append(SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", action: { self.menu = nil; self.ouvrirObelisk() }))
-        case .pc: items.append(SalonMenuItem(label: "Mises à jour", detail: "Vérifie et télécharge la dernière version", icon: "arrow.down.circle.fill", action: {
-            self.menu = nil; if let a = g.appPC { self.lancer("pc.command", ["installer", a], titre: "Mise à jour de \(g.name)", jeux: [g.id]) } }))
+        case .pc: if g.appPC?.hasPrefix("exe:") != true { items.append(SalonMenuItem(label: "Mises à jour", detail: "Vérifie et télécharge la dernière version", icon: "arrow.down.circle.fill", action: {
+            self.menu = nil; if let a = g.appPC { self.lancer("pc.command", ["installer", a], titre: "Mise à jour de \(g.name)", jeux: [g.id]) } })) }
         case .mac: break
         }
         if g.titleID != nil || Atelier.moteurDe(g) == .mng {
@@ -1599,6 +1600,39 @@ enum BGM {
     }
 }
 
+// Connexion à Epic Games dans une fenêtre de Home : la page de connexion d'Epic (la vraie, chargée depuis son site) s'affiche dans
+// une vue web ; une fois connecté, Epic renvoie une page qui contient le code de connexion, que Home lit tout seul — rien à copier.
+// Home ne lit ni l'identifiant ni le mot de passe : seule cette dernière page est regardée.
+final class ConnexionEpic: NSObject, WKNavigationDelegate, NSWindowDelegate {
+    static var enCours: ConnexionEpic?
+    private var fenetre: NSWindow?; private var fin: ((String?) -> Void)?
+    static func ouvrir(_ fin: @escaping (String?) -> Void) {
+        enCours?.terminer(nil)
+        let c = ConnexionEpic(); c.fin = fin; enCours = c
+        let web = WKWebView(frame: NSRect(x: 0, y: 0, width: 520, height: 760)); web.navigationDelegate = c
+        web.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 760), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        w.title = "Connexion à Epic Games"; w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c
+        w.level = .floating; w.center(); c.fenetre = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
+        web.load(URLRequest(url: URL(string: "https://legendary.gl/epiclogin")!))
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard webView.url?.path.contains("/id/api/redirect") == true else { return }   // la page de fin : {"authorizationCode": "…"}
+        webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self] r, _ in
+            guard let t = r as? String, let m = t.range(of: #""authorizationCode"\s*:\s*"[0-9a-fA-F]+""#, options: .regularExpression) else { return }
+            let code = t[m].components(separatedBy: "\"").dropLast().last ?? ""
+            if !code.isEmpty { self?.terminer(code) }
+        }
+    }
+    func windowWillClose(_ n: Notification) { terminer(nil) }
+    private func terminer(_ code: String?) {
+        guard let f = fin else { return }; fin = nil
+        fenetre?.delegate = nil; fenetre?.close(); fenetre = nil; ConnexionEpic.enCours = nil
+        f(code)
+    }
+}
+
 // Jeux PC installés par Home lui-même (Epic Games, sans Obelisk) : moteur/pc/pc.py fait le travail, lancé par outils/pc.command
 enum PCHome {
     struct Jeu { let app: String; let nom: String; let dossier: String }
@@ -2318,7 +2352,7 @@ struct Screen: View {
                             } else { Label("Jamais joué", systemImage: "sparkles") }
                             Label(g.category, systemImage: "tag")
                             if g.viaObelisk { Label("via Obelisk", systemImage: "pc") }
-                            if g.viaHome { Label("Epic Games", systemImage: "pc") }
+                            if g.viaHome { Label(g.appPC?.hasPrefix("exe:") == true ? "Jeu Windows" : "Epic Games", systemImage: "pc") }
                         }.font(.system(size: 17, weight: .medium, design: .rounded)).opacity(0.85)
                         HStack(spacing: 16) {
                             HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running == nil ? "Jouer" : "En cours…").font(.system(size: 20, weight: .semibold, design: .rounded)) }
@@ -2690,7 +2724,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         Atelier.installerEmbarque()
         lib.load()
-        if !Atelier.nxnativePret && !Atelier.mngPret { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil { self.lib.openPreparation(bienvenue: true) } } }   // un Mac neuf : préparer les moteurs
+        if !Atelier.nxnativePret && !Atelier.mngPret { DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if self.lib.menu == nil { self.lib.openBienvenue() } } }   // un Mac neuf : préparer les moteurs, connecter les comptes
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -2758,6 +2792,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHotKey()
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             if NSApp.modalWindow != nil || e.window?.firstResponder is NSText { return e }   // saisie de texte : le clavier va au champ
+            if e.window?.identifier?.rawValue == "connexion" { return e }   // la fenêtre de connexion (page web d'Epic) garde son clavier
             guard let self else { return e }
             if e.modifierFlags.contains(.command) { return e }
             let ch = e.charactersIgnoringModifiers?.lowercased() ?? ""
@@ -3593,6 +3628,16 @@ extension Library {
                              step: i + 1, steps: n, back: prec)
         }
     }
+    /// Premier lancement sur un Mac neuf : ce que Home peut préparer, chaque partie au choix — les moteurs des jeux Switch (outils d'Apple,
+    /// nxnative, MacNativeGames) et les jeux PC (moteur Windows, compte Epic Games). Le compte est redemandé à l'installation d'un jeu s'il manque.
+    func openBienvenue() {
+        let ici: () -> Void = { self.openBienvenue() }
+        menu = SalonMenu(title: "Bienvenue dans Home", subtitle: "Que veux-tu préparer sur ce Mac ?", items: [
+            SalonMenuItem(label: "Jeux Switch", detail: "Xcode, Homebrew, nxnative et MacNativeGames — pour construire tes jeux à partir de tes dumps", icon: "gamecontroller.fill", action: { self.openPreparation(back: ici) }),
+            SalonMenuItem(label: "Jeux PC", detail: "Le moteur Windows et ton compte Epic Games — connexion sur le site d'Epic, dans une fenêtre", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
+            SalonMenuItem(label: "Plus tard", detail: "Tout se retrouve dans la case + et dans Menu → Mises à jour → Moteurs", icon: "arrow.right.circle", tint: .gray, action: { self.menu = nil }),
+        ], hero: "house.fill")
+    }
     /// « Préparer ce Mac » : ce qu'il faut pour construire les jeux Switch (outils d'Apple, Homebrew, les deux moteurs), ce qui est déjà
     /// là, et le script qui installe le reste (preparer-moteurs.command). L'état est lu par le même script (--etat), hors du fil principal.
     func openPreparation(bienvenue: Bool = false, back: (() -> Void)? = nil) {
@@ -3661,17 +3706,86 @@ extension Library {
     }
     /// Connexion Epic : la page de connexion d'Epic s'ouvre dans le navigateur et affiche un code (authorizationCode) à coller ici
     func connexionEpic(retour: @escaping () -> Void) {
+        menu = nil; toast = "Connecte-toi dans la fenêtre d'Epic Games"
+        ConnexionEpic.ouvrir { code in
+            guard let code else { self.connexionEpicParCode(retour: retour); return }   // fenêtre fermée sans connexion : l'ancienne méthode en secours
+            self.toast = "Connexion à Epic…"
+            DispatchQueue.global().async {
+                let s = PCHome.run(["connexion", code], timeout: 60)
+                DispatchQueue.main.async { self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
+            }
+        }
+    }
+    /// En secours (la fenêtre de connexion a été fermée, ou Epic n'a pas voulu s'y afficher) : la page s'ouvre dans le navigateur et
+    /// montre un code (authorizationCode) à coller ici
+    func connexionEpicParCode(retour: @escaping () -> Void) {
+        let q = NSAlert(); q.messageText = "Connexion à Epic Games"; q.informativeText = "La fenêtre a été fermée avant la fin de la connexion. Tu peux te connecter dans ton navigateur à la place : Epic affichera un code à coller ici."
+        q.addButton(withTitle: "Ouvrir le navigateur"); q.addButton(withTitle: "Annuler")
+        guard q.runModal() == .alertFirstButtonReturn else { retour(); return }
         NSWorkspace.shared.open(URL(string: "https://legendary.gl/epiclogin")!)
         let a = NSAlert(); a.messageText = "Connexion à Epic Games"
-        a.informativeText = "Une page d'Epic vient de s'ouvrir dans ton navigateur. Connecte-toi : elle affiche ensuite un texte avec « authorizationCode ». Copie ce code (ou tout le texte) et colle-le ici."
+        a.informativeText = "Connecte-toi dans la page qui vient de s'ouvrir : elle affiche ensuite un texte avec « authorizationCode ». Copie ce code (ou tout le texte) et colle-le ici."
         let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24)); a.accessoryView = f; a.window.initialFirstResponder = f
         a.addButton(withTitle: "Se connecter"); a.addButton(withTitle: "Annuler")
-        guard a.runModal() == .alertFirstButtonReturn else { return }
-        let code = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); guard !code.isEmpty else { return }
+        guard a.runModal() == .alertFirstButtonReturn else { retour(); return }
+        let code = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); guard !code.isEmpty else { retour(); return }
         toast = "Connexion à Epic…"
         DispatchQueue.global().async {
             let s = PCHome.run(["connexion", code], timeout: 60)
             DispatchQueue.main.async { self.toast = PCHome.echec(s) ?? "Connecté à Epic Games"; retour() }
+        }
+    }
+    /// Un nom pour la tuile d'un jeu ajouté à la main
+    private func demanderNom(_ propose: String, _ message: String) -> String? {
+        let a = NSAlert(); a.messageText = "Nom du jeu"; a.informativeText = message
+        let f = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24)); f.stringValue = propose; a.accessoryView = f; a.window.initialFirstResponder = f
+        a.addButton(withTitle: "Continuer"); a.addButton(withTitle: "Annuler")
+        guard a.runModal() == .alertFirstButtonReturn else { return nil }
+        let n = f.stringValue.trimmingCharacters(in: .whitespacesAndNewlines); return n.isEmpty ? nil : n
+    }
+    private func choisirWindows(_ message: String, _ extensions: [String]) -> URL? {
+        let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = message
+        p.allowedContentTypes = extensions.compactMap { UTType(filenameExtension: $0) }; p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        return p.runModal() == .OK ? p.url : nil
+    }
+    /// Un jeu Windows déjà installé (un dossier avec son .exe) : son .exe devient une tuile. 64 bits : moteur Linux de Voile ; 32 bits ou .NET : moteur Rosetta
+    func ajouterExe(prefixe: String? = nil, exe: URL? = nil, nom: String? = nil) {
+        guard let u = exe ?? choisirWindows("Le programme du jeu (.exe), dans son dossier d'installation", ["exe"]) else { return }
+        if let b = Compat.entree(nom: nom ?? u.deletingPathExtension().lastPathComponent), b.etat == "bloque" { openBloque(b.nom, b); return }
+        guard let n = nom ?? demanderNom(u.deletingPathExtension().lastPathComponent, "Le nom affiché dans Home, et celui qui sert à trouver sa jaquette.") else { return }
+        if let b = Compat.entree(nom: n), b.etat == "bloque" { openBloque(n, b); return }
+        menu = nil
+        DispatchQueue.global().async {
+            let s = PCHome.run(["ajouter-exe", u.path, "--nom", n] + (prefixe.map { ["--prefixe", $0] } ?? []))
+            DispatchQueue.main.async {
+                if let e = PCHome.echec(s) { self.toast = e; return }
+                let m = (PCHome.json(s) as? [String: Any])?["moteur"] as? String
+                self.load(); self.toast = "\(n) ajouté\(m == "rosetta" ? " (moteur 32 bits)" : "")"
+            }
+        }
+    }
+    /// Installer un jeu depuis son installateur Windows (setup.exe, .msi) : il tourne sur le moteur Rosetta de Voile (32 bits), dans un
+    /// Windows neuf réservé à ce jeu ; à la fin, Home demande lequel des programmes installés est le jeu
+    func installerDepuisSetup() {
+        guard let u = choisirWindows("L'installateur du jeu (setup.exe ou .msi)", ["exe", "msi"]) else { return }
+        guard let n = demanderNom(u.deletingPathExtension().lastPathComponent.replacingOccurrences(of: #"(?i)[ _-]*(setup|install(er)?)[ _-]*"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces), "Le nom du jeu que cet installateur installe.") else { return }
+        if let b = Compat.entree(nom: n), b.etat == "bloque" { openBloque(n, b); return }
+        menu = nil; toast = "Préparation de Windows, puis l'installateur s'ouvre (une minute)…"
+        NotificationCenter.default.post(name: .salonHide, object: nil)   // la fenêtre de l'installateur passe devant Home
+        DispatchQueue.global().async {
+            let s = PCHome.run(["setup", u.path, "--nom", n], timeout: 3 * 3600)
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .salonShow, object: nil)
+                if let e = PCHome.echec(s) { self.toast = e; return }
+                guard let r = PCHome.json(s) as? [String: Any], let pre = r["prefixe"] as? String, let c = r["candidats"] as? [[String: Any]], !c.isEmpty else {
+                    self.toast = "L'installateur n'a installé aucun programme (annulé ?)"; return }
+                let items: [SalonMenuItem] = c.compactMap { j in
+                    guard let e = j["exe"] as? String else { return nil }
+                    let court = e.components(separatedBy: "/drive_c/").last.map { "C:/" + $0 } ?? e
+                    return SalonMenuItem(label: (e as NSString).lastPathComponent, detail: court, icon: "play.rectangle.fill", action: { self.ajouterExe(prefixe: pre, exe: URL(fileURLWithPath: e), nom: n) })
+                }
+                self.menu = SalonMenu(title: "Quel est le programme du jeu ?", subtitle: n, items: items, hero: "questionmark.app.fill", text: "L'installation est finie. Choisis le programme qui lance le jeu (souvent le plus gros, en haut).")
+            }
         }
     }
     /// La bibliothèque Epic du compte : chaque jeu avec sa compatibilité ; un jeu bloqué montre sa raison, les autres s'installent
@@ -3709,6 +3823,8 @@ extension Library {
                 if !Atelier.nxnativePret && !Atelier.mngPret { self.openPreparation(back: ici); return }   // aucun moteur : d'abord préparer ce Mac
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Jeu PC — Epic Games", detail: "Ta bibliothèque, installée et lancée par Home", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
+            SalonMenuItem(label: "Jeu PC — déjà installé", detail: "Choisis son .exe dans son dossier", icon: "folder.fill", action: { self.ajouterExe() }),
+            SalonMenuItem(label: "Jeu PC — depuis son installateur", detail: "setup.exe ou .msi, 32 ou 64 bits", icon: "shippingbox.fill", action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "App Mac", icon: "macwindow", action: { self.menu = nil; self.addGame() }),
         ], hero: "plus.app.fill", back: back)
     }

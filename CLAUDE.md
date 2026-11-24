@@ -228,7 +228,13 @@ Décidé avec Anas pour Home autonome (pour lui et ses amis) :
    - Fait : scripts embarqués et installés au démarrage ; « Préparer ce Mac » ; dossiers configurables (`Application Support/Salon/dossiers.json`,
      `HOME_RACINE` / `HOME_JEUX` dans les scripts) ; jeux Epic sans Obelisk (moteur Linux de Voile seulement : programmes 64 bits, pas .NET) ;
      liste de compatibilité.
-   - Reste : Steam et GOG sans Obelisk, moteur Rosetta de Voile (jeux 32 bits / .NET), désinstaller un jeu PC depuis Home, serveurs en ligne.
+   - Fait aussi : un .exe déjà installé devient une tuile (`pc.py ajouter-exe`), installation depuis un setup (`pc.py setup`, moteur Rosetta
+     de Voile, 32 bits et .NET), connexion Epic dans une fenêtre de Home sans code à copier (`ConnexionEpic`), accueil au premier lancement.
+   - Reste : Steam et GOG sans Obelisk, désinstaller un jeu PC depuis Home, serveurs en ligne. Les jeux Epic qui démarrent par un
+     programme 32 bits ou .NET sont encore refusés (le moteur Rosetta ne sert qu'aux setups et aux .exe ajoutés à la main).
+   - Steam sans Obelisk (étudié, pas fait) : Obelisk fait tourner la vraie bibliothèque `steamclient.dylib` de Valve dans un petit programme
+     Rust (`obelisk-steam-host`, interfaces privées figées sur une version) et télécharge avec son propre code Rust (`steam-kit`). Le reprendre
+     demande Rust ≥ 1.98, un outil en ligne de commande à écrire, et connecte le compte par un client non officiel : à décider avec Anas.
    - Règle de la liste de compatibilité : ne bloquer qu'avec une source (refus de l'éditeur ou d'Obelisk). Un anti-triche seul ne prouve rien :
      Rocket League fonctionne.
 
