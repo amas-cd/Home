@@ -151,8 +151,8 @@ final class Sounds {
     private var players: [String: [AVAudioPlayer]] = [:]
     private var tour: [String: Int] = [:]
     private static let niveau: Float = 0.8   // le même pour les six sons
-    private static let navigation: Set<String> = ["deplacer", "onglet", "volume"]   // ceux qui se coupent l'un l'autre
-    private static let fallback = ["deplacer": "Tink", "onglet": "Pop", "ouvrir": "Purr", "retour": "Bottle", "valider": "Glass", "lancer": "Hero", "volume": "Tink"]
+    private static let navigation: Set<String> = ["deplacer", "tuile", "onglet", "volume"]   // ceux qui se coupent l'un l'autre
+    private static let fallback = ["deplacer": "Tink", "onglet": "Pop", "ouvrir": "Purr", "retour": "Bottle", "valider": "Glass", "lancer": "Hero", "volume": "Tink", "tuile": "Tink"]
     private func url(_ name: String) -> URL? {
         for ext in ["wav", "mp3", "aiff", "aif", "m4a"] { let u = salonRoot.appendingPathComponent("sons/\(name).\(ext)"); if FileManager.default.fileExists(atPath: u.path) { return u } }
         if let u = Bundle.main.resourceURL?.appendingPathComponent("sons/\(name).wav"), FileManager.default.fileExists(atPath: u.path) { return u }
@@ -701,7 +701,7 @@ final class Library: ObservableObject {
     }
 
     // Navigation
-    func move(_ delta: Int) { guard running == nil, !showOptions, picker == nil else { return }; let n = min(max(selected + delta, 0), visible.count); if n != selected { selected = n; Sounds.shared.play("deplacer") } }
+    func move(_ delta: Int) { guard running == nil, !showOptions, picker == nil else { return }; let n = min(max(selected + delta, 0), visible.count); if n != selected { selected = n; Sounds.shared.play("tuile") } }   // d'un jeu à l'autre : son à part (scroll_001 de la banque, rendu profond : scripts/son-tuile.py)
     var sensCategorie = 1   // le sens du dernier changement de catégorie (1 = suivante) : la rangée des jeux entre et sort dans ce sens
     func moveCategory(_ delta: Int) { guard running == nil, !showOptions, picker == nil, !categories.isEmpty else { return }; sensCategorie = delta >= 0 ? 1 : -1; categoryIndex = (categoryIndex + delta + categories.count) % categories.count; selected = 0; Sounds.shared.play("onglet") }
     func toggleSounds() { config.sons = !(config.sons ?? true); Sounds.shared.enabled = config.sons ?? true; saveConfig(); toast = Sounds.shared.enabled ? "Sons activés" : "Sons coupés" }
