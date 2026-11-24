@@ -4521,7 +4521,7 @@ extension Library {
             func nomMoteur(_ m: String) -> String { m == "mng" ? "MacNativeGames" : "nxnative" }
             menu = SalonMenu(title: "Le moteur", subtitle: rec.jeu ?? a.base?.lastPathComponent ?? nom, items: [
                 SalonMenuItem(label: nomMoteur(rec.moteur), detail: "Recommandé", icon: "checkmark.seal.fill", tint: .green, action: { var b = a; b.moteur = rec.moteur; suite(b) }),
-                SalonMenuItem(label: "Autre : \(nomMoteur(autre))", icon: "arrow.triangle.swap", tint: .gray, action: { var b = a; b.moteur = autre; suite(b) }),
+                SalonMenuItem(label: nomMoteur(autre), icon: "arrow.triangle.swap", tint: .gray, action: { var b = a; b.moteur = autre; suite(b) }),   // l'autre moteur, par son nom
             ], hero: "cpu", step: i + 1, steps: n, back: prec)
         case "maj":
             var items = [SalonMenuItem(label: a.updates.isEmpty ? "Choisir la mise à jour…" : noms(a.updates), detail: a.updates.isEmpty ? "Un fichier .nsp" : "Choisir d'autres fichiers", icon: "doc.badge.plus", action: {
