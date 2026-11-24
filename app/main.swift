@@ -1541,7 +1541,7 @@ final class Library: ObservableObject {
             guard let g = running else { return }
             guard Recorder.shared.active else {   // la mémoire tampon ne tournait pas : rien de passé à sauver
                 if CGPreflightScreenCaptureAccess() { Recorder.shared.start(); toast = "La capture vient de démarrer : le clip sera disponible dans \(Recorder.duree)" }
-                else { toast = "Pas d'autorisation Enregistrement d'écran pour cette version de Home — signe Home avec le certificat « Salon Dev » puis réactive-le dans Réglages → Confidentialité" }
+                else { toast = "Pas d'autorisation Enregistrement d'écran pour cette version de Home — signe Home avec le certificat « Home Dev » puis réactive-le dans Réglages → Confidentialité" }
                 Sounds.shared.play("retour"); return }
             Sounds.shared.play("valider"); toast = "Enregistrement du clip…"
             Recorder.shared.saveLast(seconds: Double(Recorder.secondes), game: g.name) { [weak self] url in DispatchQueue.main.async { self?.toast = url.map { "Clip enregistré : Vidéos/Salon/\($0.lastPathComponent)" } ?? "Clip impossible (voir salon.log)"; Sounds.shared.play(url == nil ? "retour" : "lancer") } }

@@ -45,11 +45,33 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"; echo "publier=$publier" >> "$GITHUB_OUTPUT"
           xcrun swiftc --version
 
+      # Signature stable : si le dépôt a le certificat « Home Dev » dans ses secrets (HOME_DEV_P12 = le fichier .p12 en base64,
+      # HOME_DEV_MDP = son mot de passe), il est posé dans un trousseau jetable et salon-construire.command signe avec. Toutes les versions
+      # ont alors la même identité : macOS ne redemande pas les autorisations de Home à chaque mise à jour. Sans ces secrets (ou dans une
+      # contribution venue d'ailleurs, qui ne les reçoit pas), la signature reste ad hoc.
+      - name: Certificat « Home Dev »
+        env:
+          P12: ${{ secrets.HOME_DEV_P12 }}
+          MDP: ${{ secrets.HOME_DEV_MDP }}
+        run: |
+          if [ -z "$P12" ]; then echo "pas de certificat dans les secrets : signature ad hoc"; exit 0; fi
+          T="$RUNNER_TEMP/home-dev.keychain-db"; C="$(uuidgen)"
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/home-dev.p12"
+          security create-keychain -p "$C" "$T" && security set-keychain-settings -lut 3600 "$T" && security unlock-keychain -p "$C" "$T"
+          security import "$RUNNER_TEMP/home-dev.p12" -k "$T" -P "$MDP" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$C" "$T" >/dev/null
+          security list-keychains -d user -s "$T" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/home-dev.p12"
+          security find-identity -p codesigning "$T" | grep -c '"Home Dev"' | sed 's/^/certificats « Home Dev » trouvés : /'
+
       - name: Compiler Home.app
         env:
           HOME_BUILD_ONLY: ${{ github.workspace }}/dist
           HOME_VERSION: ${{ steps.version.outputs.version }}
         run: bash app/salon-construire.command < /dev/null
+
+      - name: Signature de l'app
+        run: codesign -dv dist/Home.app 2>&1 | grep -E "Authority|Signature|Identifier" || true
 
       - name: Journal de compilation
         if: always()

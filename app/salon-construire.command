@@ -1,6 +1,6 @@
 #!/bin/bash
 # Construit « Home » (ex-Salon), le launcher façon console, avec les outils développeur d'Apple (swiftc), et l'installe dans /Applications/Home.app.
-# Son identifiant (fr.anas.salon), son certificat « Salon Dev » et ses réglages (Application Support/Salon) ne changent pas : autorisations et réglages gardés.
+# Son identifiant (fr.anas.salon), son certificat « Home Dev » et ses réglages (Application Support/Salon) ne changent pas : autorisations et réglages gardés.
 # Aucune dépendance : une source Swift (main.swift à côté de ce script) → une app signée localement. À relancer après toute modification de main.swift.
 D="$(cd "$(dirname "$0")" && pwd)"; OUT="/Applications/Home.app"; OLD="/Applications/Jeux/Salon.app"; B="$D/.build"; rm -rf "$B"; mkdir -p "$B/Salon.app/Contents/MacOS" "$B/Salon.app/Contents/Resources"
 xcode-select -p >/dev/null 2>&1 || { echo "Outils développeur Apple manquants : xcode-select --install"; read -r -p "Entrée pour fermer." _; exit 1; }
@@ -54,14 +54,17 @@ if [ -d "$MO/outils" ]; then E="$B/Salon.app/Contents/Resources/moteur"; mkdir -
   rsync -a --exclude .DS_Store --exclude .build --exclude '*.log' --exclude 'main.swift.avant-*' --exclude 'cle-*' "$D/" "$E/salon/"
   ( cd "$E" && find . -type f ! -name .empreinte -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256 | cut -c1-64 ) > "$E/.empreinte"
 fi
-# Signature : si tu as créé un certificat « Salon Dev » (Trousseaux d'accès → Assistant de certification → Créer un certificat, type « Signature de code »),
-# l'app est signée avec et macOS garde ses autorisations (Accessibilité, Enregistrement d'écran, données d'autres apps) d'une version à l'autre.
-# Sinon, signature ad hoc : l'identité change à chaque compilation et macOS redemande les autorisations.
-if security find-identity -v -p codesigning 2>/dev/null | grep -q '"Salon Dev"'; then
-  codesign --force --deep -s "Salon Dev" "$B/Salon.app" 2>&1 | grep -v "replacing existing"; echo "signé avec « Salon Dev » : autorisations conservées"
-else
-  codesign --force --deep -s - "$B/Salon.app" >/dev/null 2>&1; echo "signature ad hoc (crée un certificat « Salon Dev » dans Trousseaux d'accès pour ne plus voir les demandes d'autorisation à chaque build)"
-fi
+# Signature : avec un certificat « Home Dev » (Trousseaux d'accès → Assistant de certification → Créer un certificat, type « Signature de
+# code » ; l'ancien nom « Salon Dev » marche aussi), l'app garde la même identité d'une compilation à l'autre : macOS ne redemande pas ses
+# autorisations (Accessibilité, Enregistrement d'écran, son du système). Les releases de GitHub signent avec le même certificat quand le
+# dépôt en a la copie dans ses secrets (voir .github/workflows/release.yml). Sinon, signature ad hoc : l'identité change à chaque fois.
+SIGNE=""
+for n in "Home Dev" "Salon Dev"; do
+  security find-identity -p codesigning 2>/dev/null | grep -q "\"$n\"" || continue
+  if codesign --force --deep -s "$n" "$B/Salon.app" >/dev/null 2>&1; then SIGNE="$n"; break; fi
+done
+if [ -n "$SIGNE" ]; then echo "signé avec « $SIGNE » : autorisations conservées"
+else codesign --force --deep -s - "$B/Salon.app" >/dev/null 2>&1; echo "signature ad hoc (crée un certificat « Home Dev » dans Trousseaux d'accès pour ne plus voir les demandes d'autorisation à chaque build)"; fi
 # Construction seule (GitHub Actions, ou HOME_BUILD_ONLY=<dossier>) : l'app signée est posée dans ce dossier, rien n'est installé ni quitté
 if [ -n "$HOME_BUILD_ONLY" ]; then
   mkdir -p "$HOME_BUILD_ONLY" && rm -rf "$HOME_BUILD_ONLY/Home.app" && cp -R "$B/Salon.app" "$HOME_BUILD_ONLY/Home.app" && rm -rf "$B" || exit 1

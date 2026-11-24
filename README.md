@@ -45,7 +45,7 @@ macOS demande une fois l'autorisation d'enregistrer le son du système.
 ```bash
 bash app/salon-construire.command
 ```
-Ça compile Home, l'installe dans `/Applications/Home.app` et le relance. Avec un certificat « Salon Dev »
+Ça compile Home, l'installe dans `/Applications/Home.app` et le relance. Avec un certificat « Home Dev »
 (Trousseaux d'accès → Assistant de certification → Créer un certificat, type « Signature de code »),
 macOS garde les autorisations de Home d'une version à l'autre.
 

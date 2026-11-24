@@ -255,8 +255,11 @@ Anas t'utilise surtout depuis l'**onglet Code** de l'app Claude. Regarde d'abord
   clone, il installe la release : `Home-macSilicon.dmg` de la page Releases.
 - **Compatibilité** : la cible est macOS 14 ; GitHub compile avec Xcode 26 / Swift 6.3. Le Mac d'Anas a un SDK plus récent :
   une API de macOS 27 compile chez lui mais casse la release. Vérifie le résultat du workflow après chaque push.
-- **Signature** : avec le certificat local « Salon Dev », macOS garde les autorisations de Home (Accessibilité, Enregistrement
-  d'écran) d'une version à l'autre. Les builds de GitHub sont signés ad hoc.
+- **Signature** : avec le certificat « Home Dev » (créé par Anas dans son trousseau ; l'ancien nom « Salon Dev » marche aussi), Home garde
+  la même identité d'une compilation à l'autre et macOS ne redemande pas ses autorisations (Accessibilité, Enregistrement d'écran, son du
+  système). Les releases signent avec le même certificat si le dépôt a les secrets `HOME_DEV_P12` (le .p12 en base64) et `HOME_DEV_MDP` :
+  c'est Anas qui les crée et les range dans Settings → Secrets → Actions. Ne les lis jamais, ne les mets jamais dans un fichier.
+  Sans certificat, la signature est ad hoc. Ce certificat n'enlève pas l'avertissement de macOS au premier téléchargement.
 
 ## Envoyer une mise à jour
 
@@ -343,4 +346,4 @@ Décidé avec Anas pour Home autonome (pour lui et ses amis) :
    Première version sans les serveurs en ligne.
 3. **À faire : mises à jour.** Après la compilation de toutes les bibliothèques au premier lancement, Home demande si les mises à
    jour automatiques sont activées. Sinon, une option « Mettre à jour » dans le menu. Source : la dernière release du dépôt.
-   L'app téléchargée doit être re-signée sur place avec « Salon Dev » si ce certificat existe, pour garder les autorisations.
+   L'app téléchargée doit être re-signée sur place avec « Home Dev » si ce certificat existe, pour garder les autorisations.
