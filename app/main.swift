@@ -441,17 +441,25 @@ final class Library: ObservableObject {
     @Published var pickCharges: Set<String> = []   // les images du sélecteur déjà chargées : seules celles-là se montrent (et se parcourent)
     @Published var pickerSaisie = false            // la barre de recherche du sélecteur a le clavier (sinon c'est la rangée d'images)
     /// Une image du sélecteur vient de finir de charger : elle apparaît ; si rien de visible n'était visé, c'est elle
+    var pickBouge = false   // on a déjà déplacé le curseur du sélecteur : il ne bouge plus tout seul
     func pickCharge(_ id: String) {
         guard !pickCharges.contains(id) else { return }
         withAnimation(.easeOut(duration: 0.35)) { pickCharges.insert(id) }
-        if let p = picker, p.items.indices.contains(pickIndex), !pickVisible(p.items[pickIndex]), let i = p.items.firstIndex(where: { $0.id == id }) { pickIndex = i }
+        pickCaler()
+    }
+    /// Tant qu'on n'a touché à rien, le curseur est sur la première image chargée en partant de la gauche ; ensuite il ne quitte une image que si elle n'est plus là
+    func pickCaler() {
+        guard let p = picker else { return }
+        let premiere = p.items.firstIndex { $0.thumb != nil && pickCharges.contains($0.id) }
+        if !pickBouge { if let i = premiere, pickIndex != i { pickIndex = i } }
+        else if !(p.items.indices.contains(pickIndex) && pickVisible(p.items[pickIndex])), let i = premiere { pickIndex = i }
     }
     func pickVisible(_ c: Candidate) -> Bool { c.thumb == nil || pickCharges.contains(c.id) }
     /// L'image visible suivante dans un sens
     func pickSuivant(_ d: Int) {
         guard let p = picker else { return }
         var n = pickIndex + d
-        while p.items.indices.contains(n) { if pickVisible(p.items[n]) { pickIndex = n; Sounds.shared.play("deplacer"); return }; n += d }
+        while p.items.indices.contains(n) { if pickVisible(p.items[n]) { pickBouge = true; pickIndex = n; Sounds.shared.play("deplacer"); return }; n += d }
     }
     /// La barre de recherche du sélecteur : un autre nom sous lequel chercher les images de ce jeu (vide = son nom), puis la recherche repart
     func chercherArt(_ nom: String) {
@@ -983,7 +991,7 @@ final class Library: ObservableObject {
     }
     // Galerie SteamGridDB + une dernière case « Depuis un fichier… »
     func openPicker(_ g: Game, _ slot: Slot) {
-        menu = nil; pickCharges = []; pickerSaisie = false
+        menu = nil; pickCharges = []; pickerSaisie = false; pickBouge = false
         let fileItem = Candidate(id: "file", thumb: nil, full: nil, author: "")
         guard let key = SteamGridDB.key() else { log("Jaquette \(g.name) : pas de clé SteamGridDB"); picker = (slot, [fileItem], 0, g); pickIndex = 0; toast = "Pas de clé SteamGridDB (X → Clé SteamGridDB) : choisis un fichier"; return }
         let nomPerso = config.nomsArt?[g.id]   // le nom de recherche tapé dans Apparence, s'il y en a un
@@ -1000,7 +1008,12 @@ final class Library: ObservableObject {
             // ce qui est déjà trouvé est montré tout de suite : chaque source complète la rangée quand elle répond
             func publier(_ liste: [Candidate]) async {
                 let vus = liste.filter { $0.fits(slot) }
-                await MainActor.run { guard self.picker?.game.id == g.id, self.picker?.slot == slot else { return }; self.picker = (slot, vus + [fileItem], 0, g) }
+                await MainActor.run {
+                    guard self.picker?.game.id == g.id, self.picker?.slot == slot else { return }
+                    let visee = self.picker.flatMap { $0.items.indices.contains(self.pickIndex) ? $0.items[self.pickIndex].id : nil }
+                    self.picker = (slot, vus + [fileItem], 0, g)
+                    if self.pickBouge, let v = visee, let i = (vus + [fileItem]).firstIndex(where: { $0.id == v }) { self.pickIndex = i } else { self.pickCaler() }
+                }
             }
             if let t = g.storeID {   // sources officielles d'abord
                 func add(_ c: Candidate) { if !seen.contains(c.id) { seen.insert(c.id); items.append(c) } }
@@ -2249,7 +2262,7 @@ struct MenuView: View {
             .foregroundStyle(it.destructive ? MenuView.rouge : .white)
             .shadow(color: .black.opacity(sel ? 0.6 : 0), radius: 20, y: 10)
             .scaleEffect(sel ? 1.04 : 1).brightness(sel ? 0 : -0.10).animation(.easeOut(duration: 0.14), value: index)
-            .contentShape(Rectangle()).onTapGesture { choisir(i) }.onHover { dedans in if dedans, !it.info, index != i { index = i } }
+            .contentShape(Rectangle()).onTapGesture { choisir(i) }
     }
     @ViewBuilder private var affiches: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 20), count: MenuView.colsAffiches), spacing: 20) {
@@ -2415,7 +2428,7 @@ struct MenuView: View {
         .transition(.opacity)
         .onAppear {
             let f = next(-1, 1); index = f < 0 ? 0 : f
-            if let d = MenuView.dernier[menu.title], menu.items.indices.contains(d), !menu.items[d].info { index = d }
+            if !menu.grid, let d = MenuView.dernier[menu.title], menu.items.indices.contains(d), !menu.items[d].info { index = d }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { paru = true }
         }
         .onChange(of: index) { _, n in MenuView.dernier[menu.title] = n }
@@ -2424,9 +2437,23 @@ struct MenuView: View {
             var cible = index
             if rangee { cible = (k == "right" || k == "down") ? next(index, 1) : (k == "left" || k == "up") ? next(index, -1) : index }   // la rangée : de gauche à droite
             else if menu.grid {   // la grille d'affiches : quatre directions
-                let c = MenuView.colsAffiches
-                let n = k == "right" ? index + 1 : k == "left" ? index - 1 : k == "down" ? min(index + c, menu.items.count - 1) : k == "up" ? index - c : index
-                if menu.items.indices.contains(n), !menu.items[n].info, (k == "down" ? n / c != index / c : true) { cible = n }
+                let c = MenuView.colsAffiches, total = menu.items.count
+                func libre(_ n: Int) -> Bool { menu.items.indices.contains(n) && !menu.items[n].info }
+                switch k {
+                case "right": cible = next(index, 1)
+                case "left": cible = next(index, -1)
+                case "down":
+                    // la même colonne, un rang plus bas (en sautant les cases d'information) ; sur le dernier rang incomplet, la dernière affiche
+                    var n = index + c
+                    while n < total, !libre(n) { n += c }
+                    if n >= total, index / c < (total - 1) / c { n = total - 1; while n > index, !libre(n) { n -= 1 } }
+                    if libre(n), n != index { cible = n }
+                case "up":
+                    var n = index - c
+                    while n >= 0, !libre(n) { n -= c }
+                    if libre(n) { cible = n }
+                default: break
+                }
             }
             else { cible = k == "down" ? next(index, 1) : k == "up" ? next(index, -1) : index }   // la roue : de haut en bas
             if cible != index { index = cible; Sounds.shared.play("deplacer") }
@@ -2732,11 +2759,11 @@ struct PickerView: View {
                                     let sel = i == lib.pickIndex && !lib.pickerSaisie, la = lib.pickVisible(c)
                                     Group {
                                         // une image ne prend sa place qu'une fois entièrement chargée : pas de case vide en attendant
-                                        if let t = c.thumb { AsyncImage(url: t) { ph in if let img = ph.image { img.resizable().scaledToFit().onAppear { lib.pickCharge(c.id) } } else { Color.clear } } }
+                                        if let t = c.thumb { AsyncImage(url: t) { ph in if let img = ph.image { img.resizable().scaledToFit().padding(p.slot == .logo ? 26 : 0).onAppear { lib.pickCharge(c.id) } } else { Color.clear } } }   // un logo est posé avec une marge, pas collé aux bords
                                         else { Image(systemName: "folder.fill").font(.system(size: 54, weight: .light)).frame(width: h * 0.9, height: h).background(.white.opacity(0.10)) }
                                     }
                                     .frame(height: h).frame(minWidth: la ? 150 : 0).frame(width: la ? nil : 0)
-                                    .background(LinearGradient(colors: [Color(white: 0.30), Color(white: 0.16)], startPoint: .top, endPoint: .bottom))   // un fond gris derrière les images transparentes (logos) : on voit ce qui s'affiche
+                                    .background(LinearGradient(colors: [Color(white: 0.60), Color(white: 0.44)], startPoint: .top, endPoint: .bottom))   // un gris moyen derrière les images transparentes : un logo noir s'y lit aussi bien qu'un logo blanc
                                     .clipped()
                                     .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                                     .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(sel && la ? 1 : 0), lineWidth: 4))
@@ -2874,7 +2901,7 @@ struct Screen: View {
                         let d = c - lib.categoryIndex
                         if abs(d) <= 1 {
                             RangeeJeux(lib: lib, categorie: c)
-                                .offset(y: CGFloat(d) * 236).opacity(d == 0 ? 1 : d == 1 ? 0.34 : 0)
+                                .offset(y: CGFloat(d) * 236).opacity(d == 0 ? 1 : d == 1 ? 0.45 : 0).blur(radius: d == 0 ? 0 : 14)
                                 .allowsHitTesting(d == 0).transition(.opacity).zIndex(d == 0 ? 1 : 0)
                         }
                     }
