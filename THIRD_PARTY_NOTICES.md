@@ -13,3 +13,5 @@ récupérés sur le Mac de chacun :
 | Kenney « Interface Sounds » | CC0 | Banque de sons de rechange (`app/sons/banque`) |
 
 Les six sons de l'interface (`app/sons/*.wav`) sont des sons originaux, créés pour Home : ils ne viennent d'aucun projet tiers.
+
+Les logos d'Epic Games et de Steam (`app/logos`, tirés de Wikimedia Commons) sont des marques de leurs propriétaires, Epic Games, Inc. et Valve Corporation. Home les montre seulement pour désigner ces services ; il n'est lié à aucun des deux.

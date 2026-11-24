@@ -386,7 +386,6 @@ final class Library: ObservableObject {
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
     @Published var ouverture = false   // l'animation d'ouverture (logo et jingle), au vrai lancement de l'app seulement
-    @Published var accueil: AccueilEtat? = nil   // l'écran d'accueil (mode d'utilisation), par-dessus tout le reste
     var apresTache: (() -> Void)? = nil   // ce que l'assistant fait une fois la tâche en cours réussie (se connecter, ajouter un jeu…)
     @Published var tache: Tache? = nil { didSet { majDock() } }   // la construction / mise à jour en cours, avec sa barre de progression
     /// Ferme la notification d'une tâche terminée (bouton Fermer, B / Échap) : fondu flouté ; une tâche en cours reste affichée
@@ -635,8 +634,9 @@ final class Library: ObservableObject {
     var sensCategorie = 1   // le sens du dernier changement de catégorie (1 = suivante) : la rangée des jeux entre et sort dans ce sens
     func moveCategory(_ delta: Int) { guard running == nil, !showOptions, picker == nil, !categories.isEmpty else { return }; sensCategorie = delta >= 0 ? 1 : -1; categoryIndex = (categoryIndex + delta + categories.count) % categories.count; selected = 0; Sounds.shared.play("onglet") }
     func toggleSounds() { config.sons = !(config.sons ?? true); Sounds.shared.enabled = config.sons ?? true; saveConfig(); toast = Sounds.shared.enabled ? "Sons activés" : "Sons coupés" }
+    var sensMenu: CGFloat = 1   // 1 = on entre dans un menu (il arrive par la droite), -1 = on revient au précédent (il arrive par la gauche)
     func closeMenu() {
-        if picker == nil, let b = menu?.back { Sounds.shared.play("retour"); b(); return }
+        if picker == nil, let b = menu?.back { Sounds.shared.play("retour"); sensMenu = -1; b(); DispatchQueue.main.async { self.sensMenu = 1 }; return }
         if menu != nil || picker != nil { Sounds.shared.play("retour") }; menu = nil; picker = nil
     }
     func closeAllMenus() { if menu != nil { Sounds.shared.play("retour") }; menu = nil }
@@ -850,6 +850,7 @@ final class Library: ObservableObject {
         return SalonMenu(title: "Home", subtitle: "\(games.count) jeux · \(categories.count - 1) catégories", items: [
             SalonMenuItem(label: "Mises à jour", icon: "arrow.down.circle.fill", tint: .blue, action: { self.openMisesAJour() }),
             SalonMenuItem(label: "Ajouter un jeu", icon: "plus.app.fill", action: { self.openAddMenu(back: { self.menu = self.plusMenu() }) }),
+            SalonMenuItem(label: "Comptes", detail: "Epic Games et Steam", icon: "person.crop.circle.fill", tint: .purple, action: { self.openPC(back: { self.menu = self.plusMenu() }) }),
             SalonMenuItem(label: "Mode", detail: modeResume, icon: "square.grid.2x2.fill", tint: .purple, action: { self.openModeUtilisation() }),
             SalonMenuItem(label: "Catégories", icon: "tag.fill", action: { self.openCategoriesSettings() }),
             SalonMenuItem(label: "Écrans", icon: "display.2", action: { self.openScreensSettings() }),
@@ -2141,99 +2142,20 @@ struct OuvertureView: View {
     }
 }
 
-// MARK: - Écran d'accueil (premier lancement, mode d'utilisation)
-// Un mélange voulu de trois consoles : le fond sombre et vivant et la grande typo fine de la PS5, les grandes tuiles à halo de la Xbox
-// Series, les pastilles rondes, les couleurs franches et l'aide des boutons en bas de la Switch 2. Les trois couleurs sont celles des
-// cartes de l'icône de Home (orange, bleu, violet).
-struct AccueilEtat { var etape = 0; var index = 0; var mode = "tout"; var moteurs = "tout"; var premier = false }
-struct AccueilChoix { let cle: String; let titre: String; let detail: String; let symbole: String; let teinte: [Color]; var badge: String? = nil }
-struct AccueilView: View {
-    @ObservedObject var lib: Library
-    let etat: AccueilEtat
-    var fige = false   // pour l'aperçu en image : tout est déjà en place, sans animation
-    @State private var derive = false
-    @State private var arrive = false
+/// Le symbole d'un choix : un symbole système, ou le logo d'un service (« logo:epic », « logo:steam » : les images de app/logos)
+struct Symbole: View {
+    let nom: String; let taille: CGFloat
+    static var logos: [String: NSImage] = [:]
+    static func logo(_ n: String) -> NSImage? {
+        if let i = logos[n] { return i }
+        guard let u = Bundle.main.resourceURL?.appendingPathComponent("logos/\(n).png"), let i = NSImage(contentsOf: u) else { return nil }
+        logos[n] = i; return i
+    }
     var body: some View {
-        let choix = lib.accueilChoix(etat); let titres = lib.accueilTitres(etat)
-        ZStack {
-            // le fond : une nuit bleutée, et les trois lueurs de l'icône qui dérivent lentement
-            LinearGradient(colors: [Color(red: 0.06, green: 0.07, blue: 0.14), Color(red: 0.01, green: 0.01, blue: 0.03)], startPoint: .top, endPoint: .bottom)
-            GeometryReader { g in
-                let w = g.size.width, h = g.size.height
-                ZStack {
-                    Circle().fill(Library.violet[0]).frame(width: w * 0.55).offset(x: derive ? -w * 0.30 : -w * 0.22, y: derive ? -h * 0.34 : -h * 0.22)
-                    Circle().fill(Library.bleu[1]).frame(width: w * 0.50).offset(x: derive ? w * 0.34 : w * 0.26, y: derive ? h * 0.10 : -h * 0.06)
-                    Circle().fill(Library.orange[1]).frame(width: w * 0.40).offset(x: derive ? -w * 0.10 : w * 0.02, y: derive ? h * 0.44 : h * 0.52)
-                }.frame(width: w, height: h).blur(radius: 150).opacity(0.42)
-            }
-            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
-                    Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 46, height: 46)
-                    Text("Home").font(.system(size: 22, weight: .semibold, design: .rounded))
-                    Spacer()
-                    HStack(spacing: 8) { ForEach(0..<3, id: \.self) { i in Capsule().fill(.white.opacity(i == etat.etape ? 0.95 : 0.25)).frame(width: i == etat.etape ? 34 : 10, height: 10) } }
-                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: etat.etape)
-                }
-                Spacer(minLength: 20)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(titres.0).font(.system(size: 72, weight: .thin)).tracking(-1.5)
-                    Text(titres.1).font(.system(size: 25, weight: .regular)).opacity(0.72)
-                }.id("titre-\(etat.etape)").transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
-                HStack(alignment: .center, spacing: 26) {
-                    ForEach(Array(choix.enumerated()), id: \.element.cle) { i, c in
-                        tuile(c, vise: i == etat.index)
-                            .onTapGesture { if var e = lib.accueil { e.index = i; lib.accueil = e; lib.accueilValider() } }
-                            .onHover { dedans in if dedans, var e = lib.accueil, e.index != i { e.index = i; withAnimation(glisse) { lib.accueil = e } } }
-                    }
-                }.padding(.top, 54).id("tuiles-\(etat.etape)").transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .opacity))
-                Spacer(minLength: 20)
-                HStack(spacing: 14) {
-                    aide(lib.hints.ok, "Choisir"); aide(lib.hints.back, etat.etape == 0 ? (etat.premier ? "Plus tard" : "Fermer") : "Retour")
-                    Spacer()
-                    Text("Tu pourras changer d'avis dans Menu → Mode d'utilisation").font(.system(size: 15)).opacity(0.5)
-                }
-            }.padding(.horizontal, 96).padding(.top, 58).padding(.bottom, 52)
-             .opacity(arrive || fige ? 1 : 0).offset(y: arrive || fige ? 0 : 18)
-        }
-        .foregroundStyle(.white).ignoresSafeArea()
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.7).delay(0.1)) { arrive = true }
-            withAnimation(.easeInOut(duration: 14).repeatForever(autoreverses: true)) { derive = true }
-        }
-    }
-    /// Une tuile : sa couleur en dégradé, un grand symbole, son nom ; visée, elle grandit, s'éclaire et prend un liseré blanc
-    func tuile(_ c: AccueilChoix, vise: Bool) -> some View {
-        ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 36, style: .continuous).fill(LinearGradient(colors: c.teinte, startPoint: .topLeading, endPoint: .bottomTrailing))
-            RoundedRectangle(cornerRadius: 36, style: .continuous).fill(LinearGradient(colors: [.white.opacity(0.18), .clear, .black.opacity(0.38)], startPoint: .top, endPoint: .bottom))
-            Image(systemName: c.symbole).font(.system(size: 210, weight: .regular)).foregroundStyle(.white.opacity(0.10)).rotationEffect(.degrees(-12))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing).offset(x: 56, y: -6)   // le même symbole, immense et discret, qui déborde à droite
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    Image(systemName: c.symbole).font(.system(size: 46, weight: .medium)).frame(width: 84, height: 84).background(.white.opacity(0.18), in: Circle())
-                    Spacer()
-                    if let b = c.badge { Text(b.uppercased()).font(.system(size: 12, weight: .heavy, design: .rounded)).tracking(1).padding(.horizontal, 12).padding(.vertical, 7).background(.black.opacity(0.28), in: Capsule()) }
-                }
-                Spacer()
-                Text(c.titre).font(.system(size: 31, weight: .bold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.7)
-                Text(c.detail).font(.system(size: 17, weight: .medium)).opacity(0.85).lineLimit(3).fixedSize(horizontal: false, vertical: true).padding(.top, 8)
-            }.padding(28)
-        }
-        .frame(maxWidth: .infinity).frame(height: 400)
-        .clipShape(RoundedRectangle(cornerRadius: 36, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 36, style: .continuous).strokeBorder(.white.opacity(vise ? 0.95 : 0), lineWidth: 4))
-        .shadow(color: c.teinte[0].opacity(vise ? 0.65 : 0), radius: 44, y: 14)
-        .shadow(color: .black.opacity(0.45), radius: 18, y: 12)
-        .scaleEffect(vise ? 1.03 : 0.97).saturation(vise ? 1 : 0.75).opacity(vise ? 1 : 0.62)
-        .animation(glisse, value: vise)
-    }
-    /// L'aide d'un bouton, en pastille
-    func aide(_ k: Key, _ texte: String) -> some View {
-        Hint(k: k, t: texte).font(.system(size: 17, weight: .semibold, design: .rounded)).padding(.horizontal, 18).padding(.vertical, 11).background(.white.opacity(0.12), in: Capsule())
+        if nom.hasPrefix("logo:"), let i = Symbole.logo(String(nom.dropFirst(5))) { Image(nsImage: i).resizable().interpolation(.high).scaledToFit().frame(width: taille * 1.5, height: taille * 1.5) }
+        else { Image(systemName: nom.hasPrefix("logo:") ? "person.crop.circle.fill" : nom).font(.system(size: taille, weight: .medium)) }
     }
 }
-
 // Les menus, dans le style de Home : monochromes (la couleur vient du jeu derrière), presque sans texte.
 //  - Un menu court (7 choix au plus, tous actionnables) est une RANGÉE de pastilles rondes en bas à gauche, à la manière de la PS5 :
 //    seul le choix visé a son nom, et sa précision s'il en a une. Gauche / droite pour choisir.
@@ -2249,6 +2171,9 @@ struct MenuView: View {
     @State private var index = 0
     @State private var pop = false
     @State private var paru = false   // les choix arrivent en cascade à l'ouverture du menu
+    @State private var sens: CGFloat = 1   // d'où le menu arrive : de la droite quand on avance, de la gauche quand on revient
+    @State private var fond = false        // son fond sombre : en fondu depuis la bibliothèque, immédiat d'un menu à l'autre
+    static var vu = Date.distantPast       // la dernière fois qu'un menu était à l'écran
     static var dernier: [String: Int] = [:]   // le dernier choix visé de chaque menu : on le retrouve en y revenant
     private var vise: Int { apercu ?? index }
     private func press() { pop = true; DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { pop = false } }
@@ -2334,7 +2259,7 @@ struct MenuView: View {
         }
         .frame(maxWidth: 900, maxHeight: .infinity, alignment: .leading)
         .animation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.22), value: index)
-        .offset(x: paru || apercu != nil ? 0 : -30).opacity(paru || apercu != nil ? 1 : 0)
+        .offset(x: paru || apercu != nil ? 0 : 46 * sens).opacity(paru || apercu != nil ? 1 : 0)
         .animation(.timingCurve(0.2, 0.75, 0.2, 1, duration: 0.36), value: paru)
     }
     /// À droite : le choix visé en image — son aperçu s'il en a un (mods), sinon son symbole en très grand — et sa précision
@@ -2347,8 +2272,9 @@ struct MenuView: View {
                         if let img = phase.image { img.resizable().scaledToFill() } else { ZStack { Color.white.opacity(0.06); ProgressView().tint(.white) } }
                     }.frame(width: 600, height: 338).clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous)).shadow(color: .black.opacity(0.55), radius: 30, y: 16)
                 } else {
-                    Image(systemName: it.icon).font(.system(size: 150, weight: .medium)).foregroundStyle(.white)
-                        .frame(width: 320, height: 320).background(Circle().fill(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing)))
+                    // un logo de service est montré tel quel, sur un disque sombre ; un symbole, en blanc sur la couleur du choix
+                    Symbole(nom: it.icon, taille: it.icon.hasPrefix("logo:") ? 130 : 150).foregroundStyle(.white)
+                        .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Color(white: 0.10)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
                         .shadow(color: c.opacity(0.6), radius: 60, y: 10)
                 }
                 Text(it.detail ?? menu.text ?? " ").font(.system(size: 23, weight: .medium)).multilineTextAlignment(.center).opacity(0.8).lineLimit(3).frame(width: 600, height: 96, alignment: .top)
@@ -2456,10 +2382,15 @@ struct MenuView: View {
                 aides.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading).padding(.leading, 96).padding(.bottom, 44)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white).ignoresSafeArea()
+        .frame(maxWidth: .infinity, maxHeight: .infinity).foregroundStyle(.white)
+        .background(Color.black.opacity(fond || apercu != nil ? (rangee ? 0 : 0.55) : 0).animation(.easeOut(duration: 0.25), value: fond))
+        .ignoresSafeArea()
         .scaleEffect(pop ? 0.995 : 1.0).animation(.spring(response: 0.18, dampingFraction: 0.7), value: pop)
-        .transition(.opacity)
+        .transition(.asymmetric(insertion: .identity, removal: .opacity))   // le nouveau menu est là tout de suite, l'ancien s'efface dessous : la bibliothèque ne réapparaît pas entre les deux
+        .onDisappear { MenuView.vu = Date() }
         .onAppear {
+            sens = lib.sensMenu
+            if Date().timeIntervalSince(MenuView.vu) < 0.4 { var t = Transaction(); t.disablesAnimations = true; withTransaction(t) { fond = true } } else { fond = true }
             let f = next(-1, 1); index = f < 0 ? 0 : f
             if !menu.grid, let d = MenuView.dernier[menu.title], menu.items.indices.contains(d), !menu.items[d].info { index = d }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { paru = true }
@@ -2859,7 +2790,7 @@ struct Screen: View {
         ZStack {
             Group { if g == nil { AddBackground() } else { Background(image: a?.background ?? a?.cover ?? g?.icon, video: g?.video, blurred: a?.background == nil) } }.id(g?.id ?? "salon-plus")
                 .transition(.opacity).animation(.easeInOut(duration: 0.35), value: g?.id)
-            let veiled = lib.menu != nil || lib.picker != nil || lib.accueil != nil
+            let veiled = lib.menu != nil || lib.picker != nil
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center, spacing: 10) {
                     ForEach(Array(lib.categories.enumerated()), id: \.offset) { i, c in
@@ -2948,7 +2879,6 @@ struct Screen: View {
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { PickerView(lib: lib) }
-            if let e = lib.accueil { AccueilView(lib: lib, etat: e).transition(.opacity).zIndex(5) }
             if lib.ouverture { OuvertureView(lib: lib).transition(.opacity).zIndex(20) }
             if let t = lib.tache {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 64).padding(.bottom, 92)
@@ -3264,12 +3194,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Aperçu pour le développement : HOME_APERCU=<dossier> dessine les trois étapes de l'écran d'accueil en PNG (1920×1080) et quitte,
         // sans rien charger ni installer
         if let dossier = ProcessInfo.processInfo.environment["HOME_APERCU"] {
-            for (i, mode) in [(0, "tout"), (1, "tout"), (2, "tout")] {
-                var e = AccueilEtat(); e.etape = i; e.mode = mode; e.premier = true; e.index = i == 2 ? 1 : 0
-                let r = ImageRenderer(content: AccueilView(lib: lib, etat: e, fige: true).frame(width: 1920, height: 1080)); r.scale = 1
-                if let img = r.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
-                    try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("accueil-\(i + 1).png")) }
-            }
             func rendre<V: View>(_ v: V, _ nom: String) {
                 let r = ImageRenderer(content: ZStack { LinearGradient(colors: [Color(red: 0.10, green: 0.30, blue: 0.55), Color(red: 0.04, green: 0.08, blue: 0.20)], startPoint: .topTrailing, endPoint: .bottomLeading); v }.frame(width: 1920, height: 1080)); r.scale = 1
                 if let img = r.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent(nom)) }
@@ -3290,6 +3214,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Volume du jeu : 65 %", icon: "speaker.wave.2.fill", section: "Son", action: {})])
             rendre(MenuView(lib: lib, menu: sous, apercu: 1), "menu-sous.png")
             lib.openModeUtilisation(premier: true); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 0), "mode.png") }; lib.menu = nil
+            let comptes = SalonMenu(title: "Comptes", items: [
+                SalonMenuItem(label: "Epic Games : Amas.16", detail: "Ta bibliothèque", icon: "logo:epic", tint: .purple, action: {}), SalonMenuItem(label: "Steam : non connecté", detail: "Se connecter", icon: "logo:steam", tint: .blue, action: {}),
+                SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: {}), SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {})], roue: true)
+            rendre(MenuView(lib: lib, menu: comptes, apercu: 1), "comptes.png")
             let o = ImageRenderer(content: OuvertureView(lib: lib, fige: true).frame(width: 1920, height: 1080)); o.scale = 1
             if let img = o.nsImage, let t = img.tiffRepresentation, let rep = NSBitmapImageRep(data: t), let png = rep.representation(using: .png, properties: [:]) {
                 try? png.write(to: URL(fileURLWithPath: dossier).appendingPathComponent("ouverture.png")) }
@@ -3416,7 +3344,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // lançait le premier jeu de la liste sans qu'on le veuille
         if Date().timeIntervalSince(demarrage) < 1.5 { if lib.ouverture, Date().timeIntervalSince(demarrage) > 0.4 { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false } }; return }
         if lib.ouverture { withAnimation(.easeInOut(duration: 0.35)) { lib.ouverture = false }; return }   // n'importe quelle touche ou bouton passe l'ouverture
-        if lib.accueil != nil { lib.accueilNav(k); return }
         if let p = lib.picker {
             _ = p
             if lib.pickerSaisie { if k == "up" || k == "back" { lib.pickerSaisie = false; Sounds.shared.play("deplacer") }; return }
@@ -3551,7 +3478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (name, pressed, action) in buttons {
             if pressed && prev[name] != true {
                 if action == "catL" { lib.moveCategory(-1) } else if action == "catR" { lib.moveCategory(1) }
-                else if action == "back" && lib.picker == nil && !lib.showOptions { if lib.menu == nil { lib.fermerTache() } } else { nav(action) }
+                else { nav(action) }   // retour compris : sur la bibliothèque, il ferme la carte d'une tâche finie, sinon propose de quitter Home
             }
             prev[name] = pressed
         }
@@ -4253,7 +4180,7 @@ extension Library {
         let mode = config.mode ?? "tout"
         func choix(_ nom: String, _ precision: String, _ symbole: String, _ teinte: Color, _ cle: String) -> SalonMenuItem {
             SalonMenuItem(label: nom + (!premier && cle == mode ? " : actuel" : ""), detail: precision, icon: symbole, tint: teinte, action: {
-                if cle == "pc" { self.etapePC(mode: cle, moteurs: "tout", premier: premier) } else { self.etapeMoteurs(mode: cle, premier: premier) } })
+                if cle == "pc" { self.appliquerMode(mode: cle, moteurs: "tout", ensuite: { self.openPC() }) } else { self.etapeMoteurs(mode: cle, premier: premier) } })
         }
         var items = [
             choix("Tout", "Jeux Nintendo et jeux PC", "square.grid.2x2.fill", .purple, "tout"),
@@ -4261,58 +4188,19 @@ extension Library {
             choix("PC", "Epic Games, Steam, jeux Windows", "desktopcomputer", .blue, "pc"),
         ]
         if premier { items.append(SalonMenuItem(label: "Plus tard", icon: "moon.zzz.fill", tint: .gray, action: { self.config.mode = "tout"; self.saveConfig(); self.menu = nil })) }
-        menu = SalonMenu(title: premier ? "Bienvenue" : "Mode", items: items, step: 1, steps: 3, back: premier ? { self.config.mode = "tout"; self.saveConfig(); self.menu = nil } : { self.menu = self.plusMenu() }, roue: true)
+        menu = SalonMenu(title: premier ? "Bienvenue" : "Mode", items: items, step: 1, steps: 2, back: premier ? { self.config.mode = "tout"; self.saveConfig(); self.menu = nil } : { self.menu = self.plusMenu() }, roue: true)
     }
     private func etapeMoteurs(mode: String, premier: Bool) {
-        let suite: (String) -> Void = { m in if mode == "tout" { self.etapePC(mode: mode, moteurs: m, premier: premier) } else { self.appliquerMode(mode: mode, moteurs: m, ensuite: nil) } }
+        let suite: (String) -> Void = { m in self.appliquerMode(mode: mode, moteurs: m, ensuite: mode == "tout" ? { self.openPC() } : nil) }   // avec les jeux PC : on finit sur Comptes
         menu = SalonMenu(title: "Nintendo", items: [
             SalonMenuItem(label: "Tout", detail: "Le bon moteur pour chaque jeu", icon: "sparkles", tint: .purple, action: { suite("tout") }),
             SalonMenuItem(label: "MacNativeGames", detail: "Tears of the Kingdom, Breath of the Wild, Ocarina of Time", icon: "leaf.fill", section: "Avancé", tint: .orange, action: { suite("mng") }),
             SalonMenuItem(label: "nxnative", detail: "Les autres jeux — demande Xcode", icon: "cpu.fill", tint: .blue, action: { suite("nxnative") }),
-        ], step: 2, steps: 3, back: { self.openModeUtilisation(premier: premier) }, roue: true)
-    }
-    private func etapePC(mode: String, moteurs: String, premier: Bool) {
-        let fin: ((() -> Void)?) -> Void = { e in self.appliquerMode(mode: mode, moteurs: moteurs, ensuite: e) }
-        menu = SalonMenu(title: "PC", items: [
-            SalonMenuItem(label: "Epic Games", icon: "person.crop.circle.fill.badge.plus", tint: .purple, action: { fin({ self.connexionEpic(retour: { self.openPC() }) }) }),
-            SalonMenuItem(label: "Steam", icon: "qrcode", tint: .blue, action: { fin({
-                self.apresTache = { self.connexionSteam(retour: { self.openPC() }) }
-                if PCHome.steamPret { let a = self.apresTache; self.apresTache = nil; a?() } else if !self.lancer("preparer-steam.command", titre: "Préparation de Steam") { self.apresTache = nil } }) }),
-            SalonMenuItem(label: "Un jeu installé", detail: "Un .exe ou un installateur", icon: "shippingbox.fill", tint: .orange, action: { fin({ self.openAddMenu() }) }),
-            SalonMenuItem(label: "Plus tard", icon: "moon.zzz.fill", tint: .gray, action: { fin(nil) }),
-        ], step: 3, steps: 3, back: { if mode == "pc" { self.openModeUtilisation(premier: premier) } else { self.etapeMoteurs(mode: mode, premier: premier) } }, roue: true)
+        ], step: 2, steps: 2, back: { self.openModeUtilisation(premier: premier) }, roue: true)
     }
     static let orange = [Color(red: 1.0, green: 0.70, blue: 0.23), Color(red: 1.0, green: 0.42, blue: 0.24)]
     static let bleu = [Color(red: 0.19, green: 0.78, blue: 0.80), Color(red: 0.16, green: 0.38, blue: 1.0)]
     static let violet = [Color(red: 0.58, green: 0.40, blue: 0.98), Color(red: 0.33, green: 0.17, blue: 0.80)]
-    static let gris = [Color(white: 0.36), Color(white: 0.20)]
-    /// Les tuiles de l'étape en cours
-    func accueilChoix(_ e: AccueilEtat) -> [AccueilChoix] {
-        switch e.etape {
-        case 0: return [
-            AccueilChoix(cle: "tout", titre: "Tout", detail: "Jeux Nintendo et jeux PC, au même endroit", symbole: "square.grid.2x2.fill", teinte: Library.violet, badge: "Recommandé"),
-            AccueilChoix(cle: "nintendo", titre: "Jeux Nintendo", detail: "Switch et Switch 2, à partir de tes propres dumps", symbole: "gamecontroller.fill", teinte: Library.orange),
-            AccueilChoix(cle: "pc", titre: "Jeux PC", detail: "Epic Games, Steam, ou des jeux Windows que tu as déjà", symbole: "desktopcomputer", teinte: Library.bleu)]
-        case 1: return [
-            AccueilChoix(cle: "tout", titre: "Tout installer", detail: "Home choisit le bon moteur pour chaque jeu", symbole: "sparkles", teinte: Library.violet, badge: "Recommandé"),
-            AccueilChoix(cle: "mng", titre: "MacNativeGames", detail: "Zelda Tears of the Kingdom, Breath of the Wild, Ocarina of Time", symbole: "leaf.fill", teinte: Library.orange, badge: "Avancé"),
-            AccueilChoix(cle: "nxnative", titre: "nxnative", detail: "Les autres jeux Switch et Switch 2 — demande Xcode entier", symbole: "cpu.fill", teinte: Library.bleu, badge: "Avancé")]
-        default: return [
-            AccueilChoix(cle: "epic", titre: "Epic Games", detail: "Ta bibliothèque Epic, connexion sur le site d'Epic", symbole: "person.crop.circle.fill.badge.plus", teinte: Library.violet),
-            AccueilChoix(cle: "steam", titre: "Steam", detail: "QR code avec ton téléphone, ou identifiant et mot de passe", symbole: "qrcode", teinte: Library.bleu),
-            AccueilChoix(cle: "local", titre: "Un jeu que j'ai déjà", detail: "Un .exe dans son dossier, ou un installateur", symbole: "shippingbox.fill", teinte: Library.orange),
-            AccueilChoix(cle: "tard", titre: "Plus tard", detail: "Seul le moteur Windows est installé", symbole: "moon.zzz.fill", teinte: Library.gris)]
-        }
-    }
-    func accueilTitres(_ e: AccueilEtat) -> (String, String) {
-        switch e.etape {
-        case 0: return (e.premier ? "Bienvenue." : "Mode d'utilisation", "À quoi Home va-t-il servir sur ce Mac ?")
-        case 1: return ("Jeux Nintendo", "Quels moteurs installer pour transformer tes jeux en apps Mac ?")
-        default: return ("Jeux PC", "Home installe le moteur Windows. Par où veux-tu commencer ?")
-        }
-    }
-    func accueilNav(_ k: String) {}
-    func accueilValider() {}
     /// Enregistre le mode et télécharge ce qui lui manque ; « ensuite » se fait quand tout est installé
     private func appliquerMode(mode: String, moteurs: String, ensuite: (() -> Void)?) {
         config.mode = mode; config.moteurs = moteurs; saveConfig(); menu = nil
@@ -4381,42 +4269,36 @@ extension Library {
         items.append(SalonMenuItem(label: "Fermer", icon: "xmark.circle.fill", tint: .gray, action: { if let back { back() } else { self.menu = nil } }))
         menu = SalonMenu(title: "Incompatible avec le Mac", subtitle: nom, items: items, hero: "xmark.shield.fill", text: "Home ne lance pas ce jeu : il ne démarrerait pas, ou ton compte pourrait être sanctionné. Aucune protection n'est contournée.", back: back)
     }
-    /// Jeux PC sans Obelisk : le moteur Windows (Voile) et Legendary à installer, le compte Epic à connecter, puis la bibliothèque
+    /// Comptes : un seul endroit pour Epic Games et Steam. Chaque service montre son état ; le choisir fait ce qu'il faut, dans l'ordre —
+    /// installer le moteur Windows s'il manque, se connecter si on ne l'est pas, sinon ouvrir la bibliothèque. Les jeux qu'on a déjà
+    /// (un .exe, un installateur) sont au même endroit.
     func openPC(back: (() -> Void)? = nil) {
         let ici: () -> Void = { self.openPC(back: back) }
-        menu = SalonMenu(title: "Jeux PC", subtitle: "Vérification…", items: [SalonMenuItem(label: "Un instant…", icon: "hourglass", info: true, action: {})], hero: "desktopcomputer", back: back)
+        menu = SalonMenu(title: "Comptes", items: [SalonMenuItem(label: "Un instant", icon: "hourglass", info: true, action: {})], back: back, roue: true)
         DispatchQueue.global().async {
             let e = PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]
             let steam = PCHome.steamPret ? (PCHome.json(PCHome.steam(["etat"])) as? [String: Any])?["compte"] as? String : nil
             DispatchQueue.main.async {
-                guard self.menu?.title == "Jeux PC" else { return }
-                let voile = e["voile"] as? String, leg = e["legendary"] as? Bool ?? false, compte = e["compte"] as? String
-                var items: [SalonMenuItem] = []
-                if voile == nil || !leg {
-                    items.append(SalonMenuItem(label: "Installer le moteur Windows", detail: voile == nil ? "Voile, le moteur d'Obelisk : 500 Mo à télécharger, 3 Go sur le disque" : "Legendary, pour ton compte Epic Games", icon: "arrow.down.circle.fill", tint: .green, action: {
-                        self.menu = nil; self.lancer("pc.command", ["preparer"], titre: "Installation du moteur Windows") }))
-                } else if compte == nil {
-                    items.append(SalonMenuItem(label: "Se connecter à Epic Games", detail: "Sur le site d'Epic", icon: "person.crop.circle.badge.plus", tint: .green, action: { self.connexionEpic(retour: ici) }))
-                } else {
-                    items.append(SalonMenuItem(label: "Ma bibliothèque Epic Games", detail: "Compte \(compte ?? "")", icon: "books.vertical.fill", tint: .green, action: { self.openBibliotheque(back: ici) }))
-                    items.append(SalonMenuItem(label: "Changer de compte", icon: "person.crop.circle.badge.plus", tint: .gray, action: { self.connexionEpic(retour: ici) }))
-                }
-                items.append(SalonMenuItem(label: voile.map { "Moteur Voile \($0)" } ?? "Moteur Voile absent", detail: (e["voile_source"] as? String) == "obelisk" ? "Celui d'Obelisk, déjà sur ce Mac" : nil, icon: voile == nil ? "circle" : "checkmark.circle.fill", section: "État", tint: voile == nil ? .orange : .green, info: true, action: {}))
-                if !PCHome.steamPret {
-                    items.append(SalonMenuItem(label: "Préparer Steam", detail: "Quelques minutes", icon: "arrow.down.circle.fill", section: "Steam", tint: .blue, action: {
-                        self.menu = nil; self.lancer("preparer-steam.command", titre: "Préparation de Steam") }))
-                } else if let cs = steam {
-                    items.append(SalonMenuItem(label: "Ma bibliothèque Steam", detail: "Compte \(cs)", icon: "books.vertical.fill", section: "Steam", tint: .blue, action: { self.openBibliothequeSteam(back: ici) }))
-                    items.append(SalonMenuItem(label: "Déconnecter Steam", icon: "person.crop.circle.badge.minus", section: "Steam", tint: .gray, action: { _ = PCHome.steam(["deconnexion"]); ici() }))
-                } else {
-                    items.append(SalonMenuItem(label: "Se connecter à Steam", detail: "QR code ou mot de passe", icon: "qrcode", section: "Steam", tint: .blue, action: { self.connexionSteam(retour: ici) }))
-                }
-                if FileManager.default.fileExists(atPath: "/Applications/Obelisk.app") { items.append(SalonMenuItem(label: "Ouvrir Obelisk", detail: "Pour installer et lancer les jeux Steam et GOG en attendant", icon: "desktopcomputer", section: "Autres boutiques", tint: .indigo, action: { self.menu = nil; self.ouvrirObelisk() })) }
-                self.menu = SalonMenu(title: "Jeux PC", subtitle: "Epic Games et Steam, sans Obelisk", items: items, hero: "desktopcomputer", back: back)
+                guard self.menu?.title == "Comptes" else { return }
+                let moteur = e["voile"] as? String != nil && e["legendary"] as? Bool == true, epic = e["compte"] as? String
+                var items: [SalonMenuItem] = [
+                    SalonMenuItem(label: "Epic Games : " + (epic ?? "non connecté"), detail: epic != nil ? "Ta bibliothèque" : moteur ? "Se connecter" : "Installer le moteur Windows, puis se connecter", icon: "logo:epic", tint: .purple, action: {
+                        if !moteur { self.apresTache = ici; if !self.lancer("pc.command", ["preparer"], titre: "Moteur Windows") { self.apresTache = nil } }   // puis retour ici, où il ne reste qu'à se connecter
+                        else if epic == nil { self.connexionEpic(retour: ici) }
+                        else { self.openBibliotheque(back: ici) } }),
+                    SalonMenuItem(label: "Steam : " + (steam ?? "non connecté"), detail: steam != nil ? "Ta bibliothèque" : PCHome.steamPret ? "Se connecter" : "Préparer Steam, puis se connecter", icon: "logo:steam", tint: .blue, action: {
+                        if !PCHome.steamPret { self.apresTache = ici; if !self.lancer("preparer-steam.command", titre: "Préparation de Steam") { self.apresTache = nil } }
+                        else if steam == nil { self.connexionSteam(retour: ici) }
+                        else { self.openBibliothequeSteam(back: ici) } }),
+                    SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: { self.ajouterExe() }),
+                    SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: { self.installerDepuisSetup() }),
+                ]
+                if epic != nil { items.append(SalonMenuItem(label: "Quitter Epic", icon: "rectangle.portrait.and.arrow.right", section: "Déconnexion", tint: .gray, action: { DispatchQueue.global().async { _ = PCHome.run(["deconnexion"]); DispatchQueue.main.async { ici() } } })) }
+                if steam != nil { items.append(SalonMenuItem(label: "Quitter Steam", icon: "rectangle.portrait.and.arrow.right", section: epic == nil ? "Déconnexion" : nil, tint: .gray, action: { _ = PCHome.steam(["deconnexion"]); ici() })) }
+                self.menu = SalonMenu(title: "Comptes", items: items, back: back, roue: true)
             }
         }
     }
-    /// Connexion Epic : la page de connexion d'Epic s'ouvre dans le navigateur et affiche un code (authorizationCode) à coller ici
     /// Se connecter à Epic : dans une fenêtre de Home (rien à copier), ou dans ton navigateur (il a tes mots de passe enregistrés)
     func connexionEpic(retour: @escaping () -> Void) {
         menu = SalonMenu(title: "Connexion à Epic Games", subtitle: "Où veux-tu te connecter ?", items: [
@@ -4638,11 +4520,11 @@ extension Library {
             SalonMenuItem(label: "Switch", icon: "gamecontroller.fill", action: {
                 if !Atelier.nxnativePret && !Atelier.mngPret { self.openPreparation(back: ici); return }   // aucun moteur : d'abord préparer ce Mac
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
-            SalonMenuItem(label: "Epic Games et Steam", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
+            SalonMenuItem(label: "Epic Games ou Steam", icon: "desktopcomputer", action: { self.openPC(back: ici) }),
             SalonMenuItem(label: "Jeu Windows installé", detail: "Son .exe", icon: "folder.fill", action: { self.ajouterExe() }),
             SalonMenuItem(label: "Installateur Windows", detail: "setup.exe ou .msi", icon: "shippingbox.fill", action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "App Mac", icon: "macwindow", action: { self.menu = nil; self.addGame() }),
-        ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games et Steam", "Jeu Windows installé", "Installateur Windows"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
+        ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games ou Steam", "Jeu Windows installé", "Installateur Windows"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
         hero: "plus.app.fill", back: back)
     }
     func ouvrirObelisk() {

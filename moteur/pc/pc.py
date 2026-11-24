@@ -23,6 +23,7 @@ compatibilité (moteur/compat/pc.json), avec sa raison et sa source.
   pc.py etat                    ce qui est prêt, en JSON
   pc.py preparer                Legendary (dans moteur/.venv-pc) et Voile, s'ils manquent
   pc.py connexion CODE          le compte Epic, avec le code donné par la page de connexion
+  pc.py deconnexion             oublie le compte Epic
   pc.py bibliotheque            les jeux du compte, en JSON, avec leur compatibilité
   pc.py installer APP           télécharge un jeu dans <Home>/pc/jeux
   pc.py lancer APP [--essai]    lance un jeu (--essai : affiche la commande sans rien lancer, code Epic masqué)
@@ -258,6 +259,9 @@ def cmd_connexion(code):
     c = coeur()
     if not c.auth_code(code): echec('Epic a refusé le code (il ne sert qu\'une fois et expire vite) : recommence la connexion')
     dire('Connecté à Epic : ' + str(c.lgd.userdata.get('displayName', '')))
+
+def cmd_deconnexion():
+    c = coeur(); c.lgd.invalidate_userdata(); dire('Déconnecté d\'Epic')
 
 def cmd_bibliotheque():
     c = coeur()
@@ -518,6 +522,7 @@ def main():
     if c == 'etat': cmd_etat()
     elif c == 'preparer': cmd_preparer()
     elif c == 'connexion' and len(a) == 2: cmd_connexion(a[1])
+    elif c == 'deconnexion': cmd_deconnexion()
     elif c == 'bibliotheque': cmd_bibliotheque()
     elif c == 'installer' and len(a) == 2: cmd_installer(a[1])
     elif c == 'lancer' and len(a) >= 2: cmd_lancer(a[1], essai='--essai' in a[2:])
