@@ -1,6 +1,7 @@
 # Construit Home.app sur un Mac de GitHub et publie une release.
-# - Un tag v* (ex. v0.1.0) : release « Home 0.1.0 » avec Home.zip, que Home télécharge pour se mettre à jour.
-# - « Run workflow » à la main, ou un push sur main : construction seule, l'app est gardée 7 jours dans les artefacts du run.
+# - Actions → Construire Home → Run workflow, avec une version (ex. 0.2.0) : release « Home 0.2.0 » (tag v0.2.0) avec Home.zip,
+#   que Home télécharge pour se mettre à jour. Un tag v* poussé fait pareil.
+# - Un push sur main, ou Run workflow sans version : construction seule, l'app est gardée 7 jours dans les artefacts du run.
 name: Construire Home
 
 on:
@@ -9,6 +10,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à publier (ex. 0.2.0). Vide : construction seule, sans release"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -26,9 +32,13 @@ jobs:
 
       - name: Version
         id: version
+        env:
+          VERSION_DEMANDEE: ${{ inputs.version }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.${GITHUB_RUN_NUMBER}"; fi
-          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; publier=1
+          elif [ -n "${VERSION_DEMANDEE}" ]; then v="${VERSION_DEMANDEE#v}"; publier=1
+          else v="0.0.0-dev.${GITHUB_RUN_NUMBER}"; publier=0; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"; echo "publier=$publier" >> "$GITHUB_OUTPUT"
           xcrun swiftc --version
 
       - name: Compiler Home.app
@@ -55,9 +65,10 @@ jobs:
           retention-days: 7
 
       - name: Publier la release
-        if: github.ref_type == 'tag'
+        if: steps.version.outputs.publier == '1'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/Home.zip dist/Home.zip.sha256 \
-            --title "Home ${{ steps.version.outputs.version }}" --generate-notes
+          gh release create "v${VERSION}" dist/Home.zip dist/Home.zip.sha256 --target "${GITHUB_SHA}" \
+            --title "Home ${VERSION}" --generate-notes

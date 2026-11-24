@@ -42,12 +42,8 @@ macOS garde les autorisations de Home d'une version à l'autre.
 ## Publier une version
 
 Chaque push sur `main` est compilé par GitHub Actions (onglet **Actions**). Pour publier une release :
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-La release « Home 0.2.0 » apparaît avec `Home.zip`.
+**Actions → Construire Home → Run workflow**, tape la version (ex. `0.2.0`), puis **Run workflow**.
+Environ une minute plus tard, la release « Home 0.2.0 » apparaît avec `Home.zip`. Pousser un tag `v0.2.0` fait pareil.
 
 ## Inviter un ami
 
