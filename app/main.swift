@@ -2567,18 +2567,46 @@ struct OuvertureApercu: View {
     }
 }
 
-/// Le symbole d'un choix : un symbole système, ou le logo d'un service (« logo:epic », « logo:steam » : les images de app/logos)
+/// Le symbole d'un choix : un symbole système, ou le repère d'un service (« logo:… »), dessiné par Home sur un disque à la couleur
+/// du service. Les vrais logos sont des marques déposées : une app publique ne les embarque pas.
 struct Symbole: View {
     let nom: String; let taille: CGFloat
-    var clair = false   // (gardé pour les appels existants : les repères sont dessinés dans la couleur du texte)
-    /// Le disque derrière un repère de service : rouge pour les jeux de console, sombre pour les boutiques
-    static func fond(_ nom: String) -> Color { nom == "logo:switch" ? Color(red: 0.90, green: 0.0, blue: 0.07) : nom == "logo:steam" ? Color(red: 0.03, green: 0.08, blue: 0.20) : Color(white: 0.12) }
-    /// Les repères des services (« logo:epic », « logo:steam », « logo:switch », « logo:windows ») sont dessinés par Home, pour qu'on les
-    /// reconnaisse d'un coup d'œil sans reprendre un logo : les vrais sont des marques déposées, une app publique ne les embarque pas.
-    static let reperes: Set<String> = ["logo:epic", "logo:steam", "logo:switch", "logo:windows"]
-    var body: some View {
+    var clair = false   // sur une carte déjà colorée, le dessin garde la couleur du texte
+    static func rvb(_ nom: String) -> (Double, Double, Double) {
         switch nom {
-        case "logo:switch":   // une console portable vue de face : l'écran entre ses deux manettes, un stick et des boutons
+        case "logo:switch": return (0.88, 0.02, 0.09)
+        case "logo:steam": return (0.07, 0.17, 0.38)
+        case "logo:windows": return (0.02, 0.46, 0.86)
+        case "logo:mac": return (0.72, 0.73, 0.77)
+        default: return (0.16, 0.16, 0.19)
+        }
+    }
+    /// Le disque derrière un repère : la couleur du service, plus claire en haut à gauche pour lui donner du volume
+    static func degrade(_ nom: String) -> LinearGradient {
+        let c = rvb(nom); func n(_ k: Double, _ p: Double) -> Color { Color(red: min(1, c.0 * k + p), green: min(1, c.1 * k + p), blue: min(1, c.2 * k + p)) }
+        return LinearGradient(colors: [n(1.18, 0.10), n(1, 0), n(0.58, 0)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    /// Le dessin prend une nuance de la couleur du disque
+    static func encre(_ nom: String) -> Color {
+        switch nom {
+        case "logo:steam": return Color(red: 0.80, green: 0.90, blue: 1.0)
+        case "logo:mac": return Color(white: 0.17)
+        default: return .white
+        }
+    }
+    /// Les formes de la bielle, dans un carré de 0 à 1 : `true` = une découpe qui laisse voir le fond
+    static let bielle: [(Bool, [CGPoint])] = {
+        func e(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat) -> [CGPoint] { (0..<10).map { let a = CGFloat($0) / 10 * 2 * .pi + 0.3; return CGPoint(x: x + cos(a) * r * 1.05, y: y + sin(a) * r * 1.05) } }
+        let bras = [CGPoint(x: 0.537, y: 0.251), CGPoint(x: 0.743, y: 0.469), CGPoint(x: 0.315, y: 0.838), CGPoint(x: 0.165, y: 0.682)]
+        return [(false, bras), (false, e(0.64, 0.36, 0.285)), (false, e(0.24, 0.76, 0.155)), (true, e(0.645, 0.355, 0.195)), (false, e(0.648, 0.352, 0.112)), (true, e(0.238, 0.762, 0.066))]
+    }()
+    var body: some View {
+        if clair || !nom.hasPrefix("logo:") { dessin } else { dessin.foregroundStyle(Symbole.encre(nom)) }
+    }
+    @ViewBuilder var dessin: some View {
+        switch nom {
+        case "logo:mac": Image(systemName: "laptopcomputer").font(.system(size: taille * 0.86, weight: .semibold))
+        case "logo:switch":   // une console portable vue de face : l'écran entre ses deux manettes, un stick de chaque côté
             let h = taille * 0.86, l = taille * 1.62, m = l * 0.21, r = h * 0.30
             HStack(spacing: taille * 0.05) {
                 UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: 3, topTrailingRadius: 3, style: .continuous).frame(width: m, height: h)
@@ -2588,27 +2616,46 @@ struct Symbole: View {
                 UnevenRoundedRectangle(topLeadingRadius: 3, bottomLeadingRadius: 3, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous).frame(width: m, height: h)
                     .overlay(alignment: .bottom) { Circle().fill(.black.opacity(0.42)).frame(width: m * 0.46, height: m * 0.46).padding(.bottom, h * 0.20) }
             }
-        case "logo:steam":    // de la vapeur : trois volutes qui montent
-            Vapeur().stroke(style: StrokeStyle(lineWidth: taille * 0.15, lineCap: .round, lineJoin: .round)).frame(width: taille * 1.15, height: taille * 1.15)
-        case "logo:epic":     // une initiale, dans l'écriture de Home
-            Text("E").font(.system(size: taille * 1.2, weight: .black).width(.expanded))
-        case "logo:windows":  // un PC
-            Image(systemName: "desktopcomputer").font(.system(size: taille * 0.95, weight: .semibold))
+        case "logo:steam":    // une bielle d'un seul bloc : le volant, son moyeu, le bras qui s'affine, le palier
+            let t = taille * 1.42
+            let formes = Symbole.bielle
+            ZStack { ForEach(Array(formes.enumerated()), id: \.offset) { i, f in Galet(points: f.1, droit: i == 0).blendMode(f.0 ? .destinationOut : .normal) } }.compositingGroup().frame(width: t, height: t)
+        case "logo:epic":     // un écusson plein, l'initiale découpée dedans
+            ZStack(alignment: .top) {
+                Ecusson().frame(width: taille * 1.12, height: taille * 1.36)
+                Text("E").font(.system(size: taille * 0.86, weight: .black, design: .rounded)).padding(.top, taille * 0.07).blendMode(.destinationOut)
+            }.compositingGroup()
+        case "logo:windows":  // quatre carreaux nets et serrés
+            let t = taille * 1.16, j = t * 0.07, c = (t - j) / 2
+            VStack(spacing: j) { HStack(spacing: j) { Rectangle().frame(width: c, height: c); Rectangle().frame(width: c, height: c) }; HStack(spacing: j) { Rectangle().frame(width: c, height: c); Rectangle().frame(width: c, height: c) } }
         default: Image(systemName: nom.hasPrefix("logo:") ? "person.crop.circle.fill" : nom).font(.system(size: taille, weight: .medium))
         }
     }
 }
-/// Trois volutes de vapeur, pour désigner Steam sans son logo
-struct Vapeur: Shape {
+/// Un écusson : des coins ronds en haut, des flancs droits, puis deux courbes qui se rejoignent en pointe
+struct Ecusson: Shape {
     func path(in r: CGRect) -> Path {
-        var p = Path(); let w = r.width, h = r.height
-        for x in [0.20, 0.50, 0.80] {
-            let cx = r.minX + w * x, a = w * 0.11
-            p.move(to: CGPoint(x: cx, y: r.maxY - h * 0.08))
-            p.addCurve(to: CGPoint(x: cx, y: r.minY + h * 0.50), control1: CGPoint(x: cx - a * 1.6, y: r.maxY - h * 0.22), control2: CGPoint(x: cx + a * 1.6, y: r.minY + h * 0.64))
-            p.addCurve(to: CGPoint(x: cx, y: r.minY + h * 0.08), control1: CGPoint(x: cx - a * 1.6, y: r.minY + h * 0.36), control2: CGPoint(x: cx + a * 1.6, y: r.minY + h * 0.22))
-        }
-        return p
+        var p = Path(); let c = r.width * 0.14, y = r.minY + r.height * 0.58
+        p.move(to: CGPoint(x: r.minX + c, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX - c, y: r.minY))
+        p.addQuadCurve(to: CGPoint(x: r.maxX, y: r.minY + c), control: CGPoint(x: r.maxX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: y))
+        p.addQuadCurve(to: CGPoint(x: r.midX, y: r.maxY), control: CGPoint(x: r.maxX, y: r.minY + r.height * 0.88))
+        p.addQuadCurve(to: CGPoint(x: r.minX, y: y), control: CGPoint(x: r.minX, y: r.minY + r.height * 0.88))
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + c)); p.addQuadCurve(to: CGPoint(x: r.minX + c, y: r.minY), control: CGPoint(x: r.minX, y: r.minY))
+        p.closeSubpath(); return p
+    }
+}
+/// Une forme pleine au contour souple : la courbe passe par le milieu de chaque côté du polygone donné (points dans un carré de 0 à 1).
+/// `droit` : le polygone tel quel, sans l'arrondir
+struct Galet: Shape {
+    let points: [CGPoint]; var droit = false
+    func path(in r: CGRect) -> Path {
+        var p = Path(); let q = points.map { CGPoint(x: r.minX + $0.x * r.width, y: r.minY + $0.y * r.height) }, n = q.count
+        guard n > 2 else { return p }
+        if droit { p.addLines(q); p.closeSubpath(); return p }
+        func m(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+        p.move(to: m(q[n - 1], q[0]))
+        for i in 0..<n { p.addQuadCurve(to: m(q[i], q[(i + 1) % n]), control: q[i]) }
+        p.closeSubpath(); return p
     }
 }
 // Les menus, dans le style de Home : monochromes (la couleur vient du jeu derrière), presque sans texte.
@@ -2722,7 +2769,7 @@ struct MenuView: View {
     /// Le disque d'un choix : un logo de service tel quel sur un disque sombre ; un symbole, en blanc sur la couleur du choix
     private func disque(_ it: SalonMenuItem, _ c: Color) -> some View {
         Symbole(nom: it.icon, taille: it.icon.hasPrefix("logo:") ? 130 : 150).foregroundStyle(.white)
-            .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Symbole.fond(it.icon)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
+            .frame(width: 320, height: 320).background(Circle().fill(it.icon.hasPrefix("logo:") ? AnyShapeStyle(Symbole.degrade(it.icon)) : AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))))
             .shadow(color: c.opacity(0.6), radius: 60, y: 10)
     }
     @ViewBuilder private var apercuChoix: some View {
@@ -2776,10 +2823,10 @@ struct MenuView: View {
                             let c = menuTint(it.icon, tint: it.tint, destructive: it.destructive)
                             let logo = it.icon.hasPrefix("logo:")
                             Symbole(nom: it.icon, taille: logo ? (sel ? 38 : 30) : (sel ? 32 : 26)).fontWeight(.semibold).frame(width: sel ? 96 : 76, height: sel ? 96 : 76)
-                                .background(Circle().fill(logo ? AnyShapeStyle(Symbole.fond(it.icon)) : sel ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(0.5))))
+                                .background(Circle().fill(logo ? AnyShapeStyle(Symbole.degrade(it.icon)) : sel ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(0.5))))
                                 .saturation(logo && !sel ? 0.7 : 1).brightness(logo && !sel ? -0.12 : 0)
                                 .overlay(Circle().strokeBorder(sel ? .white.opacity(0.9) : c.opacity(0.45), lineWidth: sel ? 3 : 1.5))
-                                .foregroundStyle(sel || logo ? .white : c)   // sur son disque de couleur, un repère de service reste blanc
+                                .foregroundStyle(sel || logo ? .white : c)   // sur son disque de couleur, un repère de service garde sa teinte
                                 .shadow(color: c.opacity(sel ? 0.75 : 0), radius: 26, y: 6)
                                 .animation(glisse, value: index)
                                 .offset(y: paru || apercu != nil ? 0 : 26).opacity(paru || apercu != nil ? 1 : 0)
@@ -3717,7 +3764,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: {}), SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {})], roue: true)
             rendre(MenuView(lib: lib, menu: comptes, apercu: 1), "comptes.png")
             let ajout = SalonMenu(title: "Ajouter un jeu", items: [SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {}), SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: {}),
-                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "App Mac", icon: "laptopcomputer", tint: .gray, action: {}),
+                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "App Mac", icon: "logo:mac", tint: .gray, action: {}),
                 SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: {}), SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: {})])
             lib.openAdvancedSettings(); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 4), "avance.png") }; lib.menu = nil
             rendre(MenuView(lib: lib, menu: ajout, apercu: 2), "ajouter.png")
@@ -5253,7 +5300,7 @@ extension Library {
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
             SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
-            SalonMenuItem(label: "App Mac", icon: "laptopcomputer", tint: .gray, action: { self.addGame(back: ici) }),
+            SalonMenuItem(label: "App Mac", icon: "logo:mac", tint: .gray, action: { self.addGame(back: ici) }),
             SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: { self.ajouterExe() }),
         ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games", "Steam", "Jeu Windows", "Jeu Windows préinstallé"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend
