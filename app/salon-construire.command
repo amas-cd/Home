@@ -43,7 +43,6 @@ if [ -f "$B/AppIcon.png" ]; then mkdir -p "$B/AppIcon.iconset"; for sz in 16 32 
 cat "$D/main.swift" "$D/veille.swift" "$0" "$D/icone.swift" 2>/dev/null | shasum -a 256 | cut -c1-64 > "$B/Salon.app/Contents/Resources/source.sha"
 if [ -d "$D/sons" ]; then mkdir -p "$B/Salon.app/Contents/Resources/sons"; cp -R "$D/sons/." "$B/Salon.app/Contents/Resources/sons/"; fi
 # Logos des services (Epic Games, Steam) montrés dans l'écran Comptes
-if [ -d "$D/logos" ]; then mkdir -p "$B/Salon.app/Contents/Resources/logos"; cp "$D"/logos/*.png "$B/Salon.app/Contents/Resources/logos/"; fi
 # Le moteur embarqué : les scripts, les outils, la version figée des moteurs et la source de Home. L'app les installe dans
 # <Home>/moteur à son premier lancement et après une mise à jour (moteur/outils/installer-embarque.sh) : c'est ce qui la rend autonome.
 # Depuis le dépôt, le moteur est à côté (../moteur) ; depuis l'installation (<Home>/moteur/salon), c'est le dossier parent.

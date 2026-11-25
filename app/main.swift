@@ -1993,7 +1993,7 @@ final class FormulaireSteam: NSObject, WKScriptMessageHandler, NSWindowDelegate 
         w.title = "Connexion à Steam"; w.titlebarAppearsTransparent = true; w.titleVisibility = .hidden; w.appearance = NSAppearance(named: .darkAqua); w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.09, alpha: 1)
         w.identifier = NSUserInterfaceItemIdentifier("connexion"); w.contentView = web; w.isReleasedWhenClosed = false; w.delegate = c; w.level = .floating; w.center(); c.fenetre = w
         NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil); w.makeFirstResponder(web)
-        let logo = (Bundle.main.resourceURL?.appendingPathComponent("logos/steam.png")).flatMap { try? Data(contentsOf: $0) }.map { "<img src='data:image/png;base64,\($0.base64EncodedString())'>" } ?? ""
+        let logo = "<div class='repere'>S</div>"   // une initiale dessinée par Home, pas le logo de la marque
         let texte = (code ?? "").replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
         let champs = code == nil
             ? "<input id='a' name='username' autocomplete='username' placeholder='Nom du compte' autofocus><input id='b' name='password' type='password' autocomplete='current-password' placeholder='Mot de passe'>"
@@ -2003,7 +2003,7 @@ final class FormulaireSteam: NSObject, WKScriptMessageHandler, NSWindowDelegate 
         *{box-sizing:border-box;font-family:-apple-system,system-ui;-webkit-user-select:none}
         body{margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:#fff;padding:0 54px;
           background:radial-gradient(circle at 80% 0%,#1b4f9c 0%,transparent 55%),radial-gradient(circle at 0% 100%,#3a1d6e 0%,transparent 50%),#0a0d17}
-        img{width:84px;height:84px;border-radius:50%;margin-bottom:6px}
+        .repere{width:84px;height:84px;border-radius:50%;margin-bottom:6px;background:#081433;border:1.5px solid rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:900;font-stretch:expanded}
         h1{margin:0 0 12px;font-size:22px;font-weight:900;letter-spacing:2px;font-stretch:expanded;text-transform:uppercase}
         p{margin:0 0 4px;text-align:center;opacity:.7;font-size:14px;line-height:1.4}
         input{width:100%;height:50px;border-radius:25px;border:1.5px solid rgba(255,255,255,.18);background:rgba(0,0,0,.45);color:#fff;font-size:16px;padding:0 22px;outline:none;-webkit-user-select:text}
@@ -2457,6 +2457,7 @@ struct BienvenueView: View {
                 Text("BIENVENUE").font(.system(size: 84, weight: .black).width(.expanded)).tracking(la ? 6 : 30)
                     .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.78)], startPoint: .top, endPoint: .bottom)).opacity(la ? 1 : 0)
                 Text("À quoi vas-tu jouer ? Home installe ce qu'il faut.").font(.system(size: 24, weight: .medium)).opacity(la ? 0.72 : 0).padding(.top, 14)
+                Text("Home ne contient aucun jeu : il utilise ceux que tu possèdes, copiés depuis ta propre console.").font(.system(size: 15, weight: .medium)).opacity(la ? 0.45 : 0).padding(.top, 8)
                 HStack(spacing: 34) {
                     ForEach(0..<3, id: \.self) { i in
                         let c = cartes[i], sel = i == lib.bienvenueIndex
@@ -2569,22 +2570,45 @@ struct OuvertureApercu: View {
 /// Le symbole d'un choix : un symbole système, ou le logo d'un service (« logo:epic », « logo:steam » : les images de app/logos)
 struct Symbole: View {
     let nom: String; let taille: CGFloat
-    var clair = false   // le logo de Windows en blanc, pour une carte de couleur
-    static var logos: [String: NSImage] = [:]
-    /// Le disque derrière un logo : le rouge de la Switch, sombre pour les autres
+    var clair = false   // (gardé pour les appels existants : les repères sont dessinés dans la couleur du texte)
+    /// Le disque derrière un repère de service : rouge pour les jeux de console, sombre pour les boutiques
     static func fond(_ nom: String) -> Color { nom == "logo:switch" ? Color(red: 0.90, green: 0.0, blue: 0.07) : nom == "logo:steam" ? Color(red: 0.03, green: 0.08, blue: 0.20) : Color(white: 0.12) }
-    static func logo(_ n: String) -> NSImage? {
-        if let i = logos[n] { return i }
-        guard let u = Bundle.main.resourceURL?.appendingPathComponent("logos/\(n).png"), let i = NSImage(contentsOf: u) else { return nil }
-        logos[n] = i; return i
-    }
+    /// Les repères des services (« logo:epic », « logo:steam », « logo:switch », « logo:windows ») sont dessinés par Home, pour qu'on les
+    /// reconnaisse d'un coup d'œil sans reprendre un logo : les vrais sont des marques déposées, une app publique ne les embarque pas.
+    static let reperes: Set<String> = ["logo:epic", "logo:steam", "logo:switch", "logo:windows"]
     var body: some View {
-        if nom == "logo:windows" {
-            let c = taille * 0.56, e = taille * 0.07, bleu = clair ? Color.white : Color(red: 0.0, green: 0.55, blue: 0.95)
-            VStack(spacing: e) { HStack(spacing: e) { bleu.frame(width: c, height: c); bleu.frame(width: c, height: c) }; HStack(spacing: e) { bleu.frame(width: c, height: c); bleu.frame(width: c, height: c) } }
+        switch nom {
+        case "logo:switch":   // une console portable vue de face : l'écran entre ses deux manettes, un stick et des boutons
+            let h = taille * 0.86, l = taille * 1.62, m = l * 0.21, r = h * 0.30
+            HStack(spacing: taille * 0.05) {
+                UnevenRoundedRectangle(topLeadingRadius: r, bottomLeadingRadius: r, bottomTrailingRadius: 3, topTrailingRadius: 3, style: .continuous).frame(width: m, height: h)
+                    .overlay(alignment: .top) { Circle().fill(.black.opacity(0.42)).frame(width: m * 0.46, height: m * 0.46).padding(.top, h * 0.20) }
+                RoundedRectangle(cornerRadius: 4, style: .continuous).frame(width: l - 2 * m - taille * 0.10, height: h)
+                    .overlay { RoundedRectangle(cornerRadius: 2).fill(.black.opacity(0.30)).padding(taille * 0.07) }
+                UnevenRoundedRectangle(topLeadingRadius: 3, bottomLeadingRadius: 3, bottomTrailingRadius: r, topTrailingRadius: r, style: .continuous).frame(width: m, height: h)
+                    .overlay(alignment: .bottom) { Circle().fill(.black.opacity(0.42)).frame(width: m * 0.46, height: m * 0.46).padding(.bottom, h * 0.20) }
+            }
+        case "logo:steam":    // de la vapeur : trois volutes qui montent
+            Vapeur().stroke(style: StrokeStyle(lineWidth: taille * 0.15, lineCap: .round, lineJoin: .round)).frame(width: taille * 1.15, height: taille * 1.15)
+        case "logo:epic":     // une initiale, dans l'écriture de Home
+            Text("E").font(.system(size: taille * 1.2, weight: .black).width(.expanded))
+        case "logo:windows":  // un PC
+            Image(systemName: "desktopcomputer").font(.system(size: taille * 0.95, weight: .semibold))
+        default: Image(systemName: nom.hasPrefix("logo:") ? "person.crop.circle.fill" : nom).font(.system(size: taille, weight: .medium))
         }
-        else if nom.hasPrefix("logo:"), let i = Symbole.logo(String(nom.dropFirst(5))) { Image(nsImage: i).resizable().interpolation(.high).scaledToFit().frame(width: taille * 1.5, height: taille * 1.5) }
-        else { Image(systemName: nom.hasPrefix("logo:") ? "person.crop.circle.fill" : nom).font(.system(size: taille, weight: .medium)) }
+    }
+}
+/// Trois volutes de vapeur, pour désigner Steam sans son logo
+struct Vapeur: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path(); let w = r.width, h = r.height
+        for x in [0.20, 0.50, 0.80] {
+            let cx = r.minX + w * x, a = w * 0.11
+            p.move(to: CGPoint(x: cx, y: r.maxY - h * 0.08))
+            p.addCurve(to: CGPoint(x: cx, y: r.minY + h * 0.50), control1: CGPoint(x: cx - a * 1.6, y: r.maxY - h * 0.22), control2: CGPoint(x: cx + a * 1.6, y: r.minY + h * 0.64))
+            p.addCurve(to: CGPoint(x: cx, y: r.minY + h * 0.08), control1: CGPoint(x: cx - a * 1.6, y: r.minY + h * 0.36), control2: CGPoint(x: cx + a * 1.6, y: r.minY + h * 0.22))
+        }
+        return p
     }
 }
 // Les menus, dans le style de Home : monochromes (la couleur vient du jeu derrière), presque sans texte.
@@ -2755,7 +2779,7 @@ struct MenuView: View {
                                 .background(Circle().fill(logo ? AnyShapeStyle(Symbole.fond(it.icon)) : sel ? AnyShapeStyle(LinearGradient(colors: [c, c.opacity(0.62)], startPoint: .topLeading, endPoint: .bottomTrailing)) : AnyShapeStyle(.black.opacity(0.5))))
                                 .saturation(logo && !sel ? 0.7 : 1).brightness(logo && !sel ? -0.12 : 0)
                                 .overlay(Circle().strokeBorder(sel ? .white.opacity(0.9) : c.opacity(0.45), lineWidth: sel ? 3 : 1.5))
-                                .foregroundStyle(sel ? .white : c)
+                                .foregroundStyle(sel || logo ? .white : c)   // sur son disque de couleur, un repère de service reste blanc
                                 .shadow(color: c.opacity(sel ? 0.75 : 0), radius: 26, y: 6)
                                 .animation(glisse, value: index)
                                 .offset(y: paru || apercu != nil ? 0 : 26).opacity(paru || apercu != nil ? 1 : 0)
@@ -3693,7 +3717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 SalonMenuItem(label: "Jeu installé", detail: "Son .exe", icon: "folder.fill", section: "Déjà à toi", tint: .orange, action: {}), SalonMenuItem(label: "Installateur", detail: "setup.exe ou .msi", icon: "shippingbox.fill", tint: .orange, action: {})], roue: true)
             rendre(MenuView(lib: lib, menu: comptes, apercu: 1), "comptes.png")
             let ajout = SalonMenu(title: "Ajouter un jeu", items: [SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {}), SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: {}),
-                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: {}),
+                SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: {}), SalonMenuItem(label: "App Mac", icon: "laptopcomputer", tint: .gray, action: {}),
                 SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: {}), SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: {})])
             lib.openAdvancedSettings(); if let m = lib.menu { rendre(MenuView(lib: lib, menu: m, apercu: 4), "avance.png") }; lib.menu = nil
             rendre(MenuView(lib: lib, menu: ajout, apercu: 2), "ajouter.png")
@@ -5229,7 +5253,7 @@ extension Library {
                 self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
             SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
-            SalonMenuItem(label: "App Mac", icon: "apple.logo", tint: .gray, action: { self.addGame(back: ici) }),
+            SalonMenuItem(label: "App Mac", icon: "laptopcomputer", tint: .gray, action: { self.addGame(back: ici) }),
             SalonMenuItem(label: "Jeu Windows", detail: "setup.exe ou .msi", icon: "logo:windows", tint: .blue, action: { self.installerDepuisSetup() }),
             SalonMenuItem(label: "Jeu Windows préinstallé", detail: "Son .exe", icon: "folder.fill", tint: .orange, action: { self.ajouterExe() }),
         ].filter { i in (self.modeNintendo || i.label != "Switch") && (self.modePC || !["Epic Games", "Steam", "Jeu Windows", "Jeu Windows préinstallé"].contains(i.label)) },   // seulement ce que le mode d'utilisation comprend

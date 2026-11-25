@@ -7,6 +7,18 @@ et les jeux Switch que Home recompile lui-même avec ScarletNX, à partir du dum
 Home ne contient aucun jeu, aucune clé et aucun fichier système : chacun utilise les copies de sa propre console et les jeux
 qu'il possède.
 
+## Ce que Home fait, et ne fait pas
+
+- Home **ne contient et ne télécharge aucun jeu**, aucune clé (`prod.keys`) et aucun fichier système, et ne dit pas où en trouver.
+- Il s'utilise avec les jeux que tu possèdes : pour la Switch, les copies que tu as extraites toi-même de **ta** console et de **tes**
+  cartouches ; pour le PC, les jeux de ton propre compte Epic Games ou Steam.
+- Il ne contourne aucune protection, aucun DRM ni aucun anti-triche. Un jeu que son éditeur refuse hors de Windows n'est pas lancé.
+- Home est gratuit, sans publicité et sans dons. Il n'est lié ni à Nintendo, ni à Epic Games, ni à Valve, ni à aucun éditeur.
+- Les jeux PC passent par des outils qui ne sont pas ceux des boutiques (Legendary pour Epic, le code d'Obelisk pour Steam). Renseigne-toi
+  sur les conditions d'utilisation de ton compte : c'est toi qui choisis de t'en servir.
+
+Les demandes de jeux, de clés ou de liens sont fermées sans réponse (voir « Signaler un problème »).
+
 ## Installer
 
 Ouvre la dernière [release](https://github.com/amas-cd/Home/releases/latest).
@@ -62,7 +74,12 @@ Chaque push sur `main` est compilé par GitHub Actions (onglet **Actions**), pou
 **Actions → Construire Home → Run workflow**, tape la version (ex. `0.3.0`), puis **Run workflow**. La release « Home 0.3.0 »
 apparaît quelques minutes plus tard avec `Home-macSilicon.dmg` et `Home-win64-setup.exe`. Pousser un tag `v0.3.0` fait pareil.
 
+## Signaler un problème
+
+Ouvre un ticket avec le jeu concerné, sa version, et le journal (Menu → Avancé → Journaux). Ne joins jamais un jeu, un dump, une clé
+ni un lien pour en télécharger : le ticket serait supprimé.
+
 ## Licences
 
-Le code de Home est sous licence MIT (voir `LICENSE`). Les projets repris ou utilisés sont listés dans
-`THIRD_PARTY_NOTICES.md`. Utilise Home seulement avec des jeux que tu possèdes.
+Le code de Home est sous licence MIT (voir `LICENSE`), sauf `moteur/obelisk/launch.sh` et `moteur/steam/`, sous GPL-3.0. Les projets
+repris ou utilisés, les marques et les contenus sont détaillés dans `THIRD_PARTY_NOTICES.md`. Utilise Home seulement avec des jeux que tu possèdes.

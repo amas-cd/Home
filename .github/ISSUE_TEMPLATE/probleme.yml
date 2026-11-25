@@ -1,0 +1,45 @@
+name: Signaler un problème
+description: Un bug de Home, sur Mac ou sur Windows
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Home ne fournit aucun jeu, aucune clé et aucun fichier système, et ne dit pas où en trouver.
+        Un ticket qui en demande, en joint ou en donne le lien est supprimé.
+  - type: dropdown
+    id: systeme
+    attributes:
+      label: Système
+      options: [Mac, Windows]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version de Home
+      placeholder: "0.2.5"
+    validations:
+      required: true
+  - type: textarea
+    id: quoi
+    attributes:
+      label: Ce qui se passe
+      description: Le jeu concerné, ce que tu as fait, ce que tu attendais, ce que tu as vu.
+    validations:
+      required: true
+  - type: textarea
+    id: journal
+    attributes:
+      label: Journal
+      description: "Mac : Menu → Avancé → Journaux. Relis-le avant de le coller : pas d'adresse de serveur, pas de nom de compte."
+      render: text
+  - type: checkboxes
+    id: regles
+    attributes:
+      label: Règles
+      options:
+        - label: Je ne joins ni jeu, ni dump, ni clé, ni lien pour en télécharger.
+          required: true
+        - label: J'utilise des jeux que je possède, copiés depuis ma propre console ou mon propre compte.
+          required: true
