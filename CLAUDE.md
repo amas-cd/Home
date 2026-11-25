@@ -109,6 +109,8 @@ Les sections sont marquées `// MARK:`. Cherche-les par nom, les numéros de lig
 - **`Commande`** : `run()` pour lancer une commande et lire ce qu'elle écrit.
 - **Vues** : `Screen`, `MenuView`, `TacheView` (avancement des scripts lancés dans le Terminal), `HUDView` (au-dessus du jeu), `JoueursView`.
 - **Manette** : `PadBattery`, `PadSeize` (saisie exclusive pendant le menu rapide).
+- **`ClavierJeu`** : le moteur Linux de Voile (Rocket League) ne connaît que le clavier américain ; tant qu'un de ses jeux est devant
+  (`com.zagrios.obelisk.game.*`), Home échange les codes des touches pour suivre le clavier du Mac. Réglage dans Avancé → Système.
 - **`AppDelegate`, `SalonMain`** (`@main`).
 - **`Atelier`** :
   - les chemins (`Atelier.home` = `~/Library/Application Support/Home`, `Atelier.jeux` = `/Applications/Jeux`) ;

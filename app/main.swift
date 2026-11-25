@@ -1062,6 +1062,8 @@ final class Library: ObservableObject {
                 self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); ici() }),
             SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", detail: "Des fondus courts à la place des mouvements", icon: reduit ? "hand.raised.fill" : "hand.wave.fill", tint: .teal, action: {
                 UserDefaults.standard.set(!reduit, forKey: "animationsReduites"); ici() }),
+            SalonMenuItem(label: "Clavier du Mac en jeu : \(ClavierJeu.voulu ? "oui" : "non")", detail: "Rocket League et les jeux du même moteur écrivent en AZERTY", icon: "keyboard.fill", tint: .orange, action: {
+                UserDefaults.standard.set(!ClavierJeu.voulu, forKey: "clavierMac"); ici() }),
             SalonMenuItem(label: "Images", detail: "Jaquettes, fonds et logos", icon: "photo.fill", tint: .blue, action: { self.openAvanceImages() }),
         ], hero: "gearshape.fill", back: { self.openAdvancedSettings() })
     }
@@ -3631,6 +3633,59 @@ enum PadBattery {
 struct PadSnap { var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0; var dx = 0, dy = 0; var ok = false, back = false, salon = false, tri = false }
 /// Ouvre la (les) manette(s) en exclusif via IOKit : tant que c'est pris, ni le jeu (moteur nxnative, MNG, Wine…) ni GameController ne reçoivent plus rien.
 /// Sony (DualSense, DualShock 4) : rapports bruts décodés (en Bluetooth, le rapport étendu n'est pas découpé en éléments HID) ; autres : éléments HID.
+/// Le moteur Linux de Voile (Rocket League…) reçoit la position des touches et ne connaît que le clavier américain : sur un AZERTY, le
+/// chat écrit « q » quand on tape « a ». Tant qu'un de ces jeux est devant, Home échange les codes des touches pour que chaque lettre
+/// soit la bonne. Seul ce qui se tape sans Majuscule suit (lettres, virgule…) ; la rangée des chiffres ne bouge pas, et un clavier
+/// américain ne change rien. Il faut l'autorisation Accessibilité, que Home a déjà pour le plein écran.
+final class ClavierJeu {
+    static let shared = ClavierJeu()
+    static var voulu: Bool { UserDefaults.standard.object(forKey: "clavierMac") as? Bool ?? true }
+    private var tap: CFMachPort?, actif = false, table: [Int64: Int64] = [:]
+    /// Le code de touche qui donne chaque caractère, sans Majuscule, sur un clavier américain
+    private static let us: [Character: Int64] = ["a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+        "=": 24, "-": 27, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "`": 50]
+    /// Une app passe devant : les touches ne sont échangées que pour un jeu du moteur Linux
+    func devant(_ a: NSRunningApplication) {
+        guard ClavierJeu.voulu, (a.bundleIdentifier ?? "").hasPrefix("com.zagrios.obelisk.game.") else { regler(false); return }
+        table = ClavierJeu.calculer()
+        regler(!table.isEmpty)
+    }
+    private func regler(_ oui: Bool) {
+        if oui, tap == nil {
+            guard AXIsProcessTrusted() else { log("Clavier du jeu : sans l'autorisation Accessibilité, les touches restent celles d'un clavier américain"); return }
+            let masque = CGEventMask(1 << CGEventType.keyDown.rawValue) | CGEventMask(1 << CGEventType.keyUp.rawValue)
+            tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: masque, callback: { _, type, ev, _ in
+                let c = ClavierJeu.shared
+                if type == .tapDisabledByTimeout { if c.actif, let t = c.tap { CGEvent.tapEnable(tap: t, enable: true) } }   // macOS coupe une écoute trop lente : on la reprend
+                else if c.actif, type == .keyDown || type == .keyUp, let n = c.table[ev.getIntegerValueField(.keyboardEventKeycode)] { ev.setIntegerValueField(.keyboardEventKeycode, value: n) }
+                return Unmanaged.passUnretained(ev)
+            }, userInfo: nil)
+            guard let tap else { log("Clavier du jeu : écoute du clavier refusée par macOS"); return }
+            CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+            log("Clavier du jeu : \(table.count) touches suivent le clavier du Mac")
+        }
+        actif = oui && tap != nil
+        if let tap { CGEvent.tapEnable(tap: tap, enable: actif) }
+    }
+    /// Pour chaque touche, le code américain du caractère qu'elle donne sur le clavier du Mac. Vide si le clavier est déjà américain.
+    static func calculer() -> [Int64: Int64] {
+        guard let src = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(), let prop = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return [:] }
+        let data = Unmanaged<CFData>.fromOpaque(prop).takeUnretainedValue() as Data, touches = Set(us.values).union([10]).sorted()
+        var m: [Int64: Int64] = [:]
+        data.withUnsafeBytes { brut in
+            guard let disposition = brut.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return }
+            for k in touches {
+                var morte: UInt32 = 0, n = 0, texte = [UniChar](repeating: 0, count: 4)
+                let r = UCKeyTranslate(disposition, UInt16(k), UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()), OptionBits(1 << kUCKeyTranslateNoDeadKeysBit), &morte, 4, &n, &texte)
+                if r == noErr, n == 1, let u = Unicode.Scalar(texte[0]), let cible = us[Character(u)], cible != k { m[k] = cible }
+            }
+        }
+        // deux touches ne doivent pas donner le même code : une touche restée en place sur un code déjà pris reçoit un code libéré
+        let pris = Set(m.values), libres = Set(m.keys).subtracting(pris).sorted(), doubles = touches.filter { m[$0] == nil && pris.contains($0) }
+        for (k, l) in zip(doubles, libres) { m[k] = l }
+        return m
+    }
+}
 final class PadSeize {
     static let shared = PadSeize()
     private var devices: [(dev: IOHIDDevice, buf: UnsafeMutablePointer<UInt8>?)] = []
@@ -3894,6 +3949,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             guard let self, let a = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            ClavierJeu.shared.devant(a)
             // une autre app passe devant : si c'est le jeu laissé ouvert derrière Home, sa session reprend (menu rapide, volume)
             guard a.processIdentifier == ProcessInfo.processInfo.processIdentifier else { self.lib.appActivee(a); return }
             // Pendant les 40 premières secondes d'un jeu, macOS peut nous réactiver un instant (écran de démarrage, anti-triche) : on l'ignore,
