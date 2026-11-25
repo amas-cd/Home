@@ -95,6 +95,7 @@ app="$sockets_root/obelisk-apps/$app_id/$app_name.app"
 mkdir -p "$app/Contents/MacOS" || exit 1
 rm -f "$app/Contents/MacOS/wsd"
 cp -c "$runtime/engine/wsd" "$app/Contents/MacOS/wsd" 2>/dev/null || cp "$runtime/engine/wsd" "$app/Contents/MacOS/wsd" || exit 1
+# Home : sans NSMicrophoneUsageDescription, macOS refuse le micro au jeu sans rien demander (chat vocal muet).
 xml_name=$(printf '%s' "$app_name" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -108,6 +109,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Le micro sert au chat vocal du jeu.</string>
 </dict>
 </plist>
 PLIST

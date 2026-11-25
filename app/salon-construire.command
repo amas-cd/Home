@@ -26,7 +26,7 @@ cat > "$B/Salon.app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Home</string><key>CFBundleDisplayName</key><string>Home</string>
 <key>CFBundleIdentifier</key><string>fr.anas.salon</string><key>CFBundleVersion</key><string>1</string><key>CFBundleShortVersionString</key><string>1.0</string>
 <key>CFBundleExecutable</key><string>Salon</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleIconFile</key><string>AppIcon</string>
-<key>LSMinimumSystemVersion</key><string>14.0</string><key>NSHighResolutionCapable</key><true/><key>NSAudioCaptureUsageDescription</key><string>Home règle le volume de tes jeux sans toucher à celui du Mac : pour ça il fait passer leur son par lui.</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string><key>NSHighResolutionCapable</key><true/><key>NSMicrophoneUsageDescription</key><string>Le micro sert au chat vocal de tes jeux.</string><key>NSAudioCaptureUsageDescription</key><string>Home règle le volume de tes jeux sans toucher à celui du Mac : pour ça il fait passer leur son par lui.</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.games</string><key>LSSupportsGameMode</key><false/>
 <key>NSSupportsAutomaticTermination</key><false/><key>NSSupportsSuddenTermination</key><false/>
 </dict></plist>
