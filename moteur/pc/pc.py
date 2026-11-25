@@ -7,7 +7,7 @@ Home reprend ce que fait Obelisk (https://github.com/Zagrios/Obelisk, GPL-3.0), 
     <Home>/voile/<version>. Home n'utilise jamais les fichiers d'Obelisk ; « importer » reprend une fois ce qu'il avait installé.
   - Les jeux tournent sur le « moteur Linux » de Voile (voile-wine pour Linux, exécuté par fexdarwin-run) : c'est lui qui laisse
     Easy Anti-Cheat charger son module Linux (Rocket League, Fall Guys…). Il ne lance que des programmes Windows 64 bits qui
-    ne sont pas en .NET. Les jeux Epic qui démarrent autrement sont refusés avec un message.
+    ne sont pas en .NET. Un jeu Epic qui démarre autrement est essayé sur le moteur Rosetta.
   - Le « moteur Rosetta » de Voile (Wine pour Mac Intel) sert aux installateurs (setups) et aux .exe 32 bits ou .NET ajoutés à la
     main, avec les variables d'Obelisk (rosetta.rs).
   - La commande est celle d'Obelisk (crates/game-runtime/src/wine/linux_engine.rs) : launch.sh RUNTIME HOME INSTALL CWD
@@ -433,8 +433,9 @@ def cmd_lancer(app, essai=False):
         b = amorce_eac(install)
         if b: exe = b; x64, dotnet = pe(exe)
     if not exe.is_file(): echec(f'programme du jeu introuvable : {exe}')
-    if x64 is not True or dotnet:
-        echec(f'{g.app_title} démarre par un programme {"en .NET" if dotnet else "32 bits"} ({exe.name}), que le moteur de Home ne lance pas encore', 5)
+    if x64 is not True or dotnet:   # le moteur Linux ne sait pas le lancer : on essaie le moteur Rosetta (Wine pour Mac), qui lance le 32 bits et le .NET
+        dire(f'{g.app_title} démarre par un programme {"en .NET" if dotnet else "32 bits"} ({exe.name}) : le moteur Linux ne le lance pas, essai avec le moteur Rosetta')
+        return lancer_rosetta(g.app_title, exe, list(params.game_parameters) + list(params.egl_parameters) + list(params.user_parameters), PC / 'prefixes' / (install.name + '-rosetta'), v, essai)
     lancer_linux(g.app_title, install, exe, list(params.game_parameters), list(params.egl_parameters), list(params.user_parameters), pr, v, essai, app)
 
 
@@ -619,13 +620,16 @@ def cmd_lancer_local(app, essai=False):
     if j.get('moteur') == 'linux':
         lancer_linux(j['nom'], Path(j['dossier']).resolve(), exe.resolve(), [], [], [], {}, v, essai, app)
         return
-    racine = v[0].parent; prefixe = Path(j['prefixe']) if j.get('prefixe') else PC / 'prefixes' / app.replace(':', '-')
-    rendu = 'd3dmetal'
-    cmd = [str(racine / 'bin/wine'), str(exe)]; env = dict(env_hote(), **env_rosetta(racine, prefixe, rendu))
+    lancer_rosetta(j['nom'], exe, [], Path(j['prefixe']) if j.get('prefixe') else PC / 'prefixes' / app.replace(':', '-'), v, essai)
+
+def lancer_rosetta(titre, exe, args, prefixe, v, essai):
+    """Lance un programme Windows sur le moteur Rosetta de Voile : les .exe ajoutés à la main, et les jeux que le moteur Linux ne sait pas lancer"""
+    racine = v[0].parent; rendu = 'd3dmetal'
+    cmd = [str(racine / 'bin/wine'), str(exe), *args]; env = dict(env_hote(), **env_rosetta(racine, prefixe, rendu))
     if essai:
         dire(json.dumps({'voile': v[1], 'moteur': 'rosetta', 'prefixe': str(prefixe), 'prefixe_existe': (prefixe / 'system.reg').is_file(), 'commande': cmd, 'env': env}, ensure_ascii=False, indent=1)); return
     preparer_prefixe_rosetta(racine, prefixe)
-    dire(f'{j["nom"]} : lancement (moteur Rosetta, {rendu}, Voile {v[1]})'); sys.stdout.flush()
+    dire(f'{titre} : lancement (moteur Rosetta, {rendu}, Voile {v[1]})'); sys.stdout.flush()
     os.chdir(exe.parent); os.execve(cmd[0], cmd, env)
 
 
