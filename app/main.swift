@@ -870,7 +870,8 @@ final class Library: ObservableObject {
         let ou = g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "Steam" : g.appPC?.hasPrefix("exe:") == true ? "Windows" : "Epic Games") : g.category
         var images: [String: Any] = ["large_text": g.name]
         if let j = Discord.jaquette(g) { images["large_image"] = j; images["small_image"] = "home"; images["small_text"] = "Home" } else { images["large_image"] = "home" }
-        return ["details": g.name, "state": ou, "timestamps": ["start": Int((startedAt ?? Date()).timeIntervalSince1970)], "assets": images]
+        // le titre de l'activité est le nom du jeu (« Joue à Rocket League »), pas « Home » : Discord accepte ce nom à la place de celui de l'application
+        return ["name": g.name, "details": ou, "state": "Avec Home", "timestamps": ["start": Int((startedAt ?? Date()).timeIntervalSince1970)], "assets": images]
     }
     func openMoreOptions(_ g: Game) {
         menu = SalonMenu(title: "Plus", subtitle: g.name, items: [
