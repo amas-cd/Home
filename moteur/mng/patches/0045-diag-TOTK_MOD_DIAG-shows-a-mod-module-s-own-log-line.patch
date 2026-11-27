@@ -1,0 +1,125 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <273038692+amas-cd@users.noreply.github.com>
+Date: Fri, 27 Nov 2026 23:57:49 +0100
+Subject: [PATCH] diag: TOTK_MOD_DIAG shows a mod module's own log lines and
+ probes its code
+
+TOTK Online, 1.2.1: hits given to the other players arrive, hits received from them do nothing on the Mac. The mod's
+release build formats its log lines ("Received hit for : ...") and drops them, so the log could not say where a received
+hit stops. TOTK_MOD_DIAG (or mod-diag.txt in the game's Application Support folder) lists sites of a mod module:
+"printf:<module>+<offset>" turns the mod's log function into a host print, "probe:<module>+<offset>" logs the registers
+each time that instruction runs (brk, the instruction is then done by the handler). Nothing changes without it.
+
+The eight "left unresolved (rtld rule)" lines of the log are only the first eight: every game import of a mod module
+stays 0, as on the console, and the mod fills them itself.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ games/totk/runtime/loader.c | 85 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 85 insertions(+)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index 6497e803d83a5c73880d8c32dccaaa84be575cf1..a4adea9a5943d902f4672934757cdf48aabe12dc 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -527,8 +527,90 @@ static int stale_target_reference(int num,siginfo_t *info,ucontext_t *u){
+  return 1;
+ }
+ #endif
++#if !TARGET_OS_IPHONE
++/* Diagnostic for a mod module (2026-11-28, TOTK Online: a hit received from another player did nothing on the Mac and the
++   mod's release build drops its own log lines). TOTK_MOD_DIAG, else the file
++   ~/Library/Application Support/MacNativeGames/TOTK/mod-diag.txt, lists sites separated by commas, spaces or new lines; the
++   offsets are those of the mod's NSO image (the rewrite keeps them):
++     printf:subsdk1+0xa3070   the mod's printf-style log function: its first words become a jump to a host function that
++                              prints the line ("[mod] ..."; integer, pointer and string arguments, x1-x7);
++     probe:subsdk1+0x83734    brk at that instruction: the SIGTRAP handler logs x0-x28 and ten words of the stack (the first 300
++                              times), does what the instruction did (nop, movz, ldr/ldrb with an unsigned offset: checked when
++                              the probe is placed) and the code goes on.
++   Nothing is changed without the variable or the file. */
++#define MOD_PROBES 16
++static struct{uintptr_t pc;uint32_t insn;char site[40];unsigned n;} mod_probe[MOD_PROBES];static unsigned mod_nprobe;
++static int mod_diag_readable(uint64_t p){unsigned char b;vm_size_t n=0;return p>=0x4000&&vm_read_overwrite(mach_task_self(),(vm_address_t)p,1,(vm_address_t)&b,&n)==KERN_SUCCESS;}
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wformat-nonliteral"
++static void mod_diag_printf(const char *fmt,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7){
++ uint64_t a[7]={a1,a2,a3,a4,a5,a6,a7};char out[1024];size_t n=0;unsigned k=0;
++ if(!mod_diag_readable((uintptr_t)fmt))return;
++ for(const char *p=fmt;*p&&n<sizeof out-1;){
++  if(*p!='%'){out[n++]=*p++;continue;}
++  if(p[1]=='%'){out[n++]='%';p+=2;continue;}
++  char spec[32];unsigned s=0;spec[s++]=*p++;
++  while(*p&&!strchr("diouxXcspfFeEgGaA",*p)&&s<sizeof spec-2)spec[s++]=*p++;
++  if(!*p)break;
++  char c=*p++;spec[s++]=c;spec[s]=0;
++  if(strchr("fFeEgGaA",c))n+=(size_t)snprintf(out+n,sizeof out-n,"<float>");   /* these travel in v0-v7 */
++  else if(strchr(spec,'*')||k>=7)n+=(size_t)snprintf(out+n,sizeof out-n,"<?>");
++  else if(c=='s'){uint64_t v=a[k++];n+=(size_t)snprintf(out+n,sizeof out-n,"%.200s",mod_diag_readable(v)?(const char *)(uintptr_t)v:"<bad pointer>");}
++  else n+=(size_t)snprintf(out+n,sizeof out-n,spec,a[k++]);
++  if(n>sizeof out-1)n=sizeof out-1;
++ }
++ fprintf(stderr,"[mod] %.*s\n",(int)n,out);
++}
++#pragma clang diagnostic pop
++static int mod_diag_emulated(uint32_t w){unsigned rt=w&31,rn=w>>5&31;
++ if(w==0xd503201f)return 1;
++ if((w&0x7f800000)==0x52800000)return rt<29;
++ if((w&0xffc00000)==0xf9400000||(w&0xffc00000)==0xb9400000||(w&0xffc00000)==0x39400000)return rt<29&&(rn<29||rn==31);
++ return 0;}
++static int mod_diag_trap(void *context){
++ ucontext_t *u=context;uint64_t pc=u->uc_mcontext->__ss.__pc,*x=u->uc_mcontext->__ss.__x,sp=u->uc_mcontext->__ss.__sp;
++ for(unsigned i=0;i<mod_nprobe;i++){if(mod_probe[i].pc!=pc)continue;
++  uint32_t w=mod_probe[i].insn;unsigned n=__atomic_fetch_add(&mod_probe[i].n,1,__ATOMIC_RELAXED);
++  if(n<300){char b[1400];int k=snprintf(b,sizeof b,"[mod-probe] %s #%u",mod_probe[i].site,n+1);
++   for(unsigned r=0;r<29;r++)k+=snprintf(b+k,sizeof b-(size_t)k," x%u=%llx",r,(unsigned long long)x[r]);
++   k+=snprintf(b+k,sizeof b-(size_t)k," sp:");
++   for(unsigned j=0;j<10;j++){uint64_t v;memcpy(&v,(void *)(uintptr_t)(sp+8*j),8);k+=snprintf(b+k,sizeof b-(size_t)k," %llx",(unsigned long long)v);}
++   b[k++]='\n';if(write(2,b,(size_t)k)<0){}}
++  unsigned rt=w&31,rn=w>>5&31;uint64_t base=rn==31?sp:x[rn],imm=w>>10&0xfff;
++  if((w&0x7f800000)==0x52800000){uint64_t v=(uint64_t)(w>>5&0xffff)<<(16*(w>>21&3));x[rt]=w>>31?v:(uint32_t)v;}
++  else if((w&0xffc00000)==0xf9400000){uint64_t v;memcpy(&v,(void *)(uintptr_t)(base+imm*8),8);x[rt]=v;}
++  else if((w&0xffc00000)==0xb9400000){uint32_t v;memcpy(&v,(void *)(uintptr_t)(base+imm*4),4);x[rt]=v;}
++  else if((w&0xffc00000)==0x39400000){uint8_t v;memcpy(&v,(void *)(uintptr_t)(base+imm),1);x[rt]=v;}
++  u->uc_mcontext->__ss.__pc=pc+4;return 1;}
++ return 0;
++}
++static void mod_diag_install(void){
++ char *list=NULL;const char *e=getenv("TOTK_MOD_DIAG"),*home=getenv("HOME");
++ if(e&&*e)list=strdup(e);
++ else if(home){char path[1024];snprintf(path,sizeof path,"%s/Library/Application Support/MacNativeGames/TOTK/mod-diag.txt",home);
++  FILE *f=fopen(path,"r");if(f){list=calloc(1,4096);if(list&&!fread(list,1,4095,f)){free(list);list=NULL;}fclose(f);}}
++ if(!list)return;
++ for(char *t=strtok(list,", \n\r\t");t;t=strtok(NULL,", \n\r\t")){
++  int probe=!strncmp(t,"probe:",6),print=!strncmp(t,"printf:",7);const char *name=t+(probe?6:7);char *plus=strchr(t,'+');Module *m=NULL;
++  if(*t=='#')continue;
++  if(plus&&(probe||print)){*plus=0;for(unsigned i=0;i<NM;i++)if(!strcmp(modules[i].name,name))m=&modules[i];*plus='+';}
++  uint64_t off=plus?strtoull(plus+1,NULL,0):0;
++  if(!m||m->ctor_flag||off&3||off+16>m->text_end){fprintf(stderr,"[totk] mod diagnostic: '%s' is not a site in a mod module, ignored\n",t);continue;}
++  uint32_t *w=(uint32_t *)(m->base+off),was=w[0];
++  if(print){uint64_t h=(uint64_t)(uintptr_t)runtime_hle_wrap_named((void *)mod_diag_printf,"mod diagnostic printf");
++   w[0]=0x58000050;w[1]=0xd61f0200;memcpy(&w[2],&h,8);   /* ldr x16, #8; br x16; .quad host */
++   fprintf(stderr,"[totk] mod diagnostic: %s prints its lines here (was %08x)\n",t,was);}
++  else if(mod_nprobe==MOD_PROBES||!mod_diag_emulated(was))fprintf(stderr,"[totk] mod diagnostic: no probe at %s (%08x is not a nop, movz or ldr/ldrb with an unsigned offset, or %d probes already)\n",t,was,MOD_PROBES);
++  else{mod_probe[mod_nprobe].pc=(uintptr_t)w;mod_probe[mod_nprobe].insn=was;snprintf(mod_probe[mod_nprobe].site,sizeof mod_probe[0].site,"%s",t+6);mod_nprobe++;
++   w[0]=0xd4200000;fprintf(stderr,"[totk] mod diagnostic: %s (%08x)\n",t,was);}
++ }
++}
++#endif
+ static void crash(int num,siginfo_t *info,void *context) {
+  ucontext_t *u=context;
++#if !TARGET_OS_IPHONE
++ if(num==SIGTRAP&&mod_diag_trap(context))return;   /* a mod module's probes (TOTK_MOD_DIAG) */
++#endif
+ #if !TARGET_OS_IPHONE
+  if(num==SIGTRAP){extern int runtime_mem_scan_trap(void *);if(runtime_mem_scan_trap(context))return;}   /* mscan watch (diagnostic, runtime/mem_scan.h) */
+ #endif
+@@ -810,6 +892,9 @@ int main(int argc,char **argv) {
+ #endif
+  for(unsigned i=0;i<NM;i++)map_module(&modules[i],argv[1]);
+  for(unsigned i=0;i<NM;i++)relocate(&modules[i]);
++#if !TARGET_OS_IPHONE
++ mod_diag_install();
++#endif
+  rtld_module_list();
+  for(unsigned i=0;i<NM;i++)if(!strcmp(modules[i].name,"main"))runtime_game_patches(&modules[i]);
+ #if !TARGET_OS_IPHONE

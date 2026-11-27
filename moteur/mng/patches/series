@@ -42,3 +42,4 @@
 0042-totk-online-with-TOTK_ONLINE_LOG-log-the-first-recei.patch
 0043-nvn-a-command-buffer-that-bound-a-pool-other-than-th.patch
 0044-totk-with-TOTK_RT-0-the-present-thread-asks-for-user.patch
+0045-diag-TOTK_MOD_DIAG-shows-a-mod-module-s-own-log-line.patch
