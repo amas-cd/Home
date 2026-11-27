@@ -176,6 +176,8 @@ public sealed class Bibliotheque
                 {   // un jeu construit par ScarletNX se lance par le moteur (`--game`), qui recompile de lui-même si ses mods de code ont changé
                     var psi = new ProcessStartInfo(Moteur.Exe ?? cible) { UseShellExecute = false, WorkingDirectory = dossier };
                     foreach (var a in Moteur.Exe != null ? new[] { "--data", Moteur.Donnees, "--game", dossier, "-f" } : new[] { "-f" }) psi.ArgumentList.Add(a);
+                    // un mod en ligne demande l'adresse de son serveur au clavier : ScarletNX répond à sa place (swkbd_text, pour cette partie seulement)
+                    if (Moteur.Exe != null && Construction.Serveur(dossier) is { Length: > 0 } serveur) psi.ArgumentList.Add("--swkbd-text=" + serveur);
                     p = Process.Start(psi);
                 }
                 else p = Process.Start(new ProcessStartInfo(cible) { UseShellExecute = true, WorkingDirectory = File.Exists(cible) ? Path.GetDirectoryName(cible)! : "" });

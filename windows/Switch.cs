@@ -138,6 +138,8 @@ public sealed class Chantier
 {
     public string Id { get; set; } = ""; public string Titre { get; set; } = ""; public string Dump { get; set; } = "";
     public List<string> Ajouts { get; set; } = new();   // mises à jour et DLC
+    public string? Mod { get; set; }       // un mod à installer dès que le jeu est construit (dossier ou .zip)
+    public string? Serveur { get; set; }   // l'adresse du serveur de ce mod, s'il joue en ligne
     public string Journal { get; set; } = ""; public DateTime Debut { get; set; } = DateTime.Now;
 }
 
@@ -158,6 +160,9 @@ public static class Construction
     public static string Reglages(string dossier) => Path.Combine(dossier, Path.GetFileName(dossier) + ".ini");
     public static string Data(string dossier) => Path.Combine(dossier, Path.GetFileName(dossier) + "_data");
     public static string Mods(string dossier) => Path.Combine(Data(dossier), "mods");
+    /// L'adresse du serveur d'un mod en ligne, gardée à côté du jeu (sur ce PC seulement). Home la donne au jeu à chaque lancement.
+    public static string FichierServeur(string dossier) => Path.Combine(dossier, "serveur.txt");
+    public static string Serveur(string dossier) { try { var f = FichierServeur(dossier); return File.Exists(f) ? File.ReadLines(f).FirstOrDefault()?.Trim() ?? "" : ""; } catch { return ""; } }
     /// ScarletNX n'écrit le tampon .abi qu'à la fin d'une recompilation réussie : c'est ce qui dit qu'un jeu est prêt
     static bool Pret(string dossier) => File.Exists(Programme(dossier)) && File.Exists(Path.Combine(dossier, Path.GetFileName(dossier) + ".abi"));
 
@@ -205,10 +210,10 @@ public static class Construction
         return a;
     }
 
-    public static void Commencer(Bibliotheque lib, string dump, List<string> ajouts)
+    public static void Commencer(Bibliotheque lib, string dump, List<string> ajouts, string? mod = null, string? serveur = null)
     {
         var id = "construction:" + Guid.NewGuid().ToString("N")[..8];
-        var c = new Chantier { Id = id, Titre = Path.GetFileNameWithoutExtension(dump), Dump = dump, Ajouts = ajouts, Journal = Dossiers.Fichier("log", id.Replace(':', '-') + ".log") };
+        var c = new Chantier { Id = id, Titre = Path.GetFileNameWithoutExtension(dump), Dump = dump, Ajouts = ajouts, Mod = mod, Serveur = serveur, Journal = Dossiers.Fichier("log", id.Replace(':', '-') + ".log") };
         var tous = Chantiers(); tous.Add(c); Noter(tous);
         lib.Recharger(selectionner: id);
         _ = Lancer(lib, c);
@@ -260,6 +265,19 @@ public static class Construction
             dossier ??= Directory.GetDirectories(Recompiles).Where(d => !avant.Contains(d)).OrderByDescending(Directory.GetLastWriteTime).FirstOrDefault()
                 ?? Directory.GetDirectories(Recompiles).OrderByDescending(Directory.GetLastWriteTime).FirstOrDefault();
             if (dossier == null || !Pret(dossier)) throw new InvalidOperationException("ScarletNX a fini sans produire le jeu : voir le journal");
+            if (c.Mod != null)
+            {   // un mod demandé avec le jeu : posé dans son dossier, puis le code est recompilé avec lui (un mod en ligne est un mod de code)
+                t.Etape = "Installation du mod…"; lib.Signaler();
+                var nom = await Task.Run(() => InstallerMod(dossier, c.Mod, Path.GetFileNameWithoutExtension(c.Mod.TrimEnd(Path.DirectorySeparatorChar, '/'))));
+                Journal.Ecrire($"mod installé avec le jeu : {nom}");
+                if (!string.IsNullOrWhiteSpace(c.Serveur)) { Ini.Ecrire(Reglages(dossier), "Network", "network", "1"); File.WriteAllText(FichierServeur(dossier), c.Serveur.Trim()); }
+                if (Directory.Exists(Path.Combine(Mods(dossier), nom, "exefs")))
+                {
+                    t.Etape = "Recompilation du code avec le mod…"; lib.Signaler();
+                    var (code, erreur) = await Executer(exe, ["--data", Moteur.Donnees, "-r", Path.Combine(dossier, Path.GetFileName(dossier))], c.Journal);
+                    if (code != 0) throw new InvalidOperationException("le jeu est construit, mais pas avec le mod : " + erreur);
+                }
+            }
             Noter(Chantiers().Where(x => x.Id != c.Id).ToList());
             t.Etape = "Terminé"; t.Fraction = 1; t.Fini = true;
             Journal.Ecrire($"jeu Switch construit : {Path.GetFileName(dossier)} ({Nom(dossier)}), moteur {Moteur.Version}");
@@ -278,6 +296,61 @@ public static class Construction
         EnCours = null; processus = null; lib.Signaler();
         _ = Task.Delay(8000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
     }
+    /// Lance ScarletNX et attend la fin, ce qu'il écrit ajouté au journal : son code de sortie et sa dernière ligne
+    static async Task<(int code, string derniere)> Executer(string exe, string[] arguments, string journal)
+    {
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Moteur.Donnees };
+        foreach (var a in arguments) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("ScarletNX n'a pas démarré");
+        processus = p;
+        var sortie = p.StandardOutput.ReadToEndAsync(); var erreurs = p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync(); processus = null;
+        var texte = await sortie + await erreurs; File.AppendAllText(journal, "\n" + string.Join(' ', arguments) + "\n" + texte);
+        if (abandon) throw new OperationCanceledException();
+        return (p.ExitCode, texte.Split('\n').LastOrDefault(l => l.Trim() != "")?.Trim() ?? $"code {p.ExitCode}");
+    }
+
+    /// Pose un mod (un dossier, ou un .zip) dans le dossier des mods d'un jeu, et rend son nom. Refuse ce qui n'est pas un mod.
+    public static string InstallerMod(string dossierJeu, string source, string nom)
+    {
+        string? tmp = null;
+        try
+        {
+            if (File.Exists(source))
+            {
+                if (!source.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("une archive de mod doit être un .zip");
+                tmp = Path.Combine(Dossiers.Dossier("telechargements"), "mod-" + Guid.NewGuid().ToString("N")[..8]); Moteur.Extraire(source, tmp); source = tmp;
+            }
+            if (!Directory.Exists(source)) throw new DirectoryNotFoundException("le mod n'est plus là : " + source);
+            if (Racine(source) is not { } racine) throw new InvalidDataException("ce n'est pas un mod : il n'y a ni dossier romfs ni dossier exefs dedans");
+            nom = Dossiers.NomSur(nom.Trim().TrimStart('.')); if (nom == "") nom = "mod";
+            var mods = Mods(dossierJeu); var cible = Path.Combine(mods, nom);
+            if (Directory.Exists(cible)) throw new InvalidDataException($"un mod s'appelle déjà « {nom} » : supprime-le d'abord");
+            if (Path.GetFullPath(racine).StartsWith(Path.GetFullPath(mods), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("ce dossier est déjà dans les mods du jeu");
+            // copié sous un nom caché puis renommé : une copie coupée ne se montre jamais comme un mod (ScarletNX fait pareil)
+            var enCours = Path.Combine(mods, "." + nom + ".adding"); if (Directory.Exists(enCours)) Directory.Delete(enCours, true);
+            Copier(racine, enCours); Directory.Move(enCours, cible);
+            return nom;
+        }
+        finally { try { if (tmp != null && Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { } }   // la copie de travail de Home, pas un fichier de l'utilisateur
+    }
+    /// Le dossier qui porte vraiment le mod : celui qu'on a donné, ou un seul sous-dossier quand l'archive a un dossier de plus autour
+    public static string? Racine(string d)
+    {
+        for (var i = 0; i < 3 && d != null; i++)
+        {
+            if (Directory.Exists(Path.Combine(d, "romfs")) || Directory.Exists(Path.Combine(d, "exefs"))) return d;
+            var sous = Directory.GetDirectories(d); if (sous.Length != 1) return null; d = sous[0];
+        }
+        return null;
+    }
+    static void Copier(string de, string vers)
+    {
+        Directory.CreateDirectory(vers);
+        foreach (var f in Directory.GetFiles(de)) { if ((File.GetAttributes(f) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("le mod contient un lien : refusé"); File.Copy(f, Path.Combine(vers, Path.GetFileName(f))); }
+        foreach (var d in Directory.GetDirectories(de)) { if ((File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("le mod contient un lien : refusé"); Copier(d, Path.Combine(vers, Path.GetFileName(d))); }
+    }
+
     /// Ce que ScarletNX est en train de faire, en clair. Il n'annonce pas de pourcentage : la pastille montre l'étape, pas un chiffre.
     static string? Etape(string l) =>
         l.StartsWith("Recompiling ", StringComparison.Ordinal) ? "Recompilation du code…" : l.StartsWith("LLVM", StringComparison.Ordinal) ? "Compilation…" :
@@ -364,6 +437,41 @@ public static class MenusSwitch
         lib.Ouvrir(m);
     }
 
+    // MARK: Tears of the Kingdom en ligne, préparé d'un coup (windows/outils/totk-online.cmd lance Home avec --totk-online <dossier>)
+    // Le dossier donné contient ce qu'Anas envoie à un ami : le mod (dossier ou .zip) et serveur.txt (l'adresse). Ni l'un ni l'autre
+    // n'est dans le dépôt : le mod appartient à son auteur, et l'adresse d'un serveur ne va jamais dans un dépôt public.
+    // Il ne reste à donner que le jeu et sa mise à jour (et prod.keys une fois, s'il n'est ni dans le dossier ni déjà dans Home).
+    public static void TotkOnline(Bibliotheque lib, string dossier, string? mod = null, string? serveur = null)
+    {
+        try
+        {
+            if (Directory.Exists(dossier))
+            {
+                mod ??= Directory.GetDirectories(dossier).FirstOrDefault(d => Construction.Racine(d) != null) ?? Directory.GetFiles(dossier, "*.zip").FirstOrDefault();
+                if (serveur == null && Path.Combine(dossier, "serveur.txt") is var f && File.Exists(f)) serveur = File.ReadLines(f).FirstOrDefault(l => l.Trim() != "" && !l.TrimStart().StartsWith('#'))?.Trim();
+                if (!File.Exists(Construction.ClesProd) && Path.Combine(dossier, "prod.keys") is var k && File.Exists(k)) Installer(lib, k, Construction.ClesProd);
+            }
+        }
+        catch (Exception e) { Journal.Ecrire("TOTK Online, lecture du dossier : " + e.Message); }
+        var cles = File.Exists(Construction.ClesProd);
+        var m = new Menu
+        {
+            Titre = "Zelda en ligne", SousTitre = "Tears of the Kingdom", Symbole = "globe",
+            Texte = "Home construit le jeu, installe le mod en ligne et règle le serveur. Il te demande seulement ton jeu et sa mise à jour, tirés de ta console.\n\n"
+                + $"Mod : {(mod != null ? Path.GetFileName(mod) : "pas trouvé")}  ·  Serveur : {(string.IsNullOrWhiteSpace(serveur) ? "pas réglé" : "réglé")}  ·  Clés : {(cles ? "installées" : "à donner")}",
+        };
+        if (mod != null && cles) m.Elements.Add(new("Choisir le jeu et sa mise à jour", "hammer", async () =>
+        {
+            if (lib.ChoisirFichier == null || await lib.ChoisirFichier("Tears of the Kingdom, extrait de ta console (.xci ou .nsp)", ["*.xci", "*.nsp"]) is not { } dump) return;
+            if (await lib.ChoisirFichier("La mise à jour du jeu que le mod demande (.nsp)", ["*.nsp", "*.xci"]) is not { } maj) return;
+            Construction.Commencer(lib, dump, [maj], mod, serveur);
+        }, "Puis la construction démarre : compte plus d'une heure et environ 40 Go libres"));
+        if (!cles) m.Elements.Add(new("Donner les clés", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Les clés de ta console (prod.keys)", ["prod.keys", "*.keys"]) is { } k) Installer(lib, k, Construction.ClesProd); TotkOnline(lib, dossier, mod, serveur); }, "prod.keys, tiré de ta console"));
+        m.Elements.Add(new(mod == null ? "Choisir le mod" : "Changer de mod", "puzzlepiece", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le mod en ligne (.zip)", ["*.zip"]) is { } z) mod = z; TotkOnline(lib, dossier, mod, serveur); }, "L'archive .zip du mod, avec romfs/ et/ou exefs/"));
+        m.Elements.Add(new(string.IsNullOrWhiteSpace(serveur) ? "Régler le serveur" : "Changer de serveur", "globe", () => lib.Demander("Adresse du serveur", "adresse:port", v => TotkOnline(lib, dossier, mod, v)), "L'adresse que t'a donnée celui qui héberge la partie"));
+        lib.Ouvrir(m);
+    }
+
     // MARK: Le chantier : la tuile d'un jeu en construction
     public static void Chantier(Bibliotheque lib, Jeu j)
     {
@@ -403,6 +511,13 @@ public static class MenusSwitch
             var actif = !eteints.Contains(mod);
             m.Elements.Add(new($"{mod} : {(actif ? "activé" : "désactivé")}", "puzzlepiece", () => UnMod(lib, j, mod), DeCode(j, mod) ? "Mod de code" : "Mod de fichiers") { Section = mod == mods[0] ? "Installés" : null });
         }
+        var serveur = Construction.Serveur(j.Dossier);
+        m.Elements.Add(new("Serveur en ligne" + (serveur != "" ? " : réglé" : ""), "globe", () => lib.Demander("Adresse du serveur", serveur != "" ? serveur + "  (« aucun » pour l'enlever)" : "adresse:port", v =>
+        {
+            if (v.Trim().Equals("aucun", StringComparison.OrdinalIgnoreCase)) v = "";
+            try { File.WriteAllText(Construction.FichierServeur(j.Dossier), v.Trim()); if (v.Trim() != "") Ini.Ecrire(Construction.Reglages(j.Dossier), "Network", "network", "1"); } catch (Exception e) { Journal.Ecrire("serveur : " + e.Message); }
+            Mods(lib, j);
+        }), "Pour un mod en ligne : Home répond cette adresse quand le jeu ouvre son clavier. Tous ses claviers : le chat du mod ne marchera pas") { Section = "En ligne" });
         if (mods.Count == 0) m.Texte = "Aucun mod installé. Un mod est un dossier avec romfs/ (fichiers du jeu remplacés) et/ou exefs/ (code du jeu).";
         lib.Ouvrir(m);
     }
@@ -436,49 +551,19 @@ public static class MenusSwitch
         Titre = "Ajouter un mod", SousTitre = j.Nom, Symbole = "plus", Retour = () => Mods(lib, j),
         Elements =
         {
-            new("Depuis un dossier", "folder", async () => { if (lib.ChoisirDossier != null && await lib.ChoisirDossier("Le dossier du mod (il contient romfs et/ou exefs)") is { } d) Poser(lib, j, d, Path.GetFileName(d.TrimEnd(Path.DirectorySeparatorChar, '/'))); }, "Un dossier qui contient romfs/ et/ou exefs/"),
-            new("Depuis une archive", "shippingbox", async () =>
-            {
-                if (lib.ChoisirFichier == null || await lib.ChoisirFichier("L'archive du mod (.zip)", ["*.zip"]) is not { } zip) return;
-                var tmp = Path.Combine(Dossiers.Dossier("telechargements"), "mod-" + Guid.NewGuid().ToString("N")[..8]);
-                try { await Task.Run(() => Moteur.Extraire(zip, tmp)); Poser(lib, j, tmp, Path.GetFileNameWithoutExtension(zip)); }
-                catch (Exception e) { Journal.Ecrire("archive de mod : " + e.Message); lib.Dire("Cette archive n'a pas pu être ouverte"); }
-                finally { try { if (Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { } }   // la copie de travail de Home, pas un fichier de l'utilisateur
-            }, "Un fichier .zip"),
+            new("Depuis un dossier", "folder", async () => { if (lib.ChoisirDossier != null && await lib.ChoisirDossier("Le dossier du mod (il contient romfs et/ou exefs)") is { } d) await Poser(lib, j, d); }, "Un dossier qui contient romfs/ et/ou exefs/"),
+            new("Depuis une archive", "shippingbox", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("L'archive du mod (.zip)", ["*.zip"]) is { } zip) await Poser(lib, j, zip); }, "Un fichier .zip"),
         },
     });
-    /// Le dossier qui porte vraiment le mod : celui qu'on a donné, ou un seul sous-dossier quand l'archive a un dossier de plus autour
-    static string? Racine(string d)
-    {
-        for (var i = 0; i < 3 && d != null; i++)
-        {
-            if (Directory.Exists(Path.Combine(d, "romfs")) || Directory.Exists(Path.Combine(d, "exefs"))) return d;
-            var sous = Directory.GetDirectories(d); if (sous.Length != 1) return null; d = sous[0];
-        }
-        return null;
-    }
-    static void Poser(Bibliotheque lib, Jeu j, string source, string nom)
+    static async Task Poser(Bibliotheque lib, Jeu j, string source)
     {
         try
         {
-            if (Racine(source) is not { } racine) { lib.Dire("Ce n'est pas un mod : il n'y a ni dossier romfs ni dossier exefs dedans"); return; }
-            nom = Dossiers.NomSur(nom.Trim().TrimStart('.')); if (nom == "") nom = "mod";
-            var mods = Construction.Mods(j.Dossier); var cible = Path.Combine(mods, nom);
-            if (Directory.Exists(cible)) { lib.Dire($"Un mod s'appelle déjà « {nom} » : supprime-le d'abord"); return; }
-            if (Path.GetFullPath(racine).StartsWith(Path.GetFullPath(mods), StringComparison.OrdinalIgnoreCase)) { lib.Dire("Ce dossier est déjà dans les mods du jeu"); return; }
-            // copié sous un nom caché puis renommé : une copie coupée ne se montre jamais comme un mod (ScarletNX fait pareil)
-            var enCours = Path.Combine(mods, "." + nom + ".adding"); if (Directory.Exists(enCours)) Directory.Delete(enCours, true);
-            Copier(racine, enCours); Directory.Move(enCours, cible);
-            if (Directory.Exists(Path.Combine(cible, "exefs"))) aRecompiler.Add(j.Id);
+            var nom = await Task.Run(() => Construction.InstallerMod(j.Dossier, source, Path.GetFileNameWithoutExtension(source.TrimEnd(Path.DirectorySeparatorChar, '/'))));
+            if (DeCode(j, nom)) aRecompiler.Add(j.Id);
             Journal.Ecrire($"mod installé : {nom} ({j.Nom})"); Mods(lib, j); lib.Dire(nom + " est installé");
         }
-        catch (Exception e) { Journal.Ecrire("installation d'un mod : " + e.Message); lib.Dire("Le mod n'a pas pu être copié : " + e.Message); }
-    }
-    static void Copier(string de, string vers)
-    {
-        Directory.CreateDirectory(vers);
-        foreach (var f in Directory.GetFiles(de)) { if ((File.GetAttributes(f) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("le mod contient un lien : refusé"); File.Copy(f, Path.Combine(vers, Path.GetFileName(f))); }
-        foreach (var d in Directory.GetDirectories(de)) { if ((File.GetAttributes(d) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("le mod contient un lien : refusé"); Copier(d, Path.Combine(vers, Path.GetFileName(d))); }
+        catch (Exception e) { Journal.Ecrire("installation d'un mod : " + e.Message); lib.Dire("Le mod n'a pas été installé : " + e.Message); }
     }
 
     // MARK: Réseau — le réglage network= du jeu. Un mod en ligne en a besoin ; ça ne suffit pas à dire qu'il marche.

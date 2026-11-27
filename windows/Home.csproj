@@ -30,6 +30,10 @@
     <AvaloniaResource Include="SCARLETNX-REF" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Les petits lanceurs à double-cliquer (Tears of the Kingdom en ligne), copiés à côté de Home -->
+    <Content Include="outils\*.cmd" Link="outils\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Les logos des consoles et des boutiques sont ceux de la version Mac : une seule copie dans le dépôt -->
     <Content Include="..\app\logos\*.png" Link="logos\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

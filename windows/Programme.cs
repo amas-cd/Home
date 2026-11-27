@@ -14,9 +14,11 @@ namespace Home;
 
 static class Programme
 {
+    public static string[] Arguments = [];
     [STAThread]
     static void Main(string[] args)
     {
+        Arguments = args;
         try { AppBuilder.Configure<App>().UsePlatformDetect().StartWithClassicDesktopLifetime(args); }
         catch (Exception e) { Journal.Ecrire("arrêt sur erreur : " + e); throw; }
     }
@@ -65,6 +67,8 @@ sealed class Fenetre : Window
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
             Scenario();
+            // lancé par outils/totk-online.cmd : la préparation de Tears of the Kingdom en ligne, avec le dossier d'où vient la commande
+            if (Array.IndexOf(Programme.Arguments, "--totk-online") is >= 0 and var n) MenusSwitch.TotkOnline(lib, n + 1 < Programme.Arguments.Length ? Programme.Arguments[n + 1].Trim('"') : "");
             // Une fois par démarrage, sans rien installer : le menu propose la mise à jour, c'est le joueur qui la lance
             if (OperatingSystem.IsWindows() && await MiseAJour.Verifier()) lib.Dire($"Home {MiseAJour.Version} est disponible : Menu → Mettre à jour Home");
         };
@@ -108,6 +112,7 @@ sealed class Fenetre : Window
                 case "ouverture": ecran.Ouvrir(fige: true); break;
                 case "switch": lib.Ouvrir(new Menu { Titre = "Construire le jeu", SousTitre = "Zelda.xci", Symbole = "hammer", Texte = "Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même, le fichier d'origine ne sert plus.",
                     Elements = { new("Construire", "hammer", () => { }, "Avec 1 mise à jour ou DLC"), new("Ajouter une mise à jour ou un DLC", "plus", () => { }, "Une mise à jour au plus, autant de DLC que tu veux"), new("Zelda-1.2.1.nsp", "xmark", () => { }, "Retirer de la liste") } }); break;
+                case "totk": MenusSwitch.TotkOnline(lib, "", "TOTK_Online.zip", "exemple:10014"); break;
                 case "mods": if (lib.Courant is { } jm) MenusSwitch.Mods(lib, jm); break;
                 case "place": MenusSwitch.LibererPlace(lib); break;
                 case "saisie": lib.Demander("Nouveau nom", "Au clavier", _ => { }); break;
