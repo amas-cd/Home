@@ -466,6 +466,13 @@ final class Library: ObservableObject {
     }
     func saisieValider() { guard let s = saisie else { return }; let t = saisieTexte.trimmingCharacters(in: .whitespacesAndNewlines); Sounds.shared.play("valider"); withAnimation(.easeOut(duration: 0.2)) { saisie = nil }; s.valider(t) }
     func saisieAnnuler() { guard saisie != nil else { return }; Sounds.shared.play("retour"); withAnimation(.easeOut(duration: 0.2)) { saisie = nil } }
+    /// L'installation des composants occupe tout l'écran, comme la mise en route d'une console : pas de bibliothèque avant la fin.
+    /// Si elle échoue, on peut réessayer ou continuer sans (le menu Mode d'utilisation la relance).
+    @Published var installation = false
+    var installationRelance: (() -> Void)? = nil
+    var installationQuittee = Date.distantPast   // le même appui ne doit pas aussi agir sur la bibliothèque qui réapparaît
+    func installationReessayer() { guard installation, tache?.erreur != nil, let r = installationRelance else { return }; Sounds.shared.play("valider"); tache = nil; r() }
+    func installationPasser() { guard installation, tache?.erreur != nil else { return }; installationQuittee = Date(); Sounds.shared.play("retour"); withAnimation(.easeInOut(duration: 0.45)) { installation = false } }
     @Published var pickerSaisie = false            // la barre de recherche du sélecteur a le clavier (sinon c'est la rangée d'images)
     /// Une image du sélecteur vient de finir de charger : elle apparaît ; si rien de visible n'était visé, c'est elle
     var pickBouge = false   // on a déjà déplacé le curseur du sélecteur : il ne bouge plus tout seul
@@ -3294,6 +3301,22 @@ struct SaisieView: View {
         .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { champ = true } }
     }
 }
+/// L'installation des composants, en plein écran : ce qui s'installe, où on en est, et rien d'autre. La pastille habituelle, en grand.
+struct InstallationView: View {
+    @ObservedObject var lib: Library; let t: Tache
+    var body: some View {
+        ZStack {
+            Color(red: 0.02, green: 0.02, blue: 0.05).ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
+            VStack(spacing: 26) {
+                Text(t.erreur != nil ? "INSTALLATION INTERROMPUE" : t.fini ? "C'EST PRÊT" : "INSTALLATION").font(.system(size: 54, weight: .black).width(.expanded)).tracking(2)
+                Text(t.erreur != nil ? "Vérifie la connexion à Internet, puis réessaie." : "Home installe ce qu'il faut pour tes jeux. Tu pourras jouer dès que c'est fini : laisse le Mac allumé.")
+                    .font(.system(size: 23, weight: .medium)).opacity(0.75).multilineTextAlignment(.center).frame(maxWidth: 900)
+                TacheView(lib: lib, t: t).scaleEffect(1.5).padding(.vertical, 44)
+                if t.erreur != nil { HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") } }
+            }.foregroundStyle(.white)
+        }
+    }
+}
 struct PickerView: View {
     @ObservedObject var lib: Library
     @State private var recherche = ""
@@ -3495,7 +3518,8 @@ struct Screen: View {
             if lib.saisie != nil { SaisieView(lib: lib).transition(.opacity).zIndex(17) }
             if lib.bienvenue { BienvenueView(lib: lib).transition(.opacity).zIndex(18) }
             if lib.ouverture { OuvertureView(lib: lib).zIndex(20) }
-            if let t = lib.tache {
+            if lib.installation, let t = lib.tache { InstallationView(lib: lib, t: t).transition(.opacity).zIndex(19) }
+            if let t = lib.tache, !lib.installation {
                 TacheView(lib: lib, t: t).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(.trailing, 84).padding(.bottom, 30)   // sur la ligne des aides, à la marge de l'écran
                     .transition(.asymmetric(insertion: .offset(y: 16).combined(with: .opacity), removal: .opacity)).zIndex(15)   // part en fondu ; le rang fixe garde la vue dessinée pendant qu'elle s'efface
             }
@@ -4076,6 +4100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if lib.ouverture { lib.passerOuverture(); return }   // n'importe quelle touche ou bouton passe l'ouverture
         if lib.bienvenue {   // l'accueil : gauche / droite pour choisir, valider pour commencer ; « Ignorer » est sur Options seulement
             switch k { case "left": lib.bienvenueBouger(-1); case "right": lib.bienvenueBouger(1); case "ok": lib.bienvenueValider(); case "options": lib.bienvenueIgnorer(); default: break }
+            return
+        }
+        if Date().timeIntervalSince(lib.installationQuittee) < 0.5 { return }
+        if lib.installation, lib.tache != nil {   // l'installation des composants : rien d'autre tant qu'elle tourne ; après un échec, réessayer ou continuer sans
+            if k == "ok" { lib.installationReessayer() } else if k == "back" || k == "options" { lib.installationPasser() }
             return
         }
         if lib.saisie != nil { if k == "back" { lib.saisieAnnuler() } else if k == "ok" { lib.saisieValider() }; return }   // la manette : valider ou annuler ; le texte se tape au clavier
@@ -4810,6 +4839,7 @@ extension Library {
     // MARK: Tâches de fond (à la place du Terminal) : barre de progression, journal dans /Applications/Jeux/log/home
     @discardableResult
     func lancer(_ script: String, _ args: [String] = [], env: [String: String] = [:], titre: String, jeux: Set<String> = []) -> Bool {
+        if script != "preparer-moteurs.command" { installation = false }   // l'écran d'installation ne vaut que pour les composants
         if let t = tache, !t.fini { toast = "Déjà en cours : \(t.titre)"; return false }
         let s = Atelier.outils.appendingPathComponent(script)
         guard FileManager.default.fileExists(atPath: s.path) else { toast = "\(script) introuvable"; return false }
@@ -4869,6 +4899,7 @@ extension Library {
         tacheProcess = nil; t.fini = true
         if code == 0 {
             t.fraction = 1; if !t.etape.contains("déjà à jour") { t.etape = "Terminé" }; tache = t; Sounds.shared.play("valider")
+            if installation { DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { withAnimation(.easeInOut(duration: 0.6)) { self.installation = false } } }   // l'installation finie : la bibliothèque apparaît
             Library.noterChantiers(Library.chantiers().filter { !t.jeux.contains($0.id) }); load()
             if let c = tacheScript, !t.etape.contains("déjà à jour") { Library.noterDuree(c, Date().timeIntervalSince(t.debut)) }
             if let a = apresTache { apresTache = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { a() } }
@@ -5413,7 +5444,9 @@ extension Library {
             DispatchQueue.main.async {
                 if nintendoPret && pcPret { self.toast = "Mode d'utilisation : \(self.modeResume) — tout est déjà installé"; ensuite?(); return }
                 self.apresTache = ensuite
-                if !self.lancer("preparer-moteurs.command", env: self.modePC ? ["HOME_AUSSI_PC": "1"] : [:], titre: "Installation pour : \(self.modeResume)") { self.apresTache = nil }
+                self.installationRelance = { self.appliquerMode(mode: mode, moteurs: moteurs, ensuite: ensuite) }
+                if self.lancer("preparer-moteurs.command", env: self.modePC ? ["HOME_AUSSI_PC": "1"] : [:], titre: "Installation pour : \(self.modeResume)") { withAnimation(.easeInOut(duration: 0.35)) { self.installation = true } }
+                else { self.apresTache = nil }
             }
         }
     }

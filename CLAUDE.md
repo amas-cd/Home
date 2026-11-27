@@ -275,6 +275,8 @@ une nouvelle version, dans un dossier à part : le clone en service ne bouge que
   en ligne sont pris dès qu'ils sont trouvés. La mise à jour exigée passe par « Es-tu sûr ? ». L'adresse du serveur se tape dans Home
   (`Library.demander`, `SaisieView`), pas dans une fenêtre de macOS. Un script qui connaît la raison d'un échec écrit une ligne
   « Pourquoi : … » : Home l'affiche dans la pastille et sur la tuile du chantier.
+  L'installation des composants (`preparer-moteurs.command`) occupe tout l'écran (`InstallationView`, `Library.installation`), comme
+  la mise en route d'une console : pas de bibliothèque avant la fin ; après un échec, « Réessayer » ou « Continuer sans ».
   Un mod en ligne n'est jamais mis dans le dépôt ni dans l'app sans l'accord écrit de son auteur. Jeu sans mod connu : « Suggérer un
   mod en ligne » ouvre une demande GitHub pré-remplie.
 - **Super Mario Odyssey Online** (CraftyBoss / Sanae6, pas Kirbymimi) : serveur local `smoo-server.sh`, port 1027, via Tailscale.
