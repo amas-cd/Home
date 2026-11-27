@@ -364,6 +364,20 @@ public static class Construction
         l.StartsWith("Recompiling ", StringComparison.Ordinal) ? "Recompilation du code…" : l.StartsWith("LLVM", StringComparison.Ordinal) ? "Compilation…" :
         l.StartsWith("Built ", StringComparison.Ordinal) ? "Assemblage du jeu…" : l.Contains("xtract", StringComparison.Ordinal) ? "Copie du jeu dans Home…" : null;
 
+    /// Avant de désinstaller : ScarletNX range d'ordinaire les sauvegardes hors du jeu (save/ de son dossier de données), mais un jeu
+    /// réglé sur save_layout=game les garde dans <id>_data/save. Celles-là sont mises de côté dans sauvegardes/<id> au lieu de partir.
+    public static void GarderSauvegardes(Jeu j)
+    {
+        try
+        {
+            var dans = Path.Combine(Path.GetDirectoryName(Mods(j.Dossier)) ?? "", "save");
+            if (!Directory.Exists(dans) || !Directory.EnumerateFileSystemEntries(dans).Any()) return;
+            var cible = Dossiers.Fichier("sauvegardes", Path.GetFileName(j.Dossier) + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            Directory.CreateDirectory(Path.GetDirectoryName(cible)!); Directory.Move(dans, cible);
+            Home.Journal.Ecrire($"sauvegardes de {j.Nom} gardées : {cible}");
+        }
+        catch (Exception e) { Home.Journal.Ecrire($"sauvegardes de {j.Nom} : {e.Message}"); }
+    }
     public static void Abandonner(Bibliotheque lib, Chantier c)
     {
         if (EnCours == c.Id && processus is { } p) { abandon = true; try { p.Kill(true); } catch { } return; }   // la suite se fait quand le programme s'arrête
@@ -901,10 +915,12 @@ public static class MenusSwitch
             m.Elements.Add(new("Appliquer les mods", "hammer", () => { aRecompiler.Remove(j.Id); _ = Construction.Recompiler(lib, j); }, "Un mod de code a changé : le jeu doit être recompilé, quelques minutes"));
         m.Elements.Add(new("Ajouter un mod", "plus", () => AjouterMod(lib, j), "Depuis un dossier ou une archive .zip"));
         foreach (var mod in mods)
-        {
+        {   // A active ou désactive directement, comme sur Mac
             var actif = !eteints.Contains(mod);
-            m.Elements.Add(new($"{mod} : {(actif ? "activé" : "désactivé")}", "puzzlepiece", () => UnMod(lib, j, mod), DeCode(j, mod) ? "Mod de code" : "Mod de fichiers") { Section = mod == mods[0] ? "Installés" : null });
+            m.Elements.Add(new(mod, actif ? "checkmark" : "puzzlepiece", () => Basculer(lib, j, mod), (actif ? "✓ Activé" : "Installé — A pour activer") + " · " + (DeCode(j, mod) ? "Mod de code" : "Mod de fichiers")) { Section = mod == mods[0] ? "Installés" : null, Teinte = actif ? Icones.Vert : null });
         }
+        m.Elements.Add(new("Dossier des mods", "folder", () => { var d = Construction.Mods(j.Dossier); try { Directory.CreateDirectory(d); } catch { } Systeme.Ouvrir(d); }, "Un dossier par mod, avec romfs/ et/ou exefs/"));
+        if (mods.Count > 0) m.Elements.Add(new("Supprimer un mod", "trash", () => SupprimerMod(lib, j)) { Destructif = true });
         var serveur = Construction.Serveur(j.Dossier);
         m.Elements.Add(new("Serveur en ligne" + (serveur != "" ? " : réglé" : ""), "globe", () => lib.Demander("Adresse du serveur", serveur != "" ? serveur + "  (« aucun » pour l'enlever)" : "adresse:port", v =>
         {
@@ -915,30 +931,25 @@ public static class MenusSwitch
         if (mods.Count == 0) m.Texte = "Aucun mod installé. Un mod est un dossier avec romfs/ (fichiers du jeu remplacés) et/ou exefs/ (code du jeu).";
         lib.Ouvrir(m);
     }
-    static void UnMod(Bibliotheque lib, Jeu j, string mod)
+    static void Basculer(Bibliotheque lib, Jeu j, string mod)
     {
-        var actif = !Eteints(j).Contains(mod);
-        lib.Ouvrir(new Menu
-        {
-            Titre = mod, SousTitre = actif ? "Activé" : "Désactivé", Symbole = "puzzlepiece", Retour = () => Mods(lib, j),
-            Elements =
+        var e = Eteints(j); var actif = !e.Contains(mod); if (actif) e.Add(mod); else e.Remove(mod);
+        try { Ini.Ecrire(Construction.Reglages(j.Dossier), "Game", "mods_off", string.Join('/', e.Distinct())); if (DeCode(j, mod)) aRecompiler.Add(j.Id); }
+        catch (Exception x) { Journal.Ecrire("mods_off : " + x.Message); lib.Dire("Le réglage n'a pas pu être écrit"); }
+        Mods(lib, j);
+    }
+    static void SupprimerMod(Bibliotheque lib, Jeu j)
+    {
+        var m = new Menu { Titre = "Supprimer un mod", SousTitre = j.Nom, Symbole = "trash", Roue = true, Retour = () => Mods(lib, j) };
+        foreach (var mod in ModsDe(j))
+            m.Elements.Add(new(mod, "trash", () =>
             {
-                new(actif ? "Désactiver" : "Activer", actif ? "eye.slash" : "checkmark", () =>
-                {
-                    var e = Eteints(j); if (actif) e.Add(mod); else e.Remove(mod);
-                    try { Ini.Ecrire(Construction.Reglages(j.Dossier), "Game", "mods_off", string.Join('/', e.Distinct())); if (DeCode(j, mod)) aRecompiler.Add(j.Id); }
-                    catch (Exception x) { Journal.Ecrire("mods_off : " + x.Message); lib.Dire("Le réglage n'a pas pu être écrit"); }
-                    Mods(lib, j);
-                }, actif ? "Le mod reste installé, le jeu ne s'en sert plus" : "Le jeu s'en sert à nouveau"),
-                new("Supprimer", "trash", () =>
-                {
-                    var d = Path.Combine(Construction.Mods(j.Dossier), mod); var code = DeCode(j, mod);
-                    if (!Systeme.Corbeille(d)) { lib.Dire("Le mod n'a pas pu être mis à la Corbeille"); return; }
-                    if (code) aRecompiler.Add(j.Id);
-                    Journal.Ecrire($"mod supprimé : {mod} ({j.Nom})"); Mods(lib, j); lib.Dire(mod + " est à la Corbeille");
-                }, "Le dossier du mod part à la Corbeille") { Destructif = true },
-            },
-        });
+                var d = Path.Combine(Construction.Mods(j.Dossier), mod); var code = DeCode(j, mod);
+                if (!Systeme.Corbeille(d)) { lib.Dire("Le mod n'a pas pu être mis à la Corbeille"); return; }
+                if (code) aRecompiler.Add(j.Id);
+                Journal.Ecrire($"mod supprimé : {mod} ({j.Nom})"); Mods(lib, j); lib.Dire(mod + " est à la Corbeille");
+            }, "Le dossier du mod part à la Corbeille") { Destructif = true });
+        lib.Ouvrir(m);
     }
     static void AjouterMod(Bibliotheque lib, Jeu j) => lib.Ouvrir(new Menu
     {
@@ -983,7 +994,17 @@ public static class MenusSwitch
         foreach (var (nom, d, quoi) in new[] { ("Fichiers de travail", Path.Combine(Moteur.Donnees, "work"), "Extractions provisoires de ScarletNX"), ("Téléchargements", Path.Combine(Dossiers.Racine, "telechargements"), "Archives déjà installées") })
             if (!ouverts && Directory.Exists(d) && Directory.EnumerateFileSystemEntries(d).Any()) restes.Add((nom, d, quoi));
         foreach (var (nom, d, quoi) in restes)
-            m.Elements.Add(new(nom, "trash", () => { if (Systeme.Corbeille(d)) { lib.Dire(nom + " : à la Corbeille"); LibererPlace(lib); } else lib.Dire("Ce dossier n'a pas pu être mis à la Corbeille"); }, $"{quoi} · {Lisible(Taille(d))} · part à la Corbeille"));
+        {   // la taille dans le nom, puis une confirmation : rien ne part d'un seul appui
+            var taille = Lisible(Taille(d));
+            m.Elements.Add(new($"{nom} : {taille}", "trash", () => lib.Ouvrir(new Menu
+            {
+                Titre = "Mettre à la Corbeille ?", SousTitre = nom, Symbole = "trash", Retour = () => LibererPlace(lib), Elements =
+                {
+                    new($"Oui, {taille} à la Corbeille", "trash", () => { if (Systeme.Corbeille(d)) lib.Dire(taille + " à la Corbeille : vide-la pour récupérer la place"); else lib.Dire("Ce dossier n'a pas pu être mis à la Corbeille"); LibererPlace(lib); }, "Aucun jeu installé ne s'en sert") { Destructif = true },
+                    new("Non", "arrow.uturn.backward", () => LibererPlace(lib)) { Teinte = Icones.Gris },
+                },
+            }), quoi + " · aucun jeu installé ne s'en sert") { Teinte = Icones.Rouge });
+        }
         m.Texte = restes.Count > 0 ? "Rien ici ne sert à tes jeux construits. Ce que tu choisis part à la Corbeille : tu peux encore le reprendre."
             : ouverts ? "Une construction est en cours ou à reprendre : finis-la ou abandonne-la d'abord." : "Rien à enlever : aucune construction n'a laissé de reste.";
         lib.Ouvrir(m);

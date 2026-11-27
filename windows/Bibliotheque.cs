@@ -54,6 +54,53 @@ public sealed class Bibliotheque
         _ => ("App Windows", "logo:windows"),
     };
 
+    public static readonly string[] CategoriesDeBase = ["Switch", "Steam", "Epic Games", "Apps"];
+    // MARK: Catégories à soi (openCategoryMenu, openCategoriesSettings, openRemoveCategoryMenu, addCategory sur Mac)
+    void RangerDans(Jeu j, string c)
+    {
+        if (c == j.CategorieOrigine) Config.CategoriesJeux.Remove(j.Id); else Config.CategoriesJeux[j.Id] = c;
+        Enregistrer(); FermerMenus(); Recharger(j.Id);
+        var k = Categories.IndexOf(c); if (k >= 0) { IndexCategorie = k; Selection = Math.Max(0, Visibles.FindIndex(x => x.Id == j.Id)); }
+        Dire($"{j.Nom} → {c}");
+    }
+    void OuvrirCategorie(Jeu j)
+    {
+        var m = new Menu { Titre = "Catégorie", SousTitre = j.Nom, Symbole = "tag", Roue = true, Retour = OuvrirOptions };
+        foreach (var c in new[] { j.CategorieOrigine }.Concat(Config.Categories).Distinct())
+            m.Elements.Add(new(c, c == j.Categorie ? "checkmark" : "tag", () => RangerDans(j, c), c == j.Categorie ? "Catégorie actuelle" : null) { Teinte = c == j.Categorie ? Icones.Vert : null });
+        m.Elements.Add(new("Nouvelle catégorie…", "plus", () => NouvelleCategorie(j), j.Nom + " y sera rangé"));
+        Ouvrir(m);
+    }
+    void NouvelleCategorie(Jeu? j) => Demander("Nouvelle catégorie", "Rétro, Multijoueur, Enfants…", nom =>
+    {
+        if (nom == "Tous" || CategoriesDeBase.Contains(nom)) { Dire("Ce nom est déjà pris par une catégorie de base"); return; }
+        if (!Config.Categories.Contains(nom)) Config.Categories.Add(nom); Enregistrer();
+        if (j != null) RangerDans(j, nom); else { FermerMenus(); Recharger(); var k = Categories.IndexOf(nom); if (k >= 0) { IndexCategorie = k; Selection = 0; Signaler(); } }
+        Dire($"Catégorie « {nom} » créée");
+    });
+    void OuvrirCategories() => Ouvrir(new Menu
+    {
+        Titre = "Catégories", Symbole = "tag", Retour = OuvrirPlus, Elements =
+        {
+            new("Nouvelle catégorie…", "plus", () => NouvelleCategorie(null), "Elle apparaîtra dans les onglets"),
+            new("Supprimer une catégorie", "trash", OuvrirSupprimerCategorie, "Les jeux retournent dans leur catégorie d'origine") { Destructif = true },
+        },
+    });
+    void OuvrirSupprimerCategorie()
+    {
+        if (Config.Categories.Count == 0) { Dire("Les catégories de base ne se suppriment pas"); return; }
+        var m = new Menu { Titre = "Supprimer", SousTitre = "Les jeux retournent dans leur catégorie d'origine", Symbole = "trash", Roue = true, Retour = OuvrirCategories };
+        foreach (var c in Config.Categories.ToList())
+        {
+            var n = Jeux.Count(j => j.Categorie == c);
+            m.Elements.Add(new(c, "trash", () =>
+            {
+                Config.Categories.Remove(c); foreach (var id in Config.CategoriesJeux.Where(p => p.Value == c).Select(p => p.Key).ToList()) Config.CategoriesJeux.Remove(id);
+                Enregistrer(); FermerMenus(); Recharger(); Dire($"Catégorie « {c} » supprimée");
+            }, n == 1 ? "1 jeu" : n + " jeux") { Destructif = true });
+        }
+        Ouvrir(m);
+    }
     public void Recharger(string? selectionner = null)
     {
         Sons.Actifs = Config.Sons; Mouvement.Reduit = Config.AnimationsReduites;
@@ -69,9 +116,10 @@ public sealed class Bibliotheque
         foreach (var e in Config.Jeux.Where(e => ModePC && (Demo || File.Exists(e.Chemin))))
             jeux.Add(new Jeu { Id = "app:" + e.Chemin, Nom = e.Nom ?? Path.GetFileNameWithoutExtension(e.Chemin), Origine = Origine.App, Cible = e.Chemin, Dossier = Path.GetDirectoryName(e.Chemin) ?? "" });
         foreach (var j in jeux) if (Config.Noms.TryGetValue(j.Id, out var n)) j.Nom = n;
+        foreach (var j in jeux) if (Config.CategoriesJeux.TryGetValue(j.Id, out var c)) j.CategorieChoisie = c;
         var avant = selectionner ?? Courant?.Id; var categorie = Categories.ElementAtOrDefault(IndexCategorie);
         Jeux = jeux;
-        Categories = ["Tous", .. new[] { "Switch", "Steam", "Epic Games", "Apps" }.Where(c => jeux.Any(j => j.Categorie == c && !Config.Masques.Contains(j.Id)))];
+        Categories = ["Tous", .. CategoriesDeBase.Where(c => jeux.Any(j => j.Categorie == c && !Config.Masques.Contains(j.Id))), .. Config.Categories];
         IndexCategorie = selectionner != null ? 0 : Math.Max(0, Categories.IndexOf(categorie ?? "Tous"));
         var i = Visibles.FindIndex(j => j.Id == avant); Selection = i >= 0 ? i : Math.Min(Selection, Visibles.Count);
         Journal.Ecrire($"bibliothèque : {jeux.Count(j => j.Origine == Origine.Steam)} Steam, {jeux.Count(j => j.Origine == Origine.Epic)} Epic, {jeux.Count(j => j.Origine == Origine.Switch)} Switch, {jeux.Count(j => j.Origine == Origine.App)} apps");
@@ -353,6 +401,8 @@ public sealed class Bibliotheque
         if (premier) m.Elements.Add(new("Plus tard", "clock", () => Appliquer("tout")) { Teinte = Icones.Gris });
         // le moteur des jeux Switch : où il en est, et sa mise à jour (ScarletNX sort une version presque chaque jour)
         if (!premier && ModeNintendo)
+            m.Elements.Add(new("Clés de la console", "key", () => MenusSwitch.AccueilCles(this, () => OuvrirMode()), File.Exists(Construction.ClesProd) ? "Installées · choisir pour les changer" : "Ton fichier prod.keys") { Teinte = Icones.Jaune, Section = "Jeux Switch" });
+        if (!premier && ModeNintendo)
             m.Elements.Add(new("ScarletNX" + (Moteur.Version != null ? " : installé" : ""), "arrow.down.circle", () =>
             {
                 FermerMenus();
@@ -377,18 +427,19 @@ public sealed class Bibliotheque
             m.Elements.Add(new("Internet : " + (MenusSwitch.Internet(j) ? "activé" : "coupé"), "globe", () => MenusSwitch.BasculerInternet(this, j), "La connexion du PC pour ce jeu. Un mod en ligne en a besoin"));
         }
         m.Elements.Add(new("Apparence", "paintbrush", () => OuvrirApparence(j), "Jaquette, fond, logo et nom"));
+        m.Elements.Add(new("Catégorie", "tag", () => OuvrirCategorie(j), j.Categorie));
         if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier), j.Dossier));
         m.Elements.Add(new("Masquer", "eye.slash", () => { Config.Masques.Add(j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le jeu reste installé ; Menu → Jeux masqués pour le remettre"));
         if (j.Origine == Origine.Switch) m.Elements.Add(new("Désinstaller", "trash", () => Ouvrir(new Menu
         {
             Titre = "Désinstaller " + j.Nom + " ?", Symbole = "trash", Retour = OuvrirOptions,
-            Texte = $"Le dossier du jeu part à la Corbeille, avec ses mods et les sauvegardes qu'il contient :\n{j.Dossier}\n\nTant que la Corbeille n'est pas vidée, tu peux le remettre. Ton fichier de jeu d'origine n'est pas touché.",
+            Texte = $"Le dossier du jeu part à la Corbeille, avec ses mods :\n{j.Dossier}\n\nLes sauvegardes restent. Tant que la Corbeille n'est pas vidée, tu peux remettre le jeu. Ton fichier de jeu d'origine n'est pas touché.",
             Elements =
             {
                 new("Annuler", "xmark", OuvrirOptions),
-                new("Mettre à la Corbeille", "trash", () => { if (!Systeme.Corbeille(j.Dossier)) { Dire("Le dossier n'a pas pu être mis à la Corbeille"); return; } Journal.Ecrire($"jeu Switch désinstallé : {j.Id}"); FermerMenus(); Recharger(); Dire(j.Nom + " est désinstallé"); }) { Destructif = true },
+                new("Mettre à la Corbeille", "trash", () => { Construction.GarderSauvegardes(j); if (!Systeme.Corbeille(j.Dossier)) { Dire("Le dossier n'a pas pu être mis à la Corbeille"); return; } Journal.Ecrire($"jeu Switch désinstallé : {j.Id}"); FermerMenus(); Recharger(); Dire(j.Nom + " est désinstallé"); }) { Destructif = true },
             },
-        }), "Le jeu construit part à la Corbeille") { Destructif = true });
+        }), "Les sauvegardes restent") { Destructif = true });
         // Steam et Epic tiennent leur propre liste de jeux installés : Home ne supprime pas leurs fichiers lui-même, il ouvre leur désinstallation
         if (j.Origine is Origine.Steam or Origine.Epic)
         {
@@ -466,8 +517,16 @@ public sealed class Bibliotheque
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
         m.Elements.Add(new("Composants", "sparkles", () => OuvrirMode(), Config.Mode switch { "nintendo" => "Jeux Nintendo", "pc" => "Jeux PC", _ => "Jeux Nintendo et jeux PC" }));
+        m.Elements.Add(new("Catégories", "tag", OuvrirCategories, Config.Categories.Count == 0 ? "Ranger tes jeux à ta façon" : string.Join(", ", Config.Categories)));
         m.Elements.Add(new("Libérer de la place", "trash", () => MenusSwitch.LibererPlace(this), "Ce que les constructions ont laissé et qui ne sert plus") { Teinte = Icones.Orange });
         m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, jeux Switch, journal") { Section = MiseAJour.Version == null ? null : "Home" });
+        // Home se ferme et se rouvre : la liste, les images et les réglages sont relus
+        m.Elements.Add(new("Redémarrer", "arrow.clockwise", () =>
+        {
+            FermerMenus(); Son("retour");
+            if (!OperatingSystem.IsWindows() || Environment.ProcessPath is not { } exe) { Dire("Home ne se redémarre que sur Windows"); return; }
+            try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true }); Quitter?.Invoke(); } catch (Exception e) { Journal.Ecrire("redémarrage : " + e.Message); Dire("Home n'a pas pu se relancer"); }
+        }, "Home se ferme et se rouvre"));
         m.Elements.Add(new("Quitter Home", "power", () => Quitter?.Invoke()) { Destructif = true });
         Ouvrir(m);
     }

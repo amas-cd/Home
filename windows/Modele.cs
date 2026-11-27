@@ -17,7 +17,9 @@ public sealed class Jeu
     public Origine Origine;
     public string Cible = "";     // ce qu'on ouvre : une adresse steam:// ou com.epicgames.launcher://, ou un .exe
     public string Dossier = "";   // le dossier du jeu : sert à savoir s'il tourne encore (Steam et Epic rendent la main tout de suite)
-    public string Categorie => Origine switch { Origine.Steam => "Steam", Origine.Epic => "Epic Games", Origine.Switch => "Switch", _ => "Apps" };
+    public string CategorieOrigine => Origine switch { Origine.Steam => "Steam", Origine.Epic => "Epic Games", Origine.Switch => "Switch", _ => "Apps" };
+    public string? CategorieChoisie;   // une catégorie à soi, rangée dans les réglages
+    public string Categorie => CategorieChoisie ?? CategorieOrigine;
     /// Un jeu Switch en cours de construction : sa tuile existe déjà, elle ouvre son chantier
     public bool EnConstruction => Id.StartsWith("construction:");
     public string? SteamId => Id.StartsWith("steam:") ? Id[6..] : null;
@@ -35,6 +37,8 @@ public sealed class Config
     public bool Fenetre { get; set; }                         // en fenêtre plutôt qu'en plein écran
     /// Ce que Home sert à faire sur ce PC, choisi au premier lancement (« Bienvenue ») : tout, nintendo ou pc. null = pas encore choisi.
     public string? Mode { get; set; }
+    public List<string> Categories { get; set; } = new();                    // les catégories à soi, en plus de celles de base
+    public Dictionary<string, string> CategoriesJeux { get; set; } = new();  // le jeu → la catégorie où on l'a rangé
     public bool Ouverture { get; set; } = true;               // l'écran de démarrage (logo et jingle) au lancement de Home
     public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
 }
