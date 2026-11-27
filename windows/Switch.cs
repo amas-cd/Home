@@ -423,11 +423,11 @@ public static class MenusSwitch
     {
         var m = new Menu
         {
-            Titre = "Construire le jeu", SousTitre = Path.GetFileName(dump), Symbole = "hammer",
-            Texte = "Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même, le fichier d'origine ne sert plus. "
+            Titre = "Mise à jour et DLC", SousTitre = Path.GetFileName(dump), Symbole = "arrow.down.circle",
+            Texte = "Si tu as la mise à jour du jeu ou ses DLC, ajoute-les maintenant : ils seront construits avec lui. Ce n'est pas obligatoire. Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même, le fichier d'origine ne sert plus. "
                 + "Compte de quelques minutes à plus d'une heure selon le jeu, et la taille du jeu en place libre. " + Regle,
         };
-        m.Elements.Add(new("Construire", "hammer", () => Construction.Commencer(lib, dump, ajouts), ajouts.Count == 0 ? "Le jeu seul" : ajouts.Count == 1 ? "Avec 1 mise à jour ou DLC" : $"Avec {ajouts.Count} mises à jour ou DLC"));
+        m.Elements.Add(new("Continuer", "arrow.right", () => Mode(lib, dump, ajouts), ajouts.Count == 0 ? "Le jeu seul, sans mise à jour" : ajouts.Count == 1 ? "Avec 1 mise à jour ou DLC" : $"Avec {ajouts.Count} mises à jour ou DLC"));
         m.Elements.Add(new("Ajouter une mise à jour ou un DLC", "plus", async () =>
         {
             if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Une mise à jour ou un DLC du jeu (.nsp ou .xci)", ["*.nsp", "*.xci"]) is { } f && !ajouts.Contains(f) && f != dump) ajouts.Add(f);
@@ -437,38 +437,35 @@ public static class MenusSwitch
         lib.Ouvrir(m);
     }
 
-    // MARK: Tears of the Kingdom en ligne, préparé d'un coup (windows/outils/totk-online.cmd lance Home avec --totk-online <dossier>)
-    // Le dossier donné contient ce qu'Anas envoie à un ami : le mod (dossier ou .zip) et serveur.txt (l'adresse). Ni l'un ni l'autre
-    // n'est dans le dépôt : le mod appartient à son auteur, et l'adresse d'un serveur ne va jamais dans un dépôt public.
-    // Il ne reste à donner que le jeu et sa mise à jour (et prod.keys une fois, s'il n'est ni dans le dossier ni déjà dans Home).
-    public static void TotkOnline(Bibliotheque lib, string dossier, string? mod = null, string? serveur = null)
+    // MARK: En local ou en ligne ? Posé pour chaque jeu, après le jeu et sa mise à jour.
+    // « En ligne » : le mod en ligne du jeu (TOTK Online, Super Mario Odyssey Online…) est installé avec lui, le jeu est recompilé avec
+    // ce mod, sa connexion est ouverte et l'adresse du serveur réglée. Home ne fournit ni le mod ni l'adresse : le mod appartient à son
+    // auteur, et l'adresse d'un serveur ne va jamais dans un dépôt public.
+    public static void Mode(Bibliotheque lib, string dump, List<string> ajouts) => lib.Ouvrir(new Menu
     {
-        try
+        Titre = "Comment veux-tu jouer ?", SousTitre = Path.GetFileName(dump), Symbole = "gamecontroller", Retour = () => Ajouts(lib, dump, ajouts),
+        Elements =
         {
-            if (Directory.Exists(dossier))
-            {
-                mod ??= Directory.GetDirectories(dossier).FirstOrDefault(d => Construction.Racine(d) != null) ?? Directory.GetFiles(dossier, "*.zip").FirstOrDefault();
-                if (serveur == null && Path.Combine(dossier, "serveur.txt") is var f && File.Exists(f)) serveur = File.ReadLines(f).FirstOrDefault(l => l.Trim() != "" && !l.TrimStart().StartsWith('#'))?.Trim();
-                if (!File.Exists(Construction.ClesProd) && Path.Combine(dossier, "prod.keys") is var k && File.Exists(k)) Installer(lib, k, Construction.ClesProd);
-            }
-        }
-        catch (Exception e) { Journal.Ecrire("TOTK Online, lecture du dossier : " + e.Message); }
-        var cles = File.Exists(Construction.ClesProd);
+            new("En local", "gamecontroller", () => Construction.Commencer(lib, dump, ajouts), "Le jeu tel quel. La construction démarre tout de suite"),
+            new("En ligne", "globe", () => EnLigne(lib, dump, ajouts, null, null), "Avec le mod en ligne du jeu et l'adresse d'un serveur. Tu pourras aussi y jouer seul"),
+        },
+    });
+    public static void EnLigne(Bibliotheque lib, string dump, List<string> ajouts, string? mod, string? serveur)
+    {
         var m = new Menu
         {
-            Titre = "Zelda en ligne", SousTitre = "Tears of the Kingdom", Symbole = "globe",
-            Texte = "Home construit le jeu, installe le mod en ligne et règle le serveur. Il te demande seulement ton jeu et sa mise à jour, tirés de ta console.\n\n"
-                + $"Mod : {(mod != null ? Path.GetFileName(mod) : "pas trouvé")}  ·  Serveur : {(string.IsNullOrWhiteSpace(serveur) ? "pas réglé" : "réglé")}  ·  Clés : {(cles ? "installées" : "à donner")}",
+            Titre = "Jouer en ligne", SousTitre = Path.GetFileName(dump), Symbole = "globe", Retour = () => Mode(lib, dump, ajouts),
+            Texte = "Donne le mod en ligne de ce jeu et l'adresse du serveur : Home construit le jeu, installe le mod, recompile avec lui et règle le serveur.\n\n"
+                + $"Mod : {(mod != null ? Path.GetFileName(mod.TrimEnd(Path.DirectorySeparatorChar, '/')) : "à choisir")}  ·  Serveur : {(string.IsNullOrWhiteSpace(serveur) ? "à régler" : "réglé")}",
         };
-        if (mod != null && cles) m.Elements.Add(new("Choisir le jeu et sa mise à jour", "hammer", async () =>
+        if (mod != null && !string.IsNullOrWhiteSpace(serveur)) m.Elements.Add(new("Construire", "hammer", () => Construction.Commencer(lib, dump, ajouts, mod, serveur), "Le jeu, puis le mod : compte plus longtemps qu'un jeu seul"));
+        m.Elements.Add(new(mod == null ? "Choisir le mod (.zip)" : "Changer de mod (.zip)", "shippingbox", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le mod en ligne du jeu (.zip)", ["*.zip"]) is { } z) mod = z; EnLigne(lib, dump, ajouts, mod, serveur); }, "L'archive du mod, avec romfs/ et/ou exefs/ dedans"));
+        m.Elements.Add(new(mod == null ? "Choisir le mod (dossier)" : "Changer de mod (dossier)", "folder", async () =>
         {
-            if (lib.ChoisirFichier == null || await lib.ChoisirFichier("Tears of the Kingdom, extrait de ta console (.xci ou .nsp)", ["*.xci", "*.nsp"]) is not { } dump) return;
-            if (await lib.ChoisirFichier("La mise à jour du jeu que le mod demande (.nsp)", ["*.nsp", "*.xci"]) is not { } maj) return;
-            Construction.Commencer(lib, dump, [maj], mod, serveur);
-        }, "Puis la construction démarre : compte plus d'une heure et environ 40 Go libres"));
-        if (!cles) m.Elements.Add(new("Donner les clés", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Les clés de ta console (prod.keys)", ["prod.keys", "*.keys"]) is { } k) Installer(lib, k, Construction.ClesProd); TotkOnline(lib, dossier, mod, serveur); }, "prod.keys, tiré de ta console"));
-        m.Elements.Add(new(mod == null ? "Choisir le mod" : "Changer de mod", "puzzlepiece", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le mod en ligne (.zip)", ["*.zip"]) is { } z) mod = z; TotkOnline(lib, dossier, mod, serveur); }, "L'archive .zip du mod, avec romfs/ et/ou exefs/"));
-        m.Elements.Add(new(string.IsNullOrWhiteSpace(serveur) ? "Régler le serveur" : "Changer de serveur", "globe", () => lib.Demander("Adresse du serveur", "adresse:port", v => TotkOnline(lib, dossier, mod, v)), "L'adresse que t'a donnée celui qui héberge la partie"));
+            if (lib.ChoisirDossier != null && await lib.ChoisirDossier("Le dossier du mod en ligne (il contient romfs et/ou exefs)") is { } d) { if (Construction.Racine(d) != null) mod = d; else lib.Dire("Ce n'est pas un mod : il n'y a ni dossier romfs ni dossier exefs dedans"); }
+            EnLigne(lib, dump, ajouts, mod, serveur);
+        }, "Un dossier qui contient romfs/ et/ou exefs/"));
+        m.Elements.Add(new(string.IsNullOrWhiteSpace(serveur) ? "Régler le serveur" : "Changer de serveur", "globe", () => lib.Demander("Adresse du serveur", "adresse:port", v => EnLigne(lib, dump, ajouts, mod, v)), "L'adresse que t'a donnée celui qui héberge la partie"));
         lib.Ouvrir(m);
     }
 

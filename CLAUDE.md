@@ -142,10 +142,10 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     code (`exefs/`) fait recompiler le jeu (`scarletnx -r`).
   - En ligne : seul le réglage `network=` du jeu est proposé (« Internet »). Ne présente « Jouer en ligne » comme fonctionnel pour un
     jeu qu'après un essai réel de ce jeu avec ce mod. ScarletNX a `swkbd_text` pour répondre au clavier, mais à tous les claviers.
-  - L'adresse du serveur d'un mod en ligne est dans `recompiled/<id>/serveur.txt` (sur le PC seulement) : Home la passe au lancement
-    (`--swkbd-text=`). `outils/totk-online.cmd` (copié à côté de Home.exe) lance `Home.exe --totk-online <son dossier>` : Home y prend le
-    mod (dossier ou .zip) et `serveur.txt`, demande le jeu et sa mise à jour, construit, installe le mod et règle le serveur
-    (`MenusSwitch.TotkOnline`). Le mod et l'adresse ne sont jamais dans le dépôt : Anas les envoie à part.
+  - L'assistant demande, après le jeu et sa mise à jour : **en local ou en ligne ?** (`MenusSwitch.Mode`, pour tous les jeux). En ligne :
+    le mod en ligne (dossier ou .zip) et l'adresse du serveur ; le chantier les porte (`Chantier.Mod`, `Chantier.Serveur`), et à la fin
+    de la construction Home installe le mod, recompile avec lui, met `network=1` et garde l'adresse dans `recompiled/<id>/serveur.txt`
+    (sur le PC seulement), qu'il passe à chaque lancement (`--swkbd-text=`). Le mod et l'adresse ne sont jamais dans le dépôt.
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
 - **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
   haut), choix des images dans Home (un fichier à la place), mode d'utilisation.
