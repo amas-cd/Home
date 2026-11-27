@@ -1,5 +1,8 @@
-# La version de ScarletNX que Home installe (https://github.com/scarletnx/nightly/releases), et l'empreinte SHA-256 de ses archives.
-# ScarletNX ne garde que ses 30 dernières nightlies : si celle-ci a disparu, Home prend la dernière publiée et le note dans son journal.
-tag=nightly-2026-11-27-43631c7
-x86_64=ec1ff1a52e5bdd2919c724e97d0510e0a01cfd386f5a15d1d2fd384878ba3be9
-aarch64=0b4cdd5e2a9cc4aa03e99779fc91495176992417747b7e82da4b68b03cb913e8
+# La version de ScarletNX que Home installe, et l'empreinte SHA-256 de son archive.
+# depot : le ScarletNX de Home (fork GPL-3.0-or-later de scarletnx/ScarletNX, branche « home » : l'officiel plus la caméra à la
+# souris), compilé par le workflow « Home (Windows) » de ce dépôt. Sans ligne depot, c'est scarletnx/nightly.
+# Si cette version a disparu, Home prend la dernière du dépôt ; si le dépôt ne répond pas, ou n'a pas de build pour ce PC (ARM),
+# la dernière nightly officielle, sans la souris. Il le note dans son journal.
+depot=amas-cd/ScarletNX
+tag=home-2026-11-27-21c891e
+x86_64=15280ba4fd0572896629a1e2a5177979be53b7817cd2d52c881da3c384a4e4f4

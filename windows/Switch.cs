@@ -66,6 +66,12 @@ public static class Moteur
             var d = await Reseau.Json($"https://api.github.com/repos/{depot}/releases/latest");
             if (d == null && depot != Depot) { Journal.Ecrire($"{depot} ne répond pas : ScarletNX officiel, sans la caméra à la souris"); depot = Depot; d = await Reseau.Json($"https://api.github.com/repos/{depot}/releases/latest"); }
             if (d == null) throw new InvalidOperationException("la liste des versions de ScarletNX n'a pas pu être lue");
+            JsonElement Fichier(JsonDocument doc) => doc.RootElement.GetProperty("assets").EnumerateArray().FirstOrDefault(a => a.GetProperty("name").GetString() == Archive);
+            if (depot != Depot && Fichier(d).ValueKind != JsonValueKind.Object)
+            {   // le ScarletNX de Home n'est compilé que pour les PC x86-64 : un PC ARM prend l'officiel
+                Journal.Ecrire($"{depot} n'a pas de build pour ce PC : ScarletNX officiel, sans la caméra à la souris"); depot = Depot; d.Dispose();
+                d = await Reseau.Json($"https://api.github.com/repos/{depot}/releases/latest") ?? throw new InvalidOperationException("la liste des versions de ScarletNX n'a pas pu être lue");
+            }
             using var _ = d;
             tag = d.RootElement.GetProperty("tag_name").GetString() ?? "";
             var fichier = d.RootElement.GetProperty("assets").EnumerateArray().FirstOrDefault(a => a.GetProperty("name").GetString() == Archive);
