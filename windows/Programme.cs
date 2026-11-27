@@ -120,6 +120,14 @@ sealed class Fenetre : Window
                 case "maj": MenusSwitch.Maj(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci", EnLigne = MenusSwitch.ModsEnLigne[0] }); break;
                 case "sur": { var dm = new MenusSwitch.Demande { Dump = "Zelda TOTK.xci", EnLigne = MenusSwitch.ModsEnLigne[0] }; lib.Ouvrir(new Menu { Titre = "Es-tu sûr ?", SousTitre = "Zelda-update.nsp", Symbole = "exclamationmark", Alerte = "Ce fichier doit être la mise à jour 1.2.1", Texte = "Home ne peut pas le vérifier. Avec une autre version, TOTK Online ne marchera pas, et il faudra tout reconstruire.", Elements = { new("Oui, c'est la 1.2.1", "checkmark", () => { }) { Teinte = Icones.Vert }, new("Choisir un autre fichier", "arrow.left", () => { }) { Teinte = Icones.Gris } } }); break; }
                 case "recap": MenusSwitch.Recap(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci", Maj = "Zelda-1.2.1.nsp", EnLigne = MenusSwitch.ModsEnLigne[0] }); break;
+                case "modseul":
+                {   // un chantier dont seule l'étape du mod a échoué, avec la phrase vue sur un vrai PC (le chemin doit disparaître)
+                    var raison = Construction.SansChemin(@"scarletnx: C:\Users\Jean Dupont\AppData\Local\Home\scarletnx\recompiled\0100F2C0115B6000\0100F2C0115B6000 holds no exefs/main");
+                    Journal.Ecrire("essai : " + raison);
+                    Json.Ecrire(Dossiers.Fichier("constructions.json"), new List<Chantier> { new() { Id = "construction:essai", Titre = "Zelda Tears of the Kingdom", Dump = "Zelda.xci", Mod = "TOTK_Online.zip", ModSeul = true, Raison = "Le jeu est construit et jouable en local. Le mod en ligne n'a pas pu être ajouté : " + raison } });
+                    lib.Recharger("construction:essai"); if (lib.Courant is { } jc) MenusSwitch.Chantier(lib, jc);
+                    break;
+                }
                 case "souris": if (lib.Courant is { } js) MenusSwitch.Souris(lib, js); break;
                 case "mods": if (lib.Courant is { } jm) MenusSwitch.Mods(lib, jm); break;
                 case "place": MenusSwitch.LibererPlace(lib); break;

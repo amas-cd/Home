@@ -152,6 +152,7 @@ public sealed class Chantier
     public List<string> Ajouts { get; set; } = new();   // mises à jour et DLC
     public string? Mod { get; set; }       // un mod à installer dès que le jeu est construit (dossier ou .zip)
     public string? Serveur { get; set; }   // l'adresse du serveur de ce mod, s'il joue en ligne
+    public bool ModSeul { get; set; }      // le jeu est construit, il ne reste que le mod à poser (son étape a échoué)
     public string? Raison { get; set; }    // pourquoi la construction s'est arrêtée, pour le dire sur sa tuile
     public string Journal { get; set; } = ""; public DateTime Debut { get; set; } = DateTime.Now;
 }
@@ -257,7 +258,7 @@ public static class Construction
             try
             {
                 if (Trouvailles.Lire(c.Dump).titre is { Length: > 0 } titre && Directory.GetDirectories(Recompiles).FirstOrDefault(d => Path.GetFileName(d).Equals(titre, StringComparison.OrdinalIgnoreCase)) is { } fait
-                    && Pret(fait) && Directory.GetLastWriteTime(fait) >= c.Debut.AddMinutes(-1)) { dossier = fait; Journal.Ecrire($"construction de {c.Titre} : le jeu est déjà construit, reprise à l'étape du mod"); }
+                    && Pret(fait) && (c.ModSeul || Directory.GetLastWriteTime(fait) >= c.Debut.AddMinutes(-1))) { dossier = fait; Journal.Ecrire($"construction de {c.Titre} : le jeu est déjà construit, reprise à l'étape du mod"); }
             }
             catch { }
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Moteur.Donnees };
@@ -301,8 +302,8 @@ public static class Construction
                 if (Directory.Exists(Path.Combine(Mods(dossier), nom, "exefs")))
                 {
                     t.Etape = "Recompilation du code avec le mod…"; lib.Signaler();
-                    var (code, erreur) = await Executer(exe, ["--data", Moteur.Donnees, "-r", Path.Combine(dossier, Path.GetFileName(dossier))], c.Journal);
-                    if (code != 0) throw new InvalidOperationException("le jeu est construit, mais pas avec le mod : " + erreur);
+                    var (code, erreur) = await Executer(exe, ArgumentsRecompiler(dossier), c.Journal);
+                    if (code != 0) throw new InvalidOperationException(Raison(c.Journal, erreur));
                 }
             }
             Noter(Chantiers().Where(x => x.Id != c.Id).ToList());
@@ -318,9 +319,13 @@ public static class Construction
         catch (Exception e)
         {
             // le chantier reste : sa tuile propose « Reprendre », et dit pourquoi il s'est arrêté
-            var raison = arret ? "Construction arrêtée" : e.Message.Length > 160 ? e.Message[..160] : e.Message;
-            t.Erreur = raison; t.Etape = arret ? raison : "Échec : " + raison; t.Fini = true; Journal.Ecrire($"construction de {c.Titre} : {e.Message}");
-            c.Raison = arret ? null : raison; Garder(c);
+            // Le jeu lui-même est construit et seule l'étape du mod a échoué : il est jouable en local, et on le dit.
+            var modSeul = !arret && c.Mod != null && dossier != null && Pret(dossier);
+            var raison = arret ? "Construction arrêtée" : SansChemin(e.Message); if (raison.Length > 160) raison = raison[..160];
+            if (modSeul) raison = "Le jeu est construit et jouable en local. Le mod en ligne n'a pas pu être ajouté : " + raison;
+            t.Erreur = raison; t.Etape = arret || modSeul ? raison : "Échec : " + raison; t.Fini = true; Journal.Ecrire($"construction de {c.Titre} : {e.Message}");
+            c.Raison = arret ? null : raison; c.ModSeul = modSeul; Garder(c);
+            if (modSeul) lib.Recharger();   // la tuile du jeu apparaît : il se lance sans le mod
         }
         EnCours = null; processus = null; lib.Signaler();
         lib.FinTache(t);
@@ -338,11 +343,26 @@ public static class Construction
             var lignes = r.ReadToEnd().Split('\n').Select(l => l.Trim()).Where(l => l != "").TakeLast(400).ToList();
             bool Generale(string l) => l.Contains("You can run the same command", StringComparison.OrdinalIgnoreCase) || l.Contains("exit status", StringComparison.OrdinalIgnoreCase);
             var precise = lignes.LastOrDefault(l => !Generale(l) && mots.Any(m => l.Contains(m, StringComparison.OrdinalIgnoreCase)));
-            if (precise == null) return derniere;
+            if (precise == null) return SansChemin(derniere);
             precise = System.Text.RegularExpressions.Regex.Replace(precise, @"^scarletnx(\.exe)?:\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            return Generale(derniere) ? precise : derniere;
+            return SansChemin(Generale(derniere) ? precise : derniere);
         }
-        catch { return derniere; }
+        catch { return SansChemin(derniere); }
+    }
+    /// Recompiler un jeu déjà construit, là où il est (après un changement de ses mods de code). ScarletNX le reconnaît par son
+    /// dossier (recompiled\<id>) ou par son programme (recompiled\<id>\<id>.exe) : driver.c, prepared_game. Le chemin
+    /// « <id>\<id> » sans .exe, donné jusqu'ici, n'est ni l'un ni l'autre sur Windows : ScarletNX le prenait pour un dossier de
+    /// jeu extrait et répondait « holds no exefs/main ». On donne le dossier.
+    static string[] ArgumentsRecompiler(string dossierJeu) => ["--data", Moteur.Donnees, "-r", dossierJeu.TrimEnd('\\', '/')];
+    /// Une raison sans chemin : le joueur n'a rien à faire de « C:\Users\…\AppData\… », et un chemin dit son nom de session. On
+    /// garde le nom du fichier ou du dossier, entre guillemets.
+    public static string SansChemin(string raison)
+    {
+        raison = System.Text.RegularExpressions.Regex.Replace(raison, @"^scarletnx(\.exe)?:\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        // un chemin Windows (C:\dossier\…, les dossiers pouvant contenir des espaces) ou Unix (/a/b/c) : on n'en garde que le dernier morceau
+        raison = System.Text.RegularExpressions.Regex.Replace(raison, @"[A-Za-z]:\\(?:[^\\/:*?""<>|\r\n]+\\)*([^\\/:*?""<>|\s]+)", m => "« " + m.Groups[1].Value + " »");
+        raison = System.Text.RegularExpressions.Regex.Replace(raison, @"(?<![\w.»])/(?:[^/\s:]+/)+([^/\s:]+)", m => "« " + m.Groups[1].Value + " »");
+        return raison.Trim();
     }
     static async Task<(int code, string derniere)> Executer(string exe, string[] arguments, string journal)
     {
@@ -424,7 +444,7 @@ public static class Construction
     public static void Abandonner(Bibliotheque lib, Chantier c)
     {
         if (EnCours == c.Id && processus is { } p) { abandon = true; try { p.Kill(true); } catch { } return; }   // la suite se fait quand le programme s'arrête
-        Noter(Chantiers().Where(x => x.Id != c.Id).ToList()); lib.FermerMenus(); lib.Recharger(); lib.Dire("Construction abandonnée");
+        Noter(Chantiers().Where(x => x.Id != c.Id).ToList()); lib.FermerMenus(); lib.Recharger(); lib.Dire(c.ModSeul ? "Le jeu reste jouable en local, sans le mod" : "Construction abandonnée");
     }
 
     /// Télécharge ScarletNX d'avance, avec la pastille d'avancement ; `ensuite` se fait quand c'est installé (comme `apresTache` sur Mac)
@@ -450,11 +470,11 @@ public static class Construction
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("la recompilation ne se fait que sur Windows");
             var exe = await Moteur.Preparer(t, lib.Signaler); t.Fraction = null; t.Etape = "Recompilation du code…"; lib.Signaler();
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Moteur.Donnees };
-            foreach (var a in new[] { "--data", Moteur.Donnees, "-r", Path.Combine(j.Dossier, Path.GetFileName(j.Dossier)) }) psi.ArgumentList.Add(a);
+            foreach (var a in ArgumentsRecompiler(j.Dossier)) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("ScarletNX n'a pas démarré");
             var sortie = p.StandardOutput.ReadToEndAsync(); var erreurs = p.StandardError.ReadToEndAsync();
             await p.WaitForExitAsync(); File.WriteAllText(c.Journal, await sortie + await erreurs);
-            if (p.ExitCode != 0) throw new InvalidOperationException((await erreurs).Trim().Split('\n').LastOrDefault(x => x.Trim() != "")?.Trim() ?? $"ScarletNX s'est arrêté (code {p.ExitCode})");
+            if (p.ExitCode != 0) throw new InvalidOperationException(SansChemin((await erreurs).Trim().Split('\n').LastOrDefault(x => x.Trim() != "")?.Trim() ?? $"ScarletNX s'est arrêté (code {p.ExitCode})"));
             t.Etape = "Mods appliqués"; t.Fraction = 1; t.Fini = true;
         }
         catch (Exception e) { t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire($"recompilation de {j.Nom} : {e.Message}"); }
@@ -936,6 +956,14 @@ public static class MenusSwitch
             return;
         }
         // arrêtée : la raison en orange sous le titre, puis reprendre, lire le journal ou abandonner
+        if (c.ModSeul)
+        {   // le jeu est fait : il ne reste que le mod en ligne. On réessaie le mod seul, ou on joue en local sans lui.
+            var seul = new Menu { Titre = c.Titre, SousTitre = "Le mod en ligne n'est pas posé", Symbole = "hammer", Alerte = c.Raison };
+            seul.Elements.Add(new("Réessayer le mod", "arrow.clockwise", () => _ = Construction.Lancer(lib, c), "Le jeu n'est pas reconstruit : quelques minutes") { Teinte = Icones.Vert });
+            seul.Elements.Add(new("Jouer en local", "gamecontroller", () => Construction.Abandonner(lib, c), "Garde le jeu sans le mod ; Mods → Ajouter un mod pour le remettre plus tard"));
+            if (File.Exists(c.Journal)) seul.Elements.Add(new("Voir le journal", "doc", () => Systeme.Ouvrir(c.Journal), "Ce que la construction a écrit") { Teinte = Icones.Gris });
+            lib.Ouvrir(seul); return;
+        }
         var m = new Menu { Titre = c.Titre, SousTitre = "Construction arrêtée", Symbole = "hammer", Alerte = c.Raison };
         m.Elements.Add(new("Reprendre", "play.fill", () => _ = Construction.Lancer(lib, c), "La construction repart de là où elle peut") { Teinte = Icones.Vert });
         if (File.Exists(c.Journal)) m.Elements.Add(new("Voir le journal", "doc", () => Systeme.Ouvrir(c.Journal), "Ce que la construction a écrit") { Teinte = Icones.Gris });
