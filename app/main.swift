@@ -3306,10 +3306,19 @@ struct SaisieView: View {
     }
 }
 /// L'installation des moteurs de jeu, en plein écran, comme la mise en route d'une console. Sobre : un titre qui dit ce qui
-/// s'installe, un anneau blanc fin avec le pourcentage, l'étape en cours et le temps restant. Rien d'autre n'est accessible ni affiché.
+/// s'installe, un grand anneau blanc avec le pourcentage, et à côté la liste des étapes, cochées une à une. Rien d'autre n'est accessible.
 struct InstallationView: View {
     @ObservedObject var lib: Library; let t: Tache
     @State private var paru = false
+    @State private var rang = 0   // l'étape la plus avancée vue : une étape sans nom dans la liste (« Bilan ») ne fait pas reculer
+    /// Les étapes de preparer-moteurs.command, par le début de leur nom dans le journal, et ce qu'on en dit au joueur
+    private var etapes: [(cle: String, nom: String)] {
+        let nintendo = [("Outils Apple", "Outils d'Apple"), ("Outils Homebrew", "Outils Homebrew"), ("Python", "Python"), ("nxnative", "nxnative · jeux Switch"), ("MacNativeGames", "MacNativeGames · Zelda")]
+        let pc = [("Moteur Windows", "Voile · jeux Windows"), ("Compte Epic", "Legendary · Epic Games")]
+        let m = lib.config.moteurs ?? "tout"
+        let n = nintendo.filter { m == "tout" || ($0.0 != "nxnative" && $0.0 != "MacNativeGames") || ($0.0 == "nxnative" && m == "nxnative") || ($0.0 == "MacNativeGames" && m == "mng") }
+        return (lib.modeNintendo ? n : []) + (lib.modePC ? pc : [])
+    }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
             let echec = t.erreur != nil, fini = t.fini && !echec
@@ -3317,35 +3326,50 @@ struct InstallationView: View {
             let quoi = lib.config.mode == "pc" ? "le moteur des jeux PC" : lib.config.mode == "nintendo" ? "les moteurs des jeux Switch" : "les moteurs des jeux Switch et PC"
             ZStack {
                 Color(red: 0.02, green: 0.02, blue: 0.05)
-                Circle().fill(Library.violet[1]).frame(width: 900, height: 900).blur(radius: 220).opacity(0.22).offset(y: 260)   // une seule lueur, basse et discrète
+                Circle().fill(Library.violet[1]).frame(width: 1100, height: 1100).blur(radius: 240).opacity(0.22).offset(y: 320)   // une seule lueur, basse et discrète
                 VStack(spacing: 0) {
-                    Text(echec ? "INSTALLATION INTERROMPUE" : fini ? "MOTEURS INSTALLÉS" : "INSTALLATION DES MOTEURS").font(.system(size: 34, weight: .black).width(.expanded)).tracking(4).lineLimit(1).minimumScaleFactor(0.6)
+                    Text(echec ? "INSTALLATION INTERROMPUE" : fini ? "MOTEURS INSTALLÉS" : "INSTALLATION DES MOTEURS").font(.system(size: 46, weight: .black).width(.expanded)).tracking(4).lineLimit(1).minimumScaleFactor(0.6)
                     Text(echec ? "Vérifie la connexion à Internet, puis réessaie." : "Home installe \(quoi) : ce qui fait tourner tes jeux sur ce Mac.")
-                        .font(.system(size: 20, weight: .medium)).opacity(0.6).multilineTextAlignment(.center).frame(maxWidth: 900).padding(.top, 14)
-                    ZStack {
-                        Circle().stroke(.white.opacity(0.12), lineWidth: 6)
-                        Circle().trim(from: 0, to: max(0.01, fr)).stroke(echec ? Color.orange : Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                            .rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.9), value: fr)
-                        if echec { Image(systemName: "exclamationmark").font(.system(size: 64, weight: .bold)).foregroundStyle(Color.orange) }
-                        else if fini { Image(systemName: "checkmark").font(.system(size: 64, weight: .bold)) }
-                        else {
-                            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                                Text("\(Int(fr * 100))").font(.system(size: 68, weight: .semibold, design: .rounded)).monospacedDigit().contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(fr * 100))
-                                Text("%").font(.system(size: 26, weight: .semibold, design: .rounded)).opacity(0.5)
-                            }
+                        .font(.system(size: 24, weight: .medium)).opacity(0.6).multilineTextAlignment(.center).frame(maxWidth: 1100).padding(.top, 16)
+                    HStack(alignment: .center, spacing: 120) {
+                        VStack(spacing: 30) {
+                            ZStack {
+                                Circle().stroke(.white.opacity(0.12), lineWidth: 10)
+                                Circle().trim(from: 0, to: max(0.01, fr)).stroke(echec ? Color.orange : Color.white, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                                    .rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.9), value: fr)
+                                if echec { Image(systemName: "exclamationmark").font(.system(size: 110, weight: .bold)).foregroundStyle(Color.orange) }
+                                else if fini { Image(systemName: "checkmark").font(.system(size: 110, weight: .bold)) }
+                                else {
+                                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                        Text("\(Int(fr * 100))").font(.system(size: 120, weight: .semibold, design: .rounded)).monospacedDigit().contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(fr * 100))
+                                        Text("%").font(.system(size: 42, weight: .semibold, design: .rounded)).opacity(0.5)
+                                    }
+                                }
+                            }.frame(width: 380, height: 380)
+                            Text(echec ? " " : fini ? "Tout est prêt" : TacheView.restant(t, tl.date)).font(.system(size: 21, weight: .medium)).opacity(0.55)
                         }
-                    }.frame(width: 230, height: 230).padding(.top, 70).padding(.bottom, 54)
-                    Text(echec ? (t.erreur ?? "Échec") : fini ? "Tout est prêt" : t.etape).font(.system(size: 24, weight: .semibold, design: .rounded)).lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: 900)
-                        .id(echec ? "échec" : t.etape).transition(.opacity)
-                    Text(echec || fini ? " " : TacheView.restant(t, tl.date)).font(.system(size: 17, weight: .medium)).opacity(0.5).padding(.top, 8)
-                    HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") }.padding(.top, 40).opacity(echec ? 1 : 0)
+                        VStack(alignment: .leading, spacing: 26) {
+                            ForEach(Array(etapes.enumerated()), id: \.offset) { i, e in
+                                let fait = fini || i < rang, enCours = !fini && !echec && i == rang, rate = echec && i == rang
+                                HStack(spacing: 18) {
+                                    Image(systemName: fait ? "checkmark.circle.fill" : rate ? "exclamationmark.circle.fill" : enCours ? "circle.dotted" : "circle")
+                                        .font(.system(size: 30, weight: .semibold)).foregroundStyle(rate ? Color.orange : .white).opacity(fait || enCours || rate ? 1 : 0.28).frame(width: 36)
+                                    Text(e.nom).font(.system(size: 28, weight: enCours || rate ? .bold : .medium, design: .rounded)).opacity(fait ? 0.6 : enCours || rate ? 1 : 0.32)
+                                }
+                            }
+                            if echec, let e = t.erreur { Text(e).font(.system(size: 19, weight: .medium)).foregroundStyle(Color.orange).lineLimit(3).frame(maxWidth: 520, alignment: .leading).padding(.top, 6) }
+                        }.frame(width: 540, alignment: .leading)
+                    }.padding(.top, 84)
+                    HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") }.padding(.top, 60).opacity(echec ? 1 : 0)
                 }.foregroundStyle(.white).opacity(paru ? 1 : 0).offset(y: paru ? 0 : 18)
-                .animation(.easeInOut(duration: 0.4), value: t.etape).animation(.easeInOut(duration: 0.5), value: echec).animation(.easeInOut(duration: 0.5), value: fini)
+                .animation(.easeInOut(duration: 0.4), value: rang).animation(.easeInOut(duration: 0.5), value: echec).animation(.easeInOut(duration: 0.5), value: fini)
             }
         }
         .ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
-        .onAppear { withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7)) { paru = true } }
+        .onAppear { avancer(t.etape); withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7)) { paru = true } }
+        .onChange(of: t.etape) { _, e in avancer(e) }
     }
+    private func avancer(_ etape: String) { if let i = etapes.firstIndex(where: { etape.hasPrefix($0.cle) }), i > rang { rang = i } }
 }
 struct PickerView: View {
     @ObservedObject var lib: Library
