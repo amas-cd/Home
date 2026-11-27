@@ -279,7 +279,7 @@ public static class Construction
             if (c.Mod != null)
             {   // un mod demandé avec le jeu : posé dans son dossier, puis le code est recompilé avec lui (un mod en ligne est un mod de code)
                 t.Etape = "Installation du mod…"; lib.Signaler();
-                var nom = await Task.Run(() => InstallerMod(dossier, c.Mod, Path.GetFileNameWithoutExtension(c.Mod.TrimEnd(Path.DirectorySeparatorChar, '/'))));
+                var nom = await Task.Run(() => InstallerMod(dossier, c.Mod, Path.GetFileNameWithoutExtension(c.Mod.TrimEnd(Path.DirectorySeparatorChar, '/')), remplacer: true));
                 Journal.Ecrire($"mod installé avec le jeu : {nom}");
                 Ini.Ecrire(Reglages(dossier), "Network", "network", "1");   // un mod en ligne a besoin de la connexion du PC, avec ou sans adresse réglée
                 if (!string.IsNullOrWhiteSpace(c.Serveur)) File.WriteAllText(FichierServeur(dossier), c.Serveur.Trim());
@@ -325,7 +325,9 @@ public static class Construction
     }
 
     /// Pose un mod (un dossier, ou un .zip) dans le dossier des mods d'un jeu, et rend son nom. Refuse ce qui n'est pas un mod.
-    public static string InstallerMod(string dossierJeu, string source, string nom)
+    /// `remplacer` : un mod du même nom déjà là part à la Corbeille (une construction reprise réinstalle son mod en ligne ; sans ça
+    /// elle butait sur celui qu'elle avait posé au premier essai). Ajouté à la main, un nom déjà pris reste refusé.
+    public static string InstallerMod(string dossierJeu, string source, string nom, bool remplacer = false)
     {
         string? tmp = null;
         try
@@ -339,11 +341,13 @@ public static class Construction
             if (Racine(source) is not { } racine) throw new InvalidDataException("ce n'est pas un mod : il n'y a ni dossier romfs ni dossier exefs dedans");
             nom = Dossiers.NomSur(nom.Trim().TrimStart('.')); if (nom == "") nom = "mod";
             var mods = Mods(dossierJeu); var cible = Path.Combine(mods, nom);
-            if (Directory.Exists(cible)) throw new InvalidDataException($"un mod s'appelle déjà « {nom} » : supprime-le d'abord");
+            if (Directory.Exists(cible) && !remplacer) throw new InvalidDataException($"un mod s'appelle déjà « {nom} » : supprime-le d'abord");
             if (Path.GetFullPath(racine).StartsWith(Path.GetFullPath(mods), StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("ce dossier est déjà dans les mods du jeu");
             // copié sous un nom caché puis renommé : une copie coupée ne se montre jamais comme un mod (ScarletNX fait pareil)
             var enCours = Path.Combine(mods, "." + nom + ".adding"); if (Directory.Exists(enCours)) Directory.Delete(enCours, true);
-            Copier(racine, enCours); Directory.Move(enCours, cible);
+            Copier(racine, enCours);
+            if (Directory.Exists(cible) && !Systeme.Corbeille(cible)) throw new IOException($"l'ancien mod « {nom} » n'a pas pu être mis à la Corbeille");
+            Directory.Move(enCours, cible);
             return nom;
         }
         finally { try { if (tmp != null && Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { } }   // la copie de travail de Home, pas un fichier de l'utilisateur
