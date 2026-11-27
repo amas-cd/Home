@@ -824,7 +824,7 @@ public sealed class Ecran : Panel
         if (batterie != cleBatterie)
         {
             cleBatterie = batterie; while (droite.Children.Count > 1) droite.Children.RemoveAt(0);
-            if (lib.Batterie is { } pct) droite.Children.Insert(0, U.Ilot(U.Icone("gamecontroller", 17), U.Icone("battery", 16), U.Texte(pct + " %", 14, FontWeight.SemiBold)));
+            if (lib.Batterie is { } pct) droite.Children.Insert(0, U.Ilot(U.Icone("gamecontroller", 17), U.Icone(pct < 20 ? "battery.25percent" : pct < 55 ? "battery.50percent" : "battery.100percent", 16), U.Texte(pct + " %", 14, FontWeight.SemiBold)));
         }
         Seconde();
     }
@@ -989,13 +989,13 @@ public sealed class Ecran : Panel
         saisieMontree = lib.Saisie;
         if (saisieMontree is not { } s) { coucheSaisie.Opacity = 0; coucheSaisie.IsHitTestVisible = false; Mouvement.Dans(0.25, () => { if (lib.Saisie == null) coucheSaisie.Children.Clear(); }); return; }
         coucheSaisie.Children.Clear();
-        var champ = new TextBox { FontSize = 24, FontFamily = U.Police, Padding = new Thickness(22, 14), CornerRadius = new CornerRadius(28), Watermark = s.Aide, Background = U.Noir(0.7), BorderBrush = U.Blanc(0.95), BorderThickness = new Thickness(3), Width = 760, HorizontalAlignment = HorizontalAlignment.Left };
+        var champ = new TextBox { FontSize = 24, FontFamily = U.Police, Padding = new Thickness(22, 14), CornerRadius = new CornerRadius(28), Watermark = s.Aide, Text = s.Texte, Background = U.Noir(0.7), BorderBrush = U.Blanc(0.95), BorderThickness = new Thickness(3), Width = 760, HorizontalAlignment = HorizontalAlignment.Left };
         foreach (var etat in new[] { "", "PointerOver", "Focused" }) { champ.Resources["TextControlBorderBrush" + etat] = U.Blanc(0.95); champ.Resources["TextControlBackground" + etat] = U.Noir(0.7); }   // pas le bleu de Windows : le blanc de Home
         champ.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; lib.ValiderSaisie(champ.Text ?? ""); } };
         coucheSaisie.Children.Add(new Border { Background = U.Degrade(0, 0.5, 1, 0.5, (U.NoirA(0.92), 0), (U.NoirA(0.80), 0.5), (U.NoirA(0.62), 1)) });
-        coucheSaisie.Children.Add(Avec(U.Colonne(26, U.Titre(s.Titre, 38, 1, place: 1500), champ, U.Ligne(12, U.Pilule("Entrée", "Valider"), U.Pilule("Échap", "Annuler"))),
+        coucheSaisie.Children.Add(Avec(U.Colonne(26, U.Titre(s.Titre, 38, 1, place: 1500), champ, U.Ligne(12, U.Pilule(lib.Aides.Ok, "Valider"), U.Pilule(lib.Aides.Retour, "Annuler"))),
             c => { c.VerticalAlignment = VerticalAlignment.Center; c.HorizontalAlignment = HorizontalAlignment.Left; c.Margin = new Thickness(96, 0, 96, 0); }));
-        coucheSaisie.IsHitTestVisible = true; coucheSaisie.Opacity = 1;
-        Dispatcher.UIThread.Post(() => champ.Focus(), DispatcherPriority.Background);
+        coucheSaisie.IsHitTestVisible = true; coucheSaisie.Opacity = 1; lib.TexteSaisie = () => champ.Text ?? "";
+        Dispatcher.UIThread.Post(() => { champ.Focus(); champ.SelectAll(); }, DispatcherPriority.Background);
     }
 }

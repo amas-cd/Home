@@ -16,7 +16,7 @@ public sealed class Manette
 
     const ushort Haut = 1, Bas = 2, Gauche = 4, Droite = 8, Start = 0x10, Back = 0x20, LB = 0x100, RB = 0x200, A = 0x1000, B = 0x2000;
     readonly Bibliotheque lib; readonly Func<bool> active;
-    readonly Dictionary<string, (bool appuye, DateTime prochain)> touches = new();
+    readonly Dictionary<string, bool> touches = new(); int dernierX, dernierY; DateTime prochainX, prochainY;
     readonly DispatcherTimer minuteur = new() { Interval = TimeSpan.FromMilliseconds(16) };
     int tours; bool disponible = OperatingSystem.IsWindows();
 
@@ -32,24 +32,34 @@ public sealed class Manette
         if (lib.Aides != aides) { lib.Aides = aides; lib.Signaler(); }
         if (!branchee) { if (lib.Batterie != null) { lib.Batterie = null; lib.Signaler(); } return; }
         if (++tours % 600 == 1) LireBatterie(n - 1);   // toutes les 10 s
-        if (!active() || lib.EnCours != null) { touches.Clear(); return; }
-        var p = e.Pad; const int seuil = 16000;
+        if (!active() || lib.EnCours != null) { touches.Clear(); dernierX = dernierY = 0; return; }
+        var p = e.Pad; var now = DateTime.Now;
+        // Les directions, comme pollPad sur Mac. Le stick : il faut le pousser franchement (0,8) pour un cran, il reste engagé jusqu'à
+        // 0,45 (pas de cran parasite en relâchant) et seul l'axe dominant compte (une diagonale ne bouge pas dans deux sens). En
+        // maintenant : la croix répète après 0,6 s puis toutes les 0,3 s, le stick après 0,8 s puis toutes les 0,45 s.
+        double sx = p.LX / 32767.0, sy = p.LY / 32767.0;
+        int stickX = Math.Abs(sx) >= Math.Abs(sy) && Math.Abs(sx) > (dernierX != 0 ? 0.45 : 0.8) ? Math.Sign(sx) : 0;
+        int stickY = Math.Abs(sy) > Math.Abs(sx) && Math.Abs(sy) > (dernierY != 0 ? 0.45 : 0.8) ? -Math.Sign(sy) : 0;   // XInput : le haut est positif
+        int croixX = (p.Boutons & Gauche) != 0 ? -1 : (p.Boutons & Droite) != 0 ? 1 : 0, croixY = (p.Boutons & Haut) != 0 ? -1 : (p.Boutons & Bas) != 0 ? 1 : 0;
+        Axe(croixX != 0 ? croixX : stickX, croixX != 0, ref dernierX, ref prochainX, "left", "right", now);
+        Axe(croixY != 0 ? croixY : stickY, croixY != 0, ref dernierY, ref prochainY, "up", "down", now);
         (string, bool)[] etats =
         [
-            ("left", (p.Boutons & Gauche) != 0 || p.LX < -seuil), ("right", (p.Boutons & Droite) != 0 || p.LX > seuil),
-            ("up", (p.Boutons & Haut) != 0 || p.LY > seuil), ("down", (p.Boutons & Bas) != 0 || p.LY < -seuil),
             ("ok", (p.Boutons & A) != 0), ("back", (p.Boutons & B) != 0), ("options", (p.Boutons & Start) != 0), ("plus", (p.Boutons & Back) != 0),
             ("catL", (p.Boutons & LB) != 0), ("catR", (p.Boutons & RB) != 0),
         ];
-        var now = DateTime.Now;
         foreach (var (nom, appuye) in etats)
-        {
-            touches.TryGetValue(nom, out var t);
-            var direction = nom is "left" or "right" or "up" or "down";
-            if (appuye && !t.appuye) { touches[nom] = (true, now.AddMilliseconds(380)); lib.Nav(nom); }
-            else if (appuye && direction && now >= t.prochain) { touches[nom] = (true, now.AddMilliseconds(110)); lib.Nav(nom); }   // maintenu : ça défile
-            else if (!appuye && t.appuye) touches[nom] = (false, now);
+        {   // un bouton ne compte qu'à l'appui : le tenir ne répète rien
+            touches.TryGetValue(nom, out var avant);
+            if (appuye && !avant) lib.Nav(nom);
+            touches[nom] = appuye;
         }
+    }
+    void Axe(int sens, bool croix, ref int dernier, ref DateTime prochain, string moins, string plus, DateTime now)
+    {
+        if (sens == 0) { dernier = 0; return; }
+        if (sens != dernier) { dernier = sens; prochain = now.AddMilliseconds(croix ? 600 : 800); lib.Nav(sens < 0 ? moins : plus); }
+        else if (now >= prochain) { prochain = now.AddMilliseconds(croix ? 300 : 450); lib.Nav(sens < 0 ? moins : plus); }
     }
     void LireBatterie(uint i)
     {

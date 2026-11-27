@@ -60,7 +60,7 @@ public sealed class Menu
     public GenreMenu Genre => Grille ? GenreMenu.Grille : !Roue && Elements.Count is > 0 and <= 7 && Elements.All(e => !e.Info && e.Image == null) ? GenreMenu.Rangee : GenreMenu.Roue;
 }
 /// Une question posée au clavier (recherche, clé SteamGridDB)
-public sealed class Saisie { public string Titre = ""; public string? Aide; public Action<string> Valider = _ => { }; }
+public sealed class Saisie { public string Titre = ""; public string? Aide; public string Texte = ""; public Action<string> Valider = _ => { }; }
 /// Une tâche de fond (construction d'un jeu, mise à jour de Home) : son étape, sa progression
 public sealed class Tache { public string Titre = ""; public string Etape = "Démarrage…"; public double? Fraction; public bool Fini; public string? Erreur; }
 
@@ -121,7 +121,7 @@ public static class Icones
         ("mac", "Laptop"), ("key", "Key"), ("power", "Power"), ("speaker.slash", "SpeakerMute"), ("speaker", "Speaker2"), ("display", "Desktop"),
         ("record", "Record"), ("rectangle", "FullScreenMaximize"), ("trash", "Delete"), ("eye.slash", "EyeOff"), ("eye", "Eye"), ("xmark", "Dismiss"),
         ("leaf", "LeafOne"), ("sparkles", "Sparkle"), ("clock", "Clock"), ("gear", "Settings"), ("info", "Info"), ("exclamation", "Warning"),
-        ("chevron.right", "ChevronRight"), ("star", "Star"), ("shield", "ShieldCheckmark"), ("link", "Code"), ("person", "Person"), ("battery", "Battery10"),
+        ("chevron.right", "ChevronRight"), ("star", "Star"), ("shield", "ShieldCheckmark"), ("link", "Code"), ("person", "Person"), ("battery", "Battery10"), ("battery.25percent", "Battery2"), ("battery.50percent", "Battery5"), ("battery.100percent", "Battery10"),
     ];
     static readonly Dictionary<string, Icon> cache = new();
     public static Icon De(string sf)

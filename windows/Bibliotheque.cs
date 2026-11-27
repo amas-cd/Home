@@ -21,6 +21,7 @@ public sealed class Bibliotheque
     // Ce que seule la fenêtre sait faire
     public Func<string, string[], Task<string?>>? ChoisirFichier; public Func<string, Task<string?>>? ChoisirDossier; public Func<Task<string?>>? PressePapiers;
     public Action? Devant, AppliquerFenetre, Quitter, Reconstruire;
+    public Func<string>? TexteSaisie;   // ce que le champ de saisie contient : la manette valide avec A
     /// L'écran de démarrage est-il là ? Si oui, l'appui le passe et ne va pas plus loin.
     public Func<bool>? PasserOuverture;
     /// 1 = on entre dans un menu (il arrive par la droite), −1 = on revient au précédent (il arrive par la gauche)
@@ -92,19 +93,22 @@ public sealed class Bibliotheque
             else if (k == "ok") BienvenueValider(); else if (k == "options") BienvenueIgnorer();
             return;
         }
-        if (Saisie != null) { if (k == "back") { Saisie = null; Son("retour"); Signaler(); } return; }
+        // la saisie : la manette valide ou annule, le texte se tape au clavier
+        if (Saisie != null) { if (k == "back") { Saisie = null; Son("retour"); Signaler(); } else if (k == "ok" && TexteSaisie != null) { Son("valider"); ValiderSaisie(TexteSaisie()); } return; }
         if (EnCours != null) return;
         if (Menu != null) { NavMenu(k); return; }
         var n = Visibles.Count;
         switch (k)
         {
-            case "left": if (Selection > 0) { Selection--; Son("deplacer"); Signaler(); } break;
-            case "right": if (Selection < n) { Selection++; Son("deplacer"); Signaler(); } break;
+            // d'un jeu à l'autre : un tic court et discret (« tuile »), à part de celui des menus
+            case "left": if (Selection > 0) { Selection--; Son("tuile"); Signaler(); } break;
+            case "right": if (Selection < n) { Selection++; Son("tuile"); Signaler(); } break;
+            case "back": if (!FermerTache()) OuvrirQuitter(); break;
             case "ok": Lancer(); break;
             case "options": if (Courant != null) OuvrirOptions(); break;
             case "plus": OuvrirPlus(); break;
-            case "cat" or "catR": IndexCategorie = (IndexCategorie + 1) % Categories.Count; Selection = 0; Son("onglet"); Signaler(); break;
-            case "catL": IndexCategorie = (IndexCategorie + Categories.Count - 1) % Categories.Count; Selection = 0; Son("onglet"); Signaler(); break;
+            case "cat" or "catR" or "down": IndexCategorie = (IndexCategorie + 1) % Categories.Count; Selection = 0; Son("onglet"); Signaler(); break;
+            case "catL" or "up": IndexCategorie = (IndexCategorie + Categories.Count - 1) % Categories.Count; Selection = 0; Son("onglet"); Signaler(); break;
         }
     }
     void NavMenu(string k)
@@ -116,8 +120,9 @@ public sealed class Bibliotheque
         switch (k)
         {
             case "ok": if (Libre(IndexMenu)) { Son("valider"); e[IndexMenu].Action(); } return;
-            case "back": Son("retour"); if (m.Retour != null) { SensMenu = -1; m.Retour(); SensMenu = 1; } else FermerMenus(); return;
-            case "plus" or "options": Son("retour"); FermerMenus(); return;
+            // Options revient d'un niveau, comme B (closeMenu sur Mac) : elle ne ferme plus tout d'un coup
+            case "back" or "options": Son("retour"); if (m.Retour != null) { SensMenu = -1; m.Retour(); SensMenu = 1; } else FermerMenus(); return;
+            case "plus": return;
         }
         switch (m.Genre)
         {
@@ -161,7 +166,19 @@ public sealed class Bibliotheque
         Toast = texte; Signaler();
         _ = Task.Delay(3500).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (Toast == texte) { Toast = null; Signaler(); } }));
     }
-    public void Demander(string titre, string? aide, Action<string> valider) { Saisie = new Saisie { Titre = titre, Aide = aide, Valider = valider }; Signaler(); }
+    /// `aide` : l'exemple écrit en gris dans le champ vide ; `texte` : ce que le champ contient déjà (le nom actuel, pour renommer)
+    public void Demander(string titre, string? aide, Action<string> valider, string texte = "") { Saisie = new Saisie { Titre = titre, Aide = aide, Texte = texte, Valider = valider }; Signaler(); }
+    /// Ferme la carte d'une tâche finie ou en échec (B / Échap) ; une tâche en cours reste affichée
+    public bool FermerTache() { if (Tache is not { Fini: true }) return false; Son("retour"); Tache = null; Signaler(); return true; }
+    public void OuvrirQuitter()
+    {
+        if (EnCours != null || Menu != null) return;
+        Ouvrir(new Menu { Titre = "Quitter Home ?", Symbole = "power", Elements =
+        {
+            new("Rester", "arrow.uturn.backward", FermerMenus),
+            new("Quitter Home", "power", () => { FermerMenus(); Son("retour"); _ = Task.Delay(300).ContinueWith(_ => Dispatcher.UIThread.Post(() => Quitter?.Invoke())); }) { Destructif = true },
+        } });
+    }
     public void ValiderSaisie(string texte) { var s = Saisie; Saisie = null; Signaler(); if (s != null && texte.Trim() != "") s.Valider(texte.Trim()); }
 
     // MARK: Lancement
@@ -360,7 +377,7 @@ public sealed class Bibliotheque
                 new("Changer le fond", "photo.fill", () => _ = ChoisirImage(j, "fond"), "Depuis un fichier image"),
                 new("Changer le logo", "textformat", () => _ = ChoisirImage(j, "logo"), "Depuis un fichier image (PNG transparent)"),
                 new("Rechercher les images", "magnifyingglass", () => RechercherImages(j), SteamGridDB.Cle != null ? "SteamGridDB, boutiques officielles, Steam" : "Boutiques officielles et Steam (sans clé SteamGridDB)"),
-                new("Renommer", "pencil", () => Demander("Nouveau nom", j.Nom, n => { Config.Noms[j.Id] = n; Enregistrer(); FermerMenus(); Recharger(); }), j.Nom),
+                new("Renommer", "pencil", () => Demander("Nouveau nom", null, n => { Config.Noms[j.Id] = n; Enregistrer(); FermerMenus(); Recharger(); }, texte: j.Nom), j.Nom),
             },
         });
     }

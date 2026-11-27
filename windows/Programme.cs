@@ -86,7 +86,7 @@ sealed class Fenetre : Window
         var k = e.Key switch
         {
             Key.Left => "left", Key.Right => "right", Key.Up => "up", Key.Down => "down", Key.Enter or Key.Space => "ok", Key.Escape or Key.Back => "back",
-            Key.O => "options", Key.N => "plus", Key.Tab => e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? "catL" : "cat", _ => null,
+            Key.O or Key.Y => "options", Key.N or Key.OemPlus or Key.Add => "plus", Key.Tab => e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? "catL" : "cat", _ => null,
         };
         if (e.Key == Key.F11) { lib.Config.Fenetre = !lib.Config.Fenetre; lib.Enregistrer(); AppliquerFenetre(); }
         if (k != null) { e.Handled = true; lib.Nav(k); }
