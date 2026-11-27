@@ -623,7 +623,9 @@ sealed class BienvenueVue : Panel
         var ignorer = U.Ligne(6, U.Touche(lib.Aides.Options), U.Texte("Ignorer", 13, FontWeight.Medium)); ignorer.Opacity = 0.26; ignorer.HorizontalAlignment = HorizontalAlignment.Right; ignorer.VerticalAlignment = VerticalAlignment.Bottom; ignorer.Margin = new Thickness(0, 0, 44, 30); ignorer.Background = Brushes.Transparent;
         ignorer.PointerPressed += (_, e) => { e.Handled = true; lib.BienvenueIgnorer(); };
         Children.Add(ignorer);
-        AttachedToVisualTree += (_, _) => Mouvement.Dans(0.05, () => { foreach (var a in paraitre) a(); });
+        // tout est en place d'emblée : l'écran est déjà complet sous l'écran de démarrage, qui s'efface dessus. (Sur Mac les cartes
+        // arrivent l'une après l'autre ; ici ça faisait attendre avant de pouvoir choisir.)
+        foreach (var a in paraitre) a();
         Transitions = new Transitions { Mouvement.Opacite(0.45, new CubicEaseInOut()) };
     }
     static Control Centre(Control c, double haut = 0) { c.HorizontalAlignment = HorizontalAlignment.Center; c.Margin = new Thickness(0, haut, 0, 0); return c; }
@@ -767,11 +769,11 @@ public sealed class Ecran : Panel
         Voiler(lib.Menu != null || lib.Saisie != null);
         Jeu(); pastille.Mettre(lib.Tache); Toast(); MontrerSaisie(); Bienvenue();
     }
-    /// L'accueil du premier lancement : il attend que l'écran de démarrage soit passé, puis s'efface quand le choix est fait
+    /// L'accueil du premier lancement : posé dès le début, il est là quand l'écran de démarrage s'efface ; il part quand le choix est fait
     BienvenueVue? bienvenue;
     void Bienvenue()
     {
-        if (lib.Bienvenue && bienvenue == null && ouverture == null) { bienvenue = new BienvenueVue(lib); coucheBienvenue.Children.Add(bienvenue); }
+        if (lib.Bienvenue && bienvenue == null) { bienvenue = new BienvenueVue(lib); coucheBienvenue.Children.Add(bienvenue); }   // tout de suite, sous l'écran de démarrage
         if (!lib.Bienvenue && bienvenue is { } b) { bienvenue = null; b.IsHitTestVisible = false; b.Opacity = 0; Mouvement.Dans(0.5, () => coucheBienvenue.Children.Remove(b)); }
         bienvenue?.Viser(lib.BienvenueIndex);
     }
