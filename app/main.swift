@@ -3702,9 +3702,22 @@ final class ClavierJeu {
         table = ClavierJeu.calculer()
         regler(!table.isEmpty)
     }
+    private var demande = false
+    /// L'autorisation vient d'être demandée : tant que le jeu reste devant, on regarde toutes les 3 s si elle est donnée, pour ne pas attendre le prochain lancement
+    private func attendre() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard self.tap == nil, ClavierJeu.voulu, let a = NSWorkspace.shared.frontmostApplication, (a.bundleIdentifier ?? "").hasPrefix("com.zagrios.obelisk.game.") else { return }
+            if AXIsProcessTrusted() { self.devant(a) } else { self.attendre() }
+        }
+    }
     private func regler(_ oui: Bool) {
         if oui, tap == nil {
-            guard AXIsProcessTrusted() else { log("Clavier du jeu : sans l'autorisation Accessibilité, les touches restent celles d'un clavier américain"); return }
+            guard AXIsProcessTrusted() else {
+                log("Clavier du jeu : sans l'autorisation Accessibilité, les touches restent celles d'un clavier américain")
+                // macOS propose d'ouvrir Réglages → Confidentialité → Accessibilité, une fois par lancement de Home : sans ça, rien ne dit au joueur quoi autoriser
+                if !demande { demande = true; _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
+                attendre(); return
+            }
             let masque = CGEventMask(1 << CGEventType.keyDown.rawValue) | CGEventMask(1 << CGEventType.keyUp.rawValue)
             tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: masque, callback: { _, type, ev, _ in
                 let c = ClavierJeu.shared
