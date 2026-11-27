@@ -3311,14 +3311,17 @@ struct InstallationView: View {
     @ObservedObject var lib: Library; let t: Tache
     @State private var paru = false
     @State private var rang = 0   // l'étape la plus avancée vue : une étape sans nom dans la liste (« Bilan ») ne fait pas reculer
-    /// Les étapes de preparer-moteurs.command, par le début de leur nom dans le journal, et ce qu'on en dit au joueur
-    private var etapes: [(cle: String, nom: String)] {
-        let nintendo = [("Outils Apple", "Outils d'Apple"), ("Outils Homebrew", "Outils Homebrew"), ("Python", "Python"), ("nxnative", "nxnative · jeux Switch"), ("MacNativeGames", "MacNativeGames · Zelda")]
-        let pc = [("Moteur Windows", "Voile · jeux Windows"), ("Compte Epic", "Legendary · Epic Games")]
+    /// Trois grands titres, pas la liste des outils : chacun réunit des étapes de preparer-moteurs.command (reconnues par le début de leur
+    /// nom dans le journal) ; le nom de l'étape en cours s'écrit en petit sous son titre.
+    private var groupes: [(nom: String, etapes: [(cle: String, nom: String)])] {
         let m = lib.config.moteurs ?? "tout"
-        let n = nintendo.filter { m == "tout" || ($0.0 != "nxnative" && $0.0 != "MacNativeGames") || ($0.0 == "nxnative" && m == "nxnative") || ($0.0 == "MacNativeGames" && m == "mng") }
-        return (lib.modeNintendo ? n : []) + (lib.modePC ? pc : [])
+        let switchs = [("nxnative", "nxnative"), ("MacNativeGames", "MacNativeGames")].filter { m == "tout" || ($0.0 == "nxnative") == (m == "nxnative") }
+        var g: [(String, [(cle: String, nom: String)])] = []
+        if lib.modeNintendo { g.append(("Outils sur ce Mac", [("Outils Apple", "Outils d'Apple"), ("Outils Homebrew", "Homebrew"), ("Python", "Python")])); g.append(("Moteurs Switch", switchs)) }
+        if lib.modePC { g.append(("Moteur des jeux Windows", [("Moteur Windows", "Voile"), ("Compte Epic", "Legendary, pour Epic Games")])) }
+        return g.map { (nom: $0.0, etapes: $0.1) }
     }
+    private var etapes: [(cle: String, nom: String)] { groupes.flatMap { $0.etapes } }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
             let echec = t.erreur != nil, fini = t.fini && !echec
@@ -3348,13 +3351,17 @@ struct InstallationView: View {
                             }.frame(width: 380, height: 380)
                             Text(echec ? " " : fini ? "Tout est prêt" : TacheView.restant(t, tl.date)).font(.system(size: 21, weight: .medium)).opacity(0.55)
                         }
-                        VStack(alignment: .leading, spacing: 26) {
-                            ForEach(Array(etapes.enumerated()), id: \.offset) { i, e in
-                                let fait = fini || i < rang, enCours = !fini && !echec && i == rang, rate = echec && i == rang
-                                HStack(spacing: 18) {
+                        VStack(alignment: .leading, spacing: 38) {
+                            ForEach(Array(groupes.enumerated()), id: \.offset) { gi, g in
+                                let debut = groupes.prefix(gi).reduce(0) { $0 + $1.etapes.count }, finGroupe = debut + g.etapes.count
+                                let fait = fini || rang >= finGroupe, dedans = !fini && rang >= debut && rang < finGroupe, enCours = dedans && !echec, rate = dedans && echec
+                                HStack(alignment: .top, spacing: 20) {
                                     Image(systemName: fait ? "checkmark.circle.fill" : rate ? "exclamationmark.circle.fill" : enCours ? "circle.dotted" : "circle")
-                                        .font(.system(size: 30, weight: .semibold)).foregroundStyle(rate ? Color.orange : .white).opacity(fait || enCours || rate ? 1 : 0.28).frame(width: 36)
-                                    Text(e.nom).font(.system(size: 28, weight: enCours || rate ? .bold : .medium, design: .rounded)).opacity(fait ? 0.6 : enCours || rate ? 1 : 0.32)
+                                        .font(.system(size: 34, weight: .semibold)).foregroundStyle(rate ? Color.orange : .white).opacity(fait || enCours || rate ? 1 : 0.28).frame(width: 40)
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(g.nom).font(.system(size: 32, weight: enCours || rate ? .bold : .semibold, design: .rounded)).opacity(fait ? 0.6 : enCours || rate ? 1 : 0.32)
+                                        if enCours, etapes.indices.contains(rang) { Text(etapes[rang].nom).font(.system(size: 19, weight: .medium)).opacity(0.55).id(rang).transition(.opacity) }
+                                    }
                                 }
                             }
                             if echec, let e = t.erreur { Text(e).font(.system(size: 19, weight: .medium)).foregroundStyle(Color.orange).lineLimit(3).frame(maxWidth: 520, alignment: .leading).padding(.top, 6) }
