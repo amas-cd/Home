@@ -3,18 +3,37 @@
 # plantage du jeu (avec notification), arrêt du serveur. Laisse la fenêtre ouverte à côté ; Ctrl+C pour fermer.
 HR="${HOME_RACINE:-$HOME/Library/Application Support/Home}"; JX="${HOME_JEUX:-/Applications/Jeux}"   # les dossiers de Home (Home les donne ; sinon ceux par défaut)
 GAME_LOG="$HOME/Library/Logs/MacNativeGames/totk.log"; SRV_LOG="$HR/log/totk-server.log"; SALON_LOG="$HR/log/salon.log"
+# Le serveur n'est plus forcément sur ce Mac : avec une adresse dans serveurs/totk-adresse.txt, on suit le serveur distant. Son journal
+# (log/totk-server-distant.log) est recopié en entier par Home pendant la partie : on n'en tire que la liste des joueurs connectés.
+ADR="$(tr -d ' \n\r' < "$HR/serveurs/totk-adresse.txt" 2>/dev/null)"; HOTE="${ADR%%:*}"; PORT="${ADR##*:}"; DISTANT=""
+case "$HOTE" in ""|127.0.0.1|localhost) ;; *) DISTANT=1; [ "$PORT" = "$ADR" ] && PORT=10014;; esac
 B=$'\e[1m'; G=$'\e[32m'; R=$'\e[31m'; Y=$'\e[33m'; C=$'\e[36m'; D=$'\e[2m'; N=$'\e[0m'
 notif() { osascript -e "display notification \"$2\" with title \"$1\"" >/dev/null 2>&1 & }
 etat() {
   printf '\e]0;Moniteur TOTK Online\a'
   local jeu srv
   pgrep -x TOTK >/dev/null && jeu="${G}en cours${N}" || jeu="${D}fermé${N}"
-  /usr/sbin/lsof -nP -iTCP:10014 -sTCP:LISTEN >/dev/null 2>&1 && srv="${G}en marche (port 10014)${N}" || srv="${D}arrêté${N}"
+  if [ -n "$DISTANT" ]; then   # le serveur est ailleurs (serveurs/totk-adresse.txt) : on regarde s'il répond, et si le jeu y est relié
+    /usr/bin/nc -z -G 3 "$HOTE" "$PORT" >/dev/null 2>&1 && srv="${G}distant, en marche${N}" || srv="${R}distant, ne répond pas${N}"
+    /usr/sbin/lsof -nP -a -c TOTK -iTCP:"$PORT" 2>/dev/null | grep -q ESTABLISHED && srv="$srv — ${G}jeu relié${N}"
+  else
+    /usr/sbin/lsof -nP -iTCP:10014 -sTCP:LISTEN >/dev/null 2>&1 && srv="${G}en marche (port 10014)${N}" || srv="${D}arrêté${N}"
+  fi
   echo "${B}TOTK Online${N} — jeu : $jeu — serveur : $srv — $(date '+%H:%M:%S')"
 }
 clear; echo "${B}Moniteur TOTK Online${N}  ${D}(Ctrl+C pour fermer)${N}"; etat; echo
 touch "$GAME_LOG" "$SRV_LOG" 2>/dev/null
 saves=0
+if [ -n "$DISTANT" ]; then
+  SRV_LOG=/dev/null   # pas de serveur local à suivre
+  joueurs() { /usr/bin/awk '/TOTKServer: .* connected$/ { n=$0; sub(/.*TOTKServer: /,"",n); sub(/ connected$/,"",n); la[n]=1 } /TOTKServer: .* left$/ { n=$0; sub(/.*TOTKServer: /,"",n); sub(/ left$/,"",n); delete la[n] } END { s=""; for (j in la) s = s (s==""?"":", ") j; print s }' "$HR/log/totk-server-distant.log" 2>/dev/null; }
+  ( avant="?"; while sleep 5; do
+      [ -f "$HR/log/totk-server-distant.log" ] || continue
+      la="$(joueurs)"; [ "$la" = "$avant" ] && continue; avant="$la"
+      echo "${D}$(date '+%H:%M:%S')${N} ${G}● sur le serveur : ${la:-personne}${N}"
+    done ) &
+  trap 'kill %1 2>/dev/null' EXIT
+fi
 # Les trois journaux en direct, filtrés et mis en forme ; tail -F suit aussi le journal du jeu quand il est recréé à chaque lancement
 tail -n 0 -F "$SRV_LOG" "$GAME_LOG" "$SALON_LOG" 2>/dev/null | while IFS= read -r l; do
   t="${D}$(date '+%H:%M:%S')${N}"
