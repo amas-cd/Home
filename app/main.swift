@@ -3021,6 +3021,7 @@ struct MenuView: View {
 /// temps) : chacune a un poids, celles pas encore commencées sont estimées. Un résumé court de l'étape en cours.
 final class Avancement {
     private var faites: [String] = []; private var nom = ""; private var k = 0; private var n = 0; private var frac = 0.0
+    var detail: Double { frac }
     private static let standard = ["rewrite", "shader split", "mac shaders", "mac host", "pipeline", "mac app"]
     private static func poids(_ s: String) -> Double {
         let l = s.lowercased()
@@ -3101,6 +3102,7 @@ final class Avancement {
 struct Tache {
     let titre: String; let log: URL; var jeux: Set<String> = []; var debut = Date()
     var etape = "Démarrage…"; var fraction: Double? = nil
+    var detail: Double = 0   // l'avancement à l'intérieur de l'étape en cours (0 à 1), quand le script le donne (un téléchargement)
     var fini = false; var erreur: String? = nil
     var attendu: Double? = nil   // la durée de la dernière fois (ou une estimation) : barre et temps restant d'après le temps passé
 }
@@ -3360,7 +3362,15 @@ struct InstallationView: View {
                                         .font(.system(size: 34, weight: .semibold)).foregroundStyle(rate ? Color.orange : .white).opacity(fait || enCours || rate ? 1 : 0.28).frame(width: 40)
                                     VStack(alignment: .leading, spacing: 5) {
                                         Text(g.nom).font(.system(size: 32, weight: enCours || rate ? .bold : .semibold, design: .rounded)).opacity(fait ? 0.6 : enCours || rate ? 1 : 0.32)
-                                        if enCours, etapes.indices.contains(rang) { Text(etapes[rang].nom).font(.system(size: 19, weight: .medium)).opacity(0.55).id(rang).transition(.opacity) }
+                                        if enCours, etapes.indices.contains(rang) {
+                                            // le détail de ce titre : quelle étape, laquelle sur combien, et une barre fine (les étapes faites, plus l'avancement de celle en cours quand le script le donne)
+                                            let part = (Double(rang - debut) + min(1, max(0, t.detail))) / Double(max(1, g.etapes.count))
+                                            Text("\(etapes[rang].nom) · \(rang - debut + 1) sur \(g.etapes.count)").font(.system(size: 19, weight: .medium)).opacity(0.55).id(rang).transition(.opacity)
+                                            ZStack(alignment: .leading) {
+                                                Capsule().fill(.white.opacity(0.14)).frame(width: 420, height: 6)
+                                                Capsule().fill(.white).frame(width: max(6, 420 * part), height: 6).animation(.easeInOut(duration: 0.6), value: part)
+                                            }.padding(.top, 8)
+                                        }
                                     }
                                 }
                             }
@@ -4923,11 +4933,12 @@ extension Library {
             fh.write(d); tampon.data.append(d)
             while let r = tampon.data.firstIndex(of: 0x0a) {
                 let ligne = String(decoding: tampon.data[tampon.data.startIndex..<r], as: UTF8.self); tampon.data.removeSubrange(tampon.data.startIndex...r)
-                let pr = av.lire(ligne)
+                let pr = av.lire(ligne); let detail = av.detail
                 if pr.etape != nil || pr.fraction != nil {
                     DispatchQueue.main.async {
                         guard var t = self?.tache, !t.fini else { return }
                         if let x = pr.etape { t.etape = x }
+                        t.detail = detail
                         if let x = pr.fraction { let avant = t.fraction ?? 0; t.fraction = x < avant - 0.5 ? x : max(avant, x) }   // n'avance que dans un sens, sauf construction suivante
                         self?.tache = t
                     }

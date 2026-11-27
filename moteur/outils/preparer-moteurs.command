@@ -18,7 +18,8 @@ ETAT=""; [ "$1" = "--etat" ] && ETAT=1
 NX=1; MG=1; case "${HOME_MOTEURS:-tout}" in mng) NX="";; nxnative) MG="";; aucun) NX=""; MG="";; esac   # ce que le mode d'utilisation demande
 [ -z "$ETAT" ] && exec > >(tee "$LOGD/preparer-moteurs.log") 2>&1
 A_FAIRE=()   # ce qui reste à faire à la main
-etape() { [ -z "$ETAT" ] && { echo; echo "== $1"; [ -n "$HOME_TACHE" ] && printf '{"ev": "stage", "k": %s, "n": 6, "name": "%s"}\n' "$2" "$1"; }; }
+NB=6; [ -n "$HOME_AUSSI_PC" ] && NB=8   # avec les jeux PC, deux étapes de plus : le moteur Windows et Legendary (annoncées par pc.py)
+etape() { [ -z "$ETAT" ] && { echo; echo "== $1"; [ -n "$HOME_TACHE" ] && printf '{"ev": "stage", "k": %s, "n": %s, "name": "%s"}\n' "$2" "$NB" "$1"; }; }
 dit() { if [ -n "$ETAT" ]; then echo "$1=$2"; else echo "$3"; fi; }
 
 # --- 1. Outils développeur d'Apple. nxnative compile les shaders avec Xcode entier (pas seulement les outils en ligne de commande).
@@ -119,7 +120,7 @@ fi
 etape "Bilan" 6
 [ -n "$ETAT" ] && exit 0
 if [ -n "$HOME_AUSSI_PC" ]; then   # le mode d'utilisation comprend les jeux PC : le moteur Windows dans la foulée
-  echo; echo "== Jeux PC"; /bin/bash "$MOT/outils/pc.command" preparer 2>&1 | grep -v '"ev"' | sed 's/^done in : .*$/Jeux PC : prêts/' ; [ "${PIPESTATUS[0]}" -eq 0 ] || A_FAIRE+=("Le moteur Windows des jeux PC ne s'est pas installé : case + → Jeu PC pour réessayer.")
+  echo; echo "== Jeux PC"; /bin/bash "$MOT/outils/pc.command" preparer 2>&1 | sed -e 's/"k": 1, "n": 2/"k": 7, "n": 8/' -e 's/"k": 2, "n": 2/"k": 8, "n": 8/' -e 's/^done in : .*$/Jeux PC : prêts/' ; [ "${PIPESTATUS[0]}" -eq 0 ] || A_FAIRE+=("Le moteur Windows des jeux PC ne s'est pas installé : case + → Jeu PC pour réessayer.")
 fi
 if [ ${#A_FAIRE[@]} -eq 0 ]; then echo "Tout est prêt : ajoute un jeu Switch depuis Home (case +)."; echo "done in : ce Mac est prêt"; exit 0; fi
 echo "Il reste ${#A_FAIRE[@]} chose(s) à faire à la main :"; i=1; for a in "${A_FAIRE[@]}"; do echo "  $i. $a"; i=$((i+1)); done
