@@ -106,10 +106,12 @@ sealed class Fenetre : Window
                 case "plus": lib.OuvrirPlus(); break;
                 case "ajout": lib.OuvrirAjout(); break;
                 case "ouverture": ecran.Ouvrir(fige: true); break;
-                case "switch": lib.Ouvrir(new Menu { Titre = "Construire le jeu", SousTitre = "Zelda.xci", Symbole = "hammer", Texte = "Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même, le fichier d'origine ne sert plus.",
-                    Elements = { new("Construire", "hammer", () => { }, "Avec 1 mise à jour ou DLC"), new("Ajouter une mise à jour ou un DLC", "plus", () => { }, "Une mise à jour au plus, autant de DLC que tu veux"), new("Zelda-1.2.1.nsp", "xmark", () => { }, "Retirer de la liste") } }); break;
-                case "mode": MenusSwitch.Mode(lib, "Zelda.xci", ["Zelda-1.2.1.nsp"]); break;
-                case "enligne": MenusSwitch.EnLigne(lib, "Zelda.xci", ["Zelda-1.2.1.nsp"], "TOTK_Online.zip", "exemple:10014"); break;
+                case "mode": MenusSwitch.Mode(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci" }); break;
+                case "modeinconnu": MenusSwitch.Mode(lib, new MenusSwitch.Demande { Dump = "Un autre jeu.xci" }); break;
+                case "enligne": MenusSwitch.EnLigne(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci" }, MenusSwitch.ModsEnLigne[0]); break;
+                case "maj": MenusSwitch.Maj(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci", EnLigne = MenusSwitch.ModsEnLigne[0] }); break;
+                case "sur": { var dm = new MenusSwitch.Demande { Dump = "Zelda TOTK.xci", EnLigne = MenusSwitch.ModsEnLigne[0] }; lib.Ouvrir(new Menu { Titre = "Es-tu sûr ?", SousTitre = "Zelda-update.nsp", Symbole = "exclamationmark", Alerte = "Ce fichier doit être la mise à jour 1.2.1", Texte = "Home ne peut pas le vérifier. Avec une autre version, TOTK Online ne marchera pas, et il faudra tout reconstruire.", Elements = { new("Oui, c'est la 1.2.1", "checkmark", () => { }) { Teinte = Icones.Vert }, new("Choisir un autre fichier", "arrow.left", () => { }) { Teinte = Icones.Gris } } }); break; }
+                case "recap": MenusSwitch.Recap(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci", Maj = "Zelda-1.2.1.nsp", EnLigne = MenusSwitch.ModsEnLigne[0] }); break;
                 case "mods": if (lib.Courant is { } jm) MenusSwitch.Mods(lib, jm); break;
                 case "place": MenusSwitch.LibererPlace(lib); break;
                 case "saisie": lib.Demander("Nouveau nom", "Au clavier", _ => { }); break;

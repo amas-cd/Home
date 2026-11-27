@@ -67,6 +67,7 @@ sealed class VueMenu : Panel
             var titre = U.Titre(m.Titre, 44, 1, place: 1500); titre.Margin = new Thickness(0, 4, 0, 0); titre.HorizontalAlignment = HorizontalAlignment.Left; colonne.Children.Add(titre);
         }
         // sur Windows, quelques menus courts expliquent ce qu'ils vont faire (désinstaller, construire un jeu) : le texte tient au-dessus des pastilles
+        if (m.Alerte != null) colonne.Children.Add(new TextBlock { Text = m.Alerte, FontSize = 34, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, Foreground = new SolidColorBrush(Icones.Orange), TextWrapping = TextWrapping.Wrap, MaxWidth = 1200, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 16, 0, 0) });
         if (m.Texte != null) { var t = U.Texte(m.Texte, 18, FontWeight.Normal, 0.82); t.TextWrapping = TextWrapping.Wrap; t.MaxWidth = 940; t.HorizontalAlignment = HorizontalAlignment.Left; t.Margin = new Thickness(0, 18, 0, 0); colonne.Children.Add(t); }
         var piste = new Canvas { Height = Grand, Width = Grand + (n - 1) * (Petit + Espace), Margin = new Thickness(0, 34, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         var places = new Panel[n]; var disques = new Panel[n]; var pleins = new Border[n]; var creux = new Border[n];

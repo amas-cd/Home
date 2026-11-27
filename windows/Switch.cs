@@ -270,7 +270,8 @@ public static class Construction
                 t.Etape = "Installation du mod…"; lib.Signaler();
                 var nom = await Task.Run(() => InstallerMod(dossier, c.Mod, Path.GetFileNameWithoutExtension(c.Mod.TrimEnd(Path.DirectorySeparatorChar, '/'))));
                 Journal.Ecrire($"mod installé avec le jeu : {nom}");
-                if (!string.IsNullOrWhiteSpace(c.Serveur)) { Ini.Ecrire(Reglages(dossier), "Network", "network", "1"); File.WriteAllText(FichierServeur(dossier), c.Serveur.Trim()); }
+                Ini.Ecrire(Reglages(dossier), "Network", "network", "1");   // un mod en ligne a besoin de la connexion du PC, avec ou sans adresse réglée
+                if (!string.IsNullOrWhiteSpace(c.Serveur)) File.WriteAllText(FichierServeur(dossier), c.Serveur.Trim());
                 if (Directory.Exists(Path.Combine(Mods(dossier), nom, "exefs")))
                 {
                     t.Etape = "Recompilation du code avec le mod…"; lib.Signaler();
@@ -344,7 +345,7 @@ public static class Construction
         }
         return null;
     }
-    static void Copier(string de, string vers)
+    public static void Copier(string de, string vers)
     {
         Directory.CreateDirectory(vers);
         foreach (var f in Directory.GetFiles(de)) { if ((File.GetAttributes(f) & FileAttributes.ReparsePoint) != 0) throw new InvalidDataException("le mod contient un lien : refusé"); File.Copy(f, Path.Combine(vers, Path.GetFileName(f))); }
@@ -391,7 +392,13 @@ public static class MenusSwitch
 {
     const string Regle = "Home n'utilise que ce que tu as extrait de ta propre console : ton jeu et tes clés. Il n'en télécharge aucun.";
 
-    // MARK: L'assistant de construction : le jeu, les clés, les mises à jour et DLC, puis « Construire »
+    // MARK: L'assistant de construction, dans l'ordre du Mac : le jeu, les clés, « Comment veux-tu jouer ? », le mod en ligne, la mise à
+    // jour, les DLC, puis « Prêt à construire ». La mise à jour dépend du mode : facultative en local, obligatoire à la version que
+    // le mod demande en ligne, absente si le mod veut le jeu de base.
+    /// Ce qui a été choisi dans l'assistant
+    public sealed class Demande { public string Dump = ""; public string? Maj; public List<string> Dlc = new(); public ModEnLigne? EnLigne; public string? Serveur; }
+    static string NomDe(Demande d) => Path.GetFileNameWithoutExtension(d.Dump);
+
     public static async void Ajouter(Bibliotheque lib)
     {
         if (lib.ChoisirFichier == null || await lib.ChoisirFichier("Le jeu extrait de ta console (.xci ou .nsp)", ["*.xci", "*.nsp"]) is not { } dump) return;
@@ -400,8 +407,8 @@ public static class MenusSwitch
             if (await lib.ChoisirFichier("Les clés de ta console (prod.keys)", ["prod.keys", "*.keys"]) is not { } cles) return;
             if (!Installer(lib, cles, Construction.ClesProd)) return;
         }
-        if (dump.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase) && !File.Exists(Construction.ClesTitres)) ClesTitres(lib, dump);
-        else Ajouts(lib, dump, new());
+        var d = new Demande { Dump = dump };
+        if (dump.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase) && !File.Exists(Construction.ClesTitres)) ClesTitres(lib, d); else Mode(lib, d);
     }
     /// Les clés sont copiées dans le dossier de Home, sur ce PC seulement : le jeu en a besoin à chaque lancement
     static bool Installer(Bibliotheque lib, string source, string cible)
@@ -409,63 +416,196 @@ public static class MenusSwitch
         try { if (new FileInfo(source).Length > 4 << 20) throw new InvalidDataException("ce fichier est trop gros pour être un fichier de clés"); File.Copy(source, cible, true); return true; }
         catch (Exception e) { Journal.Ecrire("clés : " + e.Message); lib.Dire("Les clés n'ont pas pu être installées : " + e.Message); return false; }
     }
-    static void ClesTitres(Bibliotheque lib, string dump) => lib.Ouvrir(new Menu
+    static void ClesTitres(Bibliotheque lib, Demande d) => lib.Ouvrir(new Menu
     {
         Titre = "Clés du jeu", SousTitre = "Un fichier .nsp", Symbole = "key",
         Texte = "Un jeu en .nsp peut demander un second fichier de clés, title.keys, tiré lui aussi de ta console. Sans lui, certains .nsp ne se lisent pas.",
         Elements =
         {
-            new("Choisir title.keys", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Les clés des jeux (title.keys)", ["title.keys", "*.keys"]) is { } f && Installer(lib, f, Construction.ClesTitres)) Ajouts(lib, dump, new()); }),
-            new("Continuer sans", "arrow.right", () => Ajouts(lib, dump, new())),
+            new("Choisir title.keys", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Les clés des jeux (title.keys)", ["title.keys", "*.keys"]) is { } f && Installer(lib, f, Construction.ClesTitres)) Mode(lib, d); }),
+            new("Continuer sans", "arrow.right", () => Mode(lib, d)),
         },
     });
-    static void Ajouts(Bibliotheque lib, string dump, List<string> ajouts)
+
+    // MARK: Jeux en ligne : la même table que sur Mac (Atelier.modsEnLigne dans app/main.swift). Ajouter un jeu = une ligne des deux côtés.
+    /// Un mod en ligne appartient à son auteur : Home ne le fournit pas, ni dans le dépôt ni dans l'installeur. Le joueur donne une fois
+    /// le fichier pris chez l'auteur ; Home le range dans mods-en-ligne/<title id>/<dossier> et le pose dans le jeu à la construction.
+    /// `Maj` : la version du jeu que le mod exige (null = le jeu de base, sans mise à jour).
+    /// Ces mods ont été essayés sur Mac. Sur Windows, avec ScarletNX, aucun ne l'a encore été : l'écran le dit.
+    public sealed record ModEnLigne(string Tid, string Nom, string Auteur, string Source, string Dossier, string Fichier, string? Maj, string[] Indices);
+    public static readonly ModEnLigne[] ModsEnLigne =
+    [
+        new("0100F2C0115B6000", "TOTK Online", "Kirbymimi", "son serveur Discord, lien sur gamebanana.com/wips/94930", "TOTK_Online", "subsdk4", "1.2.1", ["totk", "tears of the kingdom", "0100f2c0115b6000"]),
+        new("0100000000010000", "Super Mario Odyssey Online", "CraftyBoss", "github.com/CraftyBoss/SuperMarioOdysseyOnline, le fichier « for Switch »", "SMO_Online_v1", "subsdk1", null, ["super mario odyssey", "0100000000010000"]),
+    ];
+    /// Les numéros de titre qu'un .nsp nomme dans sa table de fichiers (PFS0 : nombre d'entrées, taille de la table des noms, 24 octets par entrée)
+    static List<string> TitresNSP(string fichier)
     {
-        var m = new Menu
+        var ids = new List<string>();
+        try
         {
-            Titre = "Mise à jour et DLC", SousTitre = Path.GetFileName(dump), Symbole = "arrow.down.circle",
-            Texte = "Si tu as la mise à jour du jeu ou ses DLC, ajoute-les maintenant : ils seront construits avec lui. Ce n'est pas obligatoire. Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même, le fichier d'origine ne sert plus. "
-                + "Compte de quelques minutes à plus d'une heure selon le jeu, et la taille du jeu en place libre. " + Regle,
+            using var f = File.OpenRead(fichier); var h = new byte[16];
+            if (f.Read(h, 0, 16) != 16 || Encoding.ASCII.GetString(h, 0, 4) != "PFS0") return ids;
+            int n = BitConverter.ToInt32(h, 4), taille = BitConverter.ToInt32(h, 8);
+            if (n <= 0 || n >= 4096 || taille <= 0 || taille >= 1 << 20) return ids;
+            var reste = new byte[n * 24 + taille]; if (f.Read(reste, 0, reste.Length) != reste.Length) return ids;
+            var noms = Encoding.UTF8.GetString(reste, n * 24, taille).ToUpperInvariant();
+            foreach (var mot in new string(noms.Select(c => char.IsLetterOrDigit(c) ? c : ' ').ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                if (mot.Length >= 16 && (mot.StartsWith("01") || mot.StartsWith("04"))) ids.Add(mot[..16]);
+        }
+        catch { }
+        return ids;
+    }
+    /// Le mod en ligne du jeu de ce fichier, s'il y en a un : par son numéro de titre (.nsp), sinon par le nom du fichier
+    public static ModEnLigne? ModPour(string dump)
+    {
+        var ids = TitresNSP(dump).Select(t => t[..13] + "000").ToList(); var nom = Path.GetFileName(dump).ToLowerInvariant();
+        return ModsEnLigne.FirstOrDefault(m => ids.Contains(m.Tid) || m.Indices.Any(nom.Contains));
+    }
+    static string DossierMod(ModEnLigne m) => Path.Combine(Dossiers.Racine, "mods-en-ligne", m.Tid, m.Dossier);
+    static bool ModPret(ModEnLigne m) => File.Exists(Path.Combine(DossierMod(m), "exefs", m.Fichier));
+    /// Range le mod donné (.zip ou dossier) : on y cherche exefs/<module du mod> ; le dossier qui contient cet exefs devient le mod.
+    /// Un mod déjà rangé va à la Corbeille avant d'être remplacé.
+    static bool RangerMod(ModEnLigne m, string source)
+    {
+        string? tmp = null;
+        try
+        {
+            if (File.Exists(source)) { tmp = Path.Combine(Dossiers.Dossier("telechargements"), "mod-" + Guid.NewGuid().ToString("N")[..8]); Moteur.Extraire(source, tmp); source = tmp; }
+            if (!Directory.Exists(source)) return false;
+            var module = Directory.EnumerateFiles(source, m.Fichier, SearchOption.AllDirectories).FirstOrDefault(f => Path.GetFileName(Path.GetDirectoryName(f))!.Equals("exefs", StringComparison.OrdinalIgnoreCase));
+            if (module == null) return false;
+            var racine = Path.GetDirectoryName(Path.GetDirectoryName(module))!; var cible = DossierMod(m);
+            if (Path.GetFullPath(racine).Equals(Path.GetFullPath(cible), StringComparison.OrdinalIgnoreCase)) return true;
+            if (Directory.Exists(cible) && !Systeme.Corbeille(cible)) return false;
+            Construction.Copier(racine, cible);
+            Journal.Ecrire($"mod en ligne {m.Nom} rangé dans {cible}");
+            return ModPret(m);
+        }
+        catch (Exception e) { Journal.Ecrire($"mod en ligne {m.Nom} : {e.Message}"); return false; }
+        finally { try { if (tmp != null && Directory.Exists(tmp)) Directory.Delete(tmp, true); } catch { } }   // la copie de travail de Home
+    }
+    /// Un jeu sans mod en ligne connu : la personne le propose dans une demande GitHub pré-remplie, qu'elle complète et envoie elle-même
+    static void SuggererMod(string jeu) => Systeme.Ouvrir("https://github.com/amas-cd/Home/issues/new?title=" + Uri.EscapeDataString("Mod en ligne : " + jeu) + "&body="
+        + Uri.EscapeDataString($"Jeu : {jeu}\nNom du mod :\nAuteur :\nPage de l'auteur où le trouver :\nVersion du jeu demandée par le mod :\nDéjà essayé sur (Mac, Windows, Switch, émulateur) :\n"));
+
+    // MARK: « Comment veux-tu jouer ? », juste après le jeu
+    public static void Mode(Bibliotheque lib, Demande d)
+    {
+        void Local() { d.EnLigne = null; d.Serveur = null; Maj(lib, d); }
+        var ici = () => Mode(lib, d);
+        if (ModPour(d.Dump) is not { } m)
+        {
+            lib.Ouvrir(new Menu
+            {
+                Titre = "Comment veux-tu jouer ?", SousTitre = NomDe(d), Symbole = "person",
+                Elements =
+                {
+                    new("En local", "gamecontroller", Local) { Teinte = Icones.Vert },
+                    new("En ligne", "globe", () => lib.Ouvrir(new Menu
+                    {
+                        Titre = "Jouer en ligne", SousTitre = NomDe(d), Symbole = "globe", Retour = ici,
+                        Texte = "Home ne connaît pas encore de mod en ligne pour ce jeu.\nSi tu en connais un, propose-le : il est essayé avant d'être ajouté.",
+                        Elements = { new("Suggérer un mod en ligne", "safari", () => SuggererMod(NomDe(d)), "Ouvre une demande sur GitHub, à compléter"), new("Jouer en local", "gamecontroller", Local) { Teinte = Icones.Vert } },
+                    }), "Aucun mod en ligne connu pour ce jeu") { Teinte = Icones.Gris },
+                },
+            });
+            return;
+        }
+        lib.Ouvrir(new Menu
+        {
+            Titre = "Comment veux-tu jouer ?", SousTitre = NomDe(d), Symbole = "person",
+            Elements = { new("En local", "gamecontroller", Local) { Teinte = Icones.Vert }, new("En ligne", "globe", () => EnLigne(lib, d, m), $"{m.Nom}, de {m.Auteur}") },
+        });
+    }
+    public static void EnLigne(Bibliotheque lib, Demande d, ModEnLigne m)
+    {
+        void Suite() { d.EnLigne = m; if (m.Maj == null) d.Maj = null; Serveur(lib, d); }
+        void Donner(string? source) { if (source == null) return; if (RangerMod(m, source)) Suite(); else lib.Dire($"Ce fichier n'est pas {m.Nom} : il manque exefs/{m.Fichier}"); }
+        var pret = ModPret(m);
+        var menu = new Menu
+        {
+            Titre = "Jouer en ligne", SousTitre = NomDe(d), Symbole = "globe", Retour = () => Mode(lib, d),
+            Texte = $"{m.Nom} est un mod de {m.Auteur}. Home ne le fournit pas : prends-le chez son auteur ({m.Source}), puis donne-le ici une seule fois.\n"
+                + (m.Maj != null ? $"Il demande la mise à jour {m.Maj} du jeu." : "Il demande le jeu de base, sans mise à jour.") + "\n\nPas encore essayé sur Windows : dis-nous si ça marche.",
         };
-        m.Elements.Add(new("Continuer", "arrow.right", () => Mode(lib, dump, ajouts), ajouts.Count == 0 ? "Le jeu seul, sans mise à jour" : ajouts.Count == 1 ? "Avec 1 mise à jour ou DLC" : $"Avec {ajouts.Count} mises à jour ou DLC"));
-        m.Elements.Add(new("Ajouter une mise à jour ou un DLC", "plus", async () =>
+        if (pret) menu.Elements.Add(new("Continuer", "arrow.right", Suite, "Le mod est déjà sur ce PC") { Teinte = Icones.Vert });
+        menu.Elements.Add(new(pret ? "Choisir un autre fichier…" : "Choisir le fichier du mod…", "shippingbox", async () => Donner(lib.ChoisirFichier != null ? await lib.ChoisirFichier($"{m.Nom} : le .zip du mod", ["*.zip"]) : null), $"Le .zip de {m.Auteur}"));
+        menu.Elements.Add(new("Choisir le dossier du mod…", "folder", async () => Donner(lib.ChoisirDossier != null ? await lib.ChoisirDossier($"{m.Nom} : le dossier du mod") : null), $"Si tu l'as déjà décompressé : il contient exefs/{m.Fichier}"));
+        menu.Elements.Add(new("Jouer en local", "gamecontroller", () => { d.EnLigne = null; d.Serveur = null; Maj(lib, d); }) { Teinte = Icones.Gris });
+        lib.Ouvrir(menu);
+    }
+    /// L'adresse du serveur : Home la répondra quand le jeu ouvrira son clavier. Sans adresse, on la tape dans le jeu (et le chat du mod marche).
+    static void Serveur(Bibliotheque lib, Demande d)
+    {
+        void Suite() { if (d.EnLigne?.Maj != null) Maj(lib, d); else Dlc(lib, d); }
+        lib.Ouvrir(new Menu
         {
-            if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Une mise à jour ou un DLC du jeu (.nsp ou .xci)", ["*.nsp", "*.xci"]) is { } f && !ajouts.Contains(f) && f != dump) ajouts.Add(f);
-            Ajouts(lib, dump, ajouts);
-        }, "Une mise à jour au plus, autant de DLC que tu veux"));
-        foreach (var a in ajouts.ToList()) m.Elements.Add(new(Path.GetFileName(a), "xmark", () => { ajouts.Remove(a); Ajouts(lib, dump, ajouts); }, "Retirer de la liste"));
-        lib.Ouvrir(m);
+            Titre = "Le serveur", SousTitre = d.EnLigne?.Nom ?? NomDe(d), Symbole = "globe", Retour = () => EnLigne(lib, d, d.EnLigne!),
+            Texte = "L'adresse que t'a donnée la personne qui tient le serveur. Home la répond à la place du clavier du jeu : c'est pratique, mais le chat du mod ne marche plus. Sans adresse, tu la taperas dans le jeu.",
+            Elements =
+            {
+                new(string.IsNullOrWhiteSpace(d.Serveur) ? "Donner l'adresse" : "Changer l'adresse", "globe", () => lib.Demander("Adresse du serveur", "adresse:port", v => { d.Serveur = v; Serveur(lib, d); }), string.IsNullOrWhiteSpace(d.Serveur) ? "adresse:port" : "Adresse enregistrée"),
+                new(string.IsNullOrWhiteSpace(d.Serveur) ? "Sans adresse" : "Continuer", "arrow.right", Suite, string.IsNullOrWhiteSpace(d.Serveur) ? "Je la taperai dans le jeu" : null) { Teinte = string.IsNullOrWhiteSpace(d.Serveur) ? Icones.Gris : Icones.Vert },
+            },
+        });
     }
 
-    // MARK: En local ou en ligne ? Posé pour chaque jeu, après le jeu et sa mise à jour.
-    // « En ligne » : le mod en ligne du jeu (TOTK Online, Super Mario Odyssey Online…) est installé avec lui, le jeu est recompilé avec
-    // ce mod, sa connexion est ouverte et l'adresse du serveur réglée. Home ne fournit ni le mod ni l'adresse : le mod appartient à son
-    // auteur, et l'adresse d'un serveur ne va jamais dans un dépôt public.
-    public static void Mode(Bibliotheque lib, string dump, List<string> ajouts) => lib.Ouvrir(new Menu
+    // MARK: La mise à jour : facultative en local ; en ligne, celle que le mod demande, et rien d'autre
+    public static void Maj(Bibliotheque lib, Demande d)
     {
-        Titre = "Comment veux-tu jouer ?", SousTitre = Path.GetFileName(dump), Symbole = "gamecontroller", Retour = () => Ajouts(lib, dump, ajouts),
-        Elements =
-        {
-            new("En local", "gamecontroller", () => Construction.Commencer(lib, dump, ajouts), "Le jeu tel quel. La construction démarre tout de suite"),
-            new("En ligne", "globe", () => EnLigne(lib, dump, ajouts, null, null), "Avec le mod en ligne du jeu et l'adresse d'un serveur. Tu pourras aussi y jouer seul"),
-        },
-    });
-    public static void EnLigne(Bibliotheque lib, string dump, List<string> ajouts, string? mod, string? serveur)
-    {
+        var exigee = d.EnLigne?.Maj;
         var m = new Menu
         {
-            Titre = "Jouer en ligne", SousTitre = Path.GetFileName(dump), Symbole = "globe", Retour = () => Mode(lib, dump, ajouts),
-            Texte = "Donne le mod en ligne de ce jeu et l'adresse du serveur : Home construit le jeu, installe le mod, recompile avec lui et règle le serveur.\n\n"
-                + $"Mod : {(mod != null ? Path.GetFileName(mod.TrimEnd(Path.DirectorySeparatorChar, '/')) : "à choisir")}  ·  Serveur : {(string.IsNullOrWhiteSpace(serveur) ? "à régler" : "réglé")}",
+            Titre = exigee != null ? "La mise à jour " + exigee : "La mise à jour", SousTitre = NomDe(d), Symbole = "arrow.down.circle",
+            Retour = () => { if (d.EnLigne != null) Serveur(lib, d); else Mode(lib, d); },
+            Alerte = exigee != null ? $"Il faut la version {exigee} du jeu" : null,
+            Texte = exigee != null ? $"{d.EnLigne!.Nom} ne marche qu'avec la mise à jour {exigee} : donne ce fichier-là, pas une autre version." : "Si tu as la mise à jour du jeu, donne-la : elle est construite avec lui. Ce n'est pas obligatoire.",
         };
-        if (mod != null && !string.IsNullOrWhiteSpace(serveur)) m.Elements.Add(new("Construire", "hammer", () => Construction.Commencer(lib, dump, ajouts, mod, serveur), "Le jeu, puis le mod : compte plus longtemps qu'un jeu seul"));
-        m.Elements.Add(new(mod == null ? "Choisir le mod (.zip)" : "Changer de mod (.zip)", "shippingbox", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le mod en ligne du jeu (.zip)", ["*.zip"]) is { } z) mod = z; EnLigne(lib, dump, ajouts, mod, serveur); }, "L'archive du mod, avec romfs/ et/ou exefs/ dedans"));
-        m.Elements.Add(new(mod == null ? "Choisir le mod (dossier)" : "Changer de mod (dossier)", "folder", async () =>
+        m.Elements.Add(new(d.Maj == null ? "Choisir la mise à jour…" : Path.GetFileName(d.Maj), "arrow.down.circle", async () =>
         {
-            if (lib.ChoisirDossier != null && await lib.ChoisirDossier("Le dossier du mod en ligne (il contient romfs et/ou exefs)") is { } d) { if (Construction.Racine(d) != null) mod = d; else lib.Dire("Ce n'est pas un mod : il n'y a ni dossier romfs ni dossier exefs dedans"); }
-            EnLigne(lib, dump, ajouts, mod, serveur);
-        }, "Un dossier qui contient romfs/ et/ou exefs/"));
-        m.Elements.Add(new(string.IsNullOrWhiteSpace(serveur) ? "Régler le serveur" : "Changer de serveur", "globe", () => lib.Demander("Adresse du serveur", "adresse:port", v => EnLigne(lib, dump, ajouts, mod, v)), "L'adresse que t'a donnée celui qui héberge la partie"));
+            if (lib.ChoisirFichier == null || await lib.ChoisirFichier(exigee != null ? $"La mise à jour {exigee} du jeu (.nsp)" : "La mise à jour du jeu (.nsp)", ["*.nsp", "*.xci"]) is not { } f || f == d.Dump) { Maj(lib, d); return; }
+            if (exigee == null) { d.Maj = f; Maj(lib, d); return; }
+            // en ligne : une autre version que celle du mod donne un jeu qui ne se connecte pas, après une heure de construction. On redemande.
+            lib.Ouvrir(new Menu
+            {
+                Titre = "Es-tu sûr ?", SousTitre = Path.GetFileName(f), Symbole = "exclamationmark", Retour = () => Maj(lib, d),
+                Alerte = $"Ce fichier doit être la mise à jour {exigee}",
+                Texte = $"Home ne peut pas le vérifier. Avec une autre version, {d.EnLigne!.Nom} ne marchera pas, et il faudra tout reconstruire.",
+                Elements = { new($"Oui, c'est la {exigee}", "checkmark", () => { d.Maj = f; Maj(lib, d); }) { Teinte = Icones.Vert }, new("Choisir un autre fichier", "arrow.left", () => Maj(lib, d)) { Teinte = Icones.Gris } },
+            });
+        }, d.Maj == null ? "Un fichier .nsp" : "Choisir un autre fichier"));
+        if (d.Maj != null) m.Elements.Add(new("Continuer", "arrow.right", () => Dlc(lib, d)) { Teinte = Icones.Vert });
+        else if (exigee == null) m.Elements.Add(new("Pas de mise à jour", "arrow.right", () => Dlc(lib, d)) { Teinte = Icones.Gris });
+        // sans cette mise à jour, pas de jeu en ligne : on repasse en local, où elle est facultative
+        if (exigee != null) m.Elements.Add(new("Jouer en local à la place", "gamecontroller", () => { var mod = d.EnLigne!.Nom; d.EnLigne = null; d.Serveur = null; Maj(lib, d); lib.Dire("En local, sans " + mod); }, $"Sans {d.EnLigne!.Nom} : la mise à jour devient facultative") { Teinte = Icones.Gris });
+        lib.Ouvrir(m);
+    }
+    static void Dlc(Bibliotheque lib, Demande d)
+    {
+        var m = new Menu { Titre = "Les contenus additionnels", SousTitre = NomDe(d), Symbole = "puzzlepiece", Retour = () => { if (d.EnLigne is { Maj: null }) Serveur(lib, d); else Maj(lib, d); } };
+        m.Elements.Add(new(d.Dlc.Count == 0 ? "Choisir les DLC…" : "Ajouter un autre DLC…", "puzzlepiece", async () =>
+        {
+            if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Un DLC du jeu (.nsp)", ["*.nsp"]) is { } f && f != d.Dump && f != d.Maj && !d.Dlc.Contains(f)) d.Dlc.Add(f);
+            Dlc(lib, d);
+        }, d.Dlc.Count == 0 ? "Un fichier .nsp à la fois" : string.Join(", ", d.Dlc.Select(Path.GetFileName))));
+        m.Elements.Add(new(d.Dlc.Count == 0 ? "Pas de DLC" : "Continuer", "arrow.right", () => Recap(lib, d)) { Teinte = d.Dlc.Count == 0 ? Icones.Gris : Icones.Vert });
+        if (d.Dlc.Count > 0) m.Elements.Add(new("Tout retirer", "xmark", () => { d.Dlc.Clear(); Dlc(lib, d); }) { Teinte = Icones.Gris });
+        lib.Ouvrir(m);
+    }
+    public static void Recap(Bibliotheque lib, Demande d)
+    {
+        var m = new Menu { Titre = "Prêt à construire", SousTitre = NomDe(d), Symbole = "hammer", Retour = () => Dlc(lib, d),
+            Texte = "Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même. Compte de quelques minutes à plus d'une heure, et la taille du jeu en place libre. " + Regle };
+        m.Elements.Add(new() { Libelle = Path.GetFileName(d.Dump), Detail = "Le jeu", Icone = "gamecontroller", Info = true });
+        m.Elements.Add(new() { Libelle = d.Maj != null ? Path.GetFileName(d.Maj) : "Aucune", Detail = "Mise à jour", Icone = "arrow.down.circle", Info = true });
+        m.Elements.Add(new() { Libelle = d.Dlc.Count == 0 ? "Aucun" : string.Join(", ", d.Dlc.Select(Path.GetFileName)), Detail = "DLC", Icone = "puzzlepiece", Info = true });
+        m.Elements.Add(new() { Libelle = d.EnLigne != null ? "En ligne · " + d.EnLigne.Nom : "En local", Detail = "Mode", Icone = d.EnLigne != null ? "globe" : "gamecontroller", Info = true });
+        m.Elements.Add(new("Construire", "hammer", () =>
+        {
+            var ajouts = new List<string>(); if (d.Maj != null) ajouts.Add(d.Maj); ajouts.AddRange(d.Dlc);
+            Construction.Commencer(lib, d.Dump, ajouts, d.EnLigne != null ? DossierMod(d.EnLigne) : null, d.Serveur);
+        }, d.EnLigne != null ? "Le jeu, puis le mod : compte plus longtemps qu'un jeu seul" : null) { Teinte = Icones.Vert, Section = " " });
         lib.Ouvrir(m);
     }
 

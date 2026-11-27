@@ -50,6 +50,8 @@ public sealed class Menu
 {
     public string Titre = ""; public string? SousTitre; public List<ElementMenu> Elements = new();
     public string? Symbole; public Bitmap? Logo; public string? ImageURL; public string? Texte; public Action? Retour; public bool Grille;
+    /// Une phrase qu'il ne faut pas rater (la version du jeu qu'un mod en ligne exige) : écrite en gros, en orange, au-dessus du texte
+    public string? Alerte;
     /// Comme sur Mac : un menu court (7 choix au plus, tous actionnables, sans image) est une rangée de pastilles ; les autres, une roue
     public GenreMenu Genre => Grille ? GenreMenu.Grille : Elements.Count is > 0 and <= 7 && Elements.All(e => !e.Info && e.Image == null) ? GenreMenu.Rangee : GenreMenu.Roue;
 }

@@ -142,13 +142,21 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     code (`exefs/`) fait recompiler le jeu (`scarletnx -r`).
   - En ligne : seul le réglage `network=` du jeu est proposé (« Internet »). Ne présente « Jouer en ligne » comme fonctionnel pour un
     jeu qu'après un essai réel de ce jeu avec ce mod. ScarletNX a `swkbd_text` pour répondre au clavier, mais à tous les claviers.
-  - L'assistant demande, après le jeu et sa mise à jour : **en local ou en ligne ?** (`MenusSwitch.Mode`, pour tous les jeux). En ligne :
-    le mod en ligne (dossier ou .zip) et l'adresse du serveur ; le chantier les porte (`Chantier.Mod`, `Chantier.Serveur`), et à la fin
-    de la construction Home installe le mod, recompile avec lui, met `network=1` et garde l'adresse dans `recompiled/<id>/serveur.txt`
-    (sur le PC seulement), qu'il passe à chaque lancement (`--swkbd-text=`). Le mod et l'adresse ne sont jamais dans le dépôt.
+  - L'assistant suit l'ordre du Mac : le jeu, les clés, **« Comment veux-tu jouer ? »** (`MenusSwitch.Mode`), le mod en ligne, le
+    serveur, la mise à jour, les DLC, « Prêt à construire ». La mise à jour est facultative en local ; en ligne, c'est celle que le mod
+    demande, écrite en gros (`Menu.Alerte`) et confirmée par « Es-tu sûr ? » (Home ne sait pas lire la version d'un .nsp).
+  - « En ligne » n'existe que pour les jeux de `MenusSwitch.ModsEnLigne`, **la même table que `Atelier.modsEnLigne` sur Mac** : une
+    ligne des deux côtés pour ajouter un jeu. Le jeu est reconnu par ses numéros de titre (.nsp) ou le nom du fichier. Le mod donné
+    est vérifié (`exefs/<module>`) et rangé dans `%LOCALAPPDATA%\Home\mods-en-ligne\`. Un jeu hors table : « Suggérer un mod en
+    ligne » (demande GitHub pré-remplie). Ces mods ont été essayés sur Mac, aucun sur Windows : l'écran le dit.
+  - À la fin de la construction, Home pose le mod, recompile avec lui, met `network=1` et garde l'adresse du serveur, si on l'a
+    donnée, dans `recompiled/<id>/serveur.txt` (sur le PC seulement), qu'il passe à chaque lancement (`--swkbd-text=`).
+    Un mod en ligne et l'adresse d'un serveur ne sont jamais dans le dépôt ni dans l'installeur sans l'accord écrit de l'auteur.
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
 - **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
   haut), choix des images dans Home (un fichier à la place), mode d'utilisation.
+- **Désinstaller** : un jeu Switch part à la Corbeille. Pour un jeu Steam ou Epic, Home ne supprime rien lui-même : il ouvre la
+  désinstallation de la boutique (`steam://uninstall/<appid>`, le lanceur Epic). Une app ajoutée à la main : « Retirer de Home » seulement.
 - **Graphisme** : l'app Mac fait foi. `windows/` la recopie vue par vue ; une vue reste en place et on change ses propriétés (c'est ce
   qui l'anime), et on n'anime jamais une taille (seulement `RenderTransform` et l'opacité). « Animations réduites » : `Mouvement.Reduit`.
   Pour comparer : `HOME_APERCU=<dossier> Home.app/Contents/MacOS/Salon` écrit les menus, l'ouverture et l'avancement du Mac en PNG.
@@ -186,7 +194,7 @@ dotnet build windows/Home.csproj
 HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=options HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
 ```
 `HOME_DEMO=1` remplit la bibliothèque avec des tuiles d'exemple (aucun jeu n'est là). `HOME_SCENARIO` enchaîne des écrans ou des touches
-(`options`, `plus`, `ajout`, `switch`, `mods`, `place`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
+(`options`, `plus`, `ajout`, `mode`, `modeinconnu`, `enligne`, `maj`, `sur`, `recap`, `mods`, `place`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
 la fenêtre puis quitte : lis le PNG. Cette image ne montre ni les flous ni un mouvement en cours : pour les voir, lance sans
 `HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille,
 ScarletNX : aucun jeu ne tourne sur macOS) ne se teste pas sur Mac. Dans un compte rendu, sépare toujours « compilé », « vu à l'écran »

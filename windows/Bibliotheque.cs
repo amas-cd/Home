@@ -238,6 +238,28 @@ public sealed class Bibliotheque
                 new("Mettre à la Corbeille", "trash", () => { if (!Systeme.Corbeille(j.Dossier)) { Dire("Le dossier n'a pas pu être mis à la Corbeille"); return; } Journal.Ecrire($"jeu Switch désinstallé : {j.Id}"); FermerMenus(); Recharger(); Dire(j.Nom + " est désinstallé"); }) { Destructif = true },
             },
         }), "Le jeu construit part à la Corbeille") { Destructif = true });
+        // Steam et Epic tiennent leur propre liste de jeux installés : Home ne supprime pas leurs fichiers lui-même, il ouvre leur désinstallation
+        if (j.Origine is Origine.Steam or Origine.Epic)
+        {
+            var steam = j.Origine == Origine.Steam; var boutique = steam ? "Steam" : "Epic Games";
+            m.Elements.Add(new("Désinstaller", "trash", () => Ouvrir(new Menu
+            {
+                Titre = "Désinstaller " + j.Nom + " ?", SousTitre = boutique, Symbole = "trash", Retour = OuvrirOptions,
+                Texte = (steam ? "Home ouvre la désinstallation de Steam, qui te demande de confirmer : c'est Steam qui enlève le jeu."
+                               : "Home ouvre le lanceur Epic Games : dans ta bibliothèque, clique sur les trois points du jeu, puis « Désinstaller ». C'est Epic qui enlève le jeu.")
+                    + "\nHome ne supprime aucun fichier lui-même. Quand c'est fait : Menu → Actualiser la bibliothèque.",
+                Elements =
+                {
+                    new("Annuler", "xmark", OuvrirOptions),
+                    new(steam ? "Ouvrir la désinstallation de Steam" : "Ouvrir Epic Games", "trash", () =>
+                    {
+                        FermerMenus(); Journal.Ecrire($"désinstallation demandée à {boutique} : {j.Id}");
+                        if (!OperatingSystem.IsWindows()) { Dire(boutique + " ne s'ouvre que sur Windows"); return; }
+                        Systeme.Ouvrir(steam ? "steam://uninstall/" + j.SteamId : "com.epicgames.launcher://store/library");
+                    }) { Destructif = true },
+                },
+            }), "C'est " + boutique + " qui enlève le jeu") { Destructif = true });
+        }
         if (j.Origine == Origine.App) m.Elements.Add(new("Retirer de Home", "trash", () => { Config.Jeux.RemoveAll(e => "app:" + e.Chemin == j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le programme n'est pas supprimé") { Destructif = true });
         Ouvrir(m);
     }
