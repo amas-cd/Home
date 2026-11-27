@@ -87,17 +87,26 @@ public sealed class Bibliotheque
     // MARK: Navigation
     public void Nav(string k)
     {
+        // pendant la première seconde et demie rien n'est pris en compte : un bouton tenu au moment où Home démarre lançait le premier jeu
+        if ((DateTime.Now - demarrage).TotalSeconds < 1.5) return;
         if (PasserOuverture?.Invoke() == true) return;
-        if (Bienvenue)
+        if (Bienvenue && !BienvenueFige)
         {   // l'accueil du premier lancement : gauche et droite choisissent une carte, la touche des options l'ignore
             if (k is "left" or "right") { var carte = Math.Clamp(BienvenueIndex + (k == "left" ? -1 : 1), 0, 2); if (carte != BienvenueIndex) { BienvenueIndex = carte; Son("deplacer"); Signaler(); } }
             else if (k == "ok") BienvenueValider(); else if (k == "options") BienvenueIgnorer();
+            return;
+        }
+        if ((DateTime.Now - installationQuittee).TotalSeconds < 0.5) return;   // le même appui n'agit pas aussi sur la bibliothèque qui réapparaît
+        if (Installation)
+        {   // l'installation du moteur : rien d'autre tant qu'elle tourne ; après un échec, réessayer ou continuer sans
+            if (Tache?.Erreur != null) { if (k == "ok") InstallationReessayer(); else if (k is "back" or "options") InstallationPasser(); }
             return;
         }
         // la saisie : la manette valide ou annule, le texte se tape au clavier
         if (Saisie != null) { if (k == "back") { Saisie = null; Son("retour"); Signaler(); } else if (k == "ok" && TexteSaisie != null) { Son("valider"); ValiderSaisie(TexteSaisie()); } return; }
         if (EnCours != null) return;
         if (Menu != null) { NavMenu(k); return; }
+        if (Bienvenue) return;   // le choix est fait : la bienvenue attend l'écran suivant
         var n = Visibles.Count;
         switch (k)
         {
@@ -175,7 +184,7 @@ public sealed class Bibliotheque
     public void FinTache(Tache t)
     {
         if (t.Erreur == null) { Son("valider"); _ = Task.Delay(8000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (Tache == t) { Tache = null; Signaler(); } })); return; }
-        Son("retour"); if (Tache == t && EnCours == null && Menu == null && !Bienvenue) OuvrirTacheMenu();
+        Son("retour"); if (Tache == t && EnCours == null && Menu == null && !Bienvenue && !Installation) OuvrirTacheMenu();
     }
     /// Le menu de la carte d'une tâche (openTacheMenu sur Mac)
     public void OuvrirTacheMenu()
@@ -267,11 +276,20 @@ public sealed class Bibliotheque
     }
     // MARK: L'accueil du premier lancement (BienvenueVue) : un écran à part, pas un menu
     public bool Bienvenue; public int BienvenueIndex;
+    public bool BienvenueFige;   // le choix est fait : l'écran reste jusqu'au suivant (les clés, l'installation), on ne voit jamais la bibliothèque entre les deux
+    readonly DateTime demarrage = DateTime.Now;
+    public void FermerBienvenue() { BienvenueFige = false; if (Bienvenue) { Bienvenue = false; Signaler(); } }
+    /// L'installation du moteur occupe tout l'écran, comme la mise en route d'une console : pas de bibliothèque avant la fin.
+    /// Si elle échoue, on peut réessayer ou continuer sans (Menu → Composants la relance).
+    public bool Installation; Action? installationRelance; DateTime installationQuittee = DateTime.MinValue;
+    void InstallationReessayer() { if (installationRelance is not { } r) return; Son("valider"); Tache = null; r(); }
+    void InstallationPasser() { installationQuittee = DateTime.Now; Son("retour"); Installation = false; Signaler(); }
     /// La suite, dans l'ordre du Mac, chaque étape à valider : les clés de la console (sans elles aucun jeu Switch ne se construit),
     /// puis l'installation des composants, puis seulement les bibliothèques Steam et Epic Games.
     public void BienvenueValider()
     {
-        Son("valider"); Config.Mode = new[] { "tout", "nintendo", "pc" }[BienvenueIndex]; Enregistrer(); Bienvenue = false; Recharger();
+        if (BienvenueFige) return;
+        Son("valider"); BienvenueFige = true; Config.Mode = new[] { "tout", "nintendo", "pc" }[BienvenueIndex]; Enregistrer(); Recharger();
         void Comptes() { if (ModePC) AccueilBibliotheques(); }
         void Installer() => AppliquerMode(Comptes);
         if (ModeNintendo) MenusSwitch.AccueilCles(this, Installer); else Installer();
@@ -281,9 +299,17 @@ public sealed class Bibliotheque
     /// installer : Steam et Epic Games sont des programmes que le joueur a déjà.
     void AppliquerMode(Action? ensuite)
     {
-        if (!ModeNintendo || Moteur.Exe != null) { Dire($"Mode d'utilisation : {ModeResume} — tout est déjà installé"); ensuite?.Invoke(); return; }
-        if (!OperatingSystem.IsWindows()) { Dire("Le moteur des jeux Switch ne s'installe que sur Windows"); ensuite?.Invoke(); return; }
-        _ = Construction.PreparerMoteur(this, "Installation pour : " + ModeResume, ensuite);
+        if (!ModeNintendo || Moteur.Exe != null) { FermerBienvenue(); Dire($"Mode d'utilisation : {ModeResume} — tout est déjà installé"); ensuite?.Invoke(); return; }
+        if (!OperatingSystem.IsWindows()) { FermerBienvenue(); Dire("Le moteur des jeux Switch ne s'installe que sur Windows"); ensuite?.Invoke(); return; }
+        if (Tache is { Fini: false }) { FermerBienvenue(); Dire("Une autre tâche est en cours : attends qu'elle finisse"); return; }
+        // en plein écran ; la bienvenue ne part qu'une fois l'installation affichée
+        installationRelance = () => AppliquerMode(ensuite); FermerMenus(); Installation = true; Signaler();
+        _ = Task.Delay(500).ContinueWith(_ => Dispatcher.UIThread.Post(FermerBienvenue));
+        _ = Construction.PreparerMoteur(this, "Installation pour : " + ModeResume, () =>
+        {   // « MOTEURS INSTALLÉS » un instant, puis la bibliothèque en fondu, puis la suite (les bibliothèques Steam et Epic)
+            _ = Task.Delay(700).ContinueWith(_ => Dispatcher.UIThread.Post(() => { Installation = false; Signaler(); }));
+            _ = Task.Delay(1500).ContinueWith(_ => Dispatcher.UIThread.Post(() => ensuite?.Invoke()));
+        });
     }
     /// Premier lancement, jeux PC : sur Mac on connecte ses comptes Epic et Steam ; sur Windows il n'y a rien à connecter, Home lit les
     /// jeux que ces boutiques ont installés. L'étape montre ce qu'il a trouvé.
@@ -304,7 +330,7 @@ public sealed class Bibliotheque
             },
         });
     }
-    public void BienvenueIgnorer() { Config.Mode = "tout"; Enregistrer(); Son("retour"); Bienvenue = false; Signaler(); }
+    public void BienvenueIgnorer() { if (BienvenueFige) return; Config.Mode = "tout"; Enregistrer(); Son("retour"); Bienvenue = false; Signaler(); }
 
     // MARK: Mode d'utilisation : ce que Home sert à faire sur ce PC (jeux Nintendo, jeux PC, les deux), comme sur Mac
     public bool ModeNintendo => Config.Mode != "pc";
@@ -431,6 +457,7 @@ public sealed class Bibliotheque
         // « Nom : état » : la roue montre l'état dans une capsule, à côté du choix visé
         m.Elements.Add(new("Sons de l'interface : " + (Config.Sons ? "activés" : "coupés"), Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, "Les sons des menus et de la bibliothèque") { Section = "Réglages" });
         m.Elements.Add(new("Affichage : " + (Config.Fenetre ? "en fenêtre" : "plein écran"), "rectangle", () => { Config.Fenetre = !Config.Fenetre; Enregistrer(); AppliquerFenetre?.Invoke(); OuvrirPlus(); }, "F11 change aussi"));
+        m.Elements.Add(new("Écran de démarrage : " + (Config.Ouverture ? "oui" : "non"), "sparkles", () => { Config.Ouverture = !Config.Ouverture; Enregistrer(); OuvrirPlus(); }, "Le logo et le jingle au lancement de Home"));
         m.Elements.Add(new("Animations : " + (Config.AnimationsReduites ? "réduites" : "complètes"), "sparkles", () => { Config.AnimationsReduites = !Config.AnimationsReduites; Mouvement.Reduit = Config.AnimationsReduites; Enregistrer(); Reconstruire?.Invoke(); OuvrirPlus(); },
             "Réduites : les mouvements deviennent un fondu très court"));
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));

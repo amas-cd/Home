@@ -29,7 +29,7 @@ sealed class VueMenu : Panel
     {
         this.lib = lib; Menu = m; this.arrivee = arrivee; this.sens = sens;
         Background = Brushes.Transparent; Transitions = new Transitions { Mouvement.Opacite(0.22, new CubicEaseInOut()) };
-        PointerPressed += (_, e) => { if (!e.Handled && lib.Saisie == null) { e.Handled = true; lib.FermerMenus(); } };   // un clic à côté ferme tout
+        PointerPressed += (_, e) => { if (!e.Handled && lib.Saisie == null && !lib.BienvenueFige) { e.Handled = true; lib.FermerMenus(); } };   // un clic à côté ferme tout
         var fond = new Border { Background = U.Noir(m.Genre == GenreMenu.Rangee ? 0 : 0.55), IsHitTestVisible = false, Opacity = fonduDuFond ? 0 : 1, Transitions = new Transitions { Mouvement.Opacite(0.25) } };
         Children.Add(fond); if (fonduDuFond) Paraitre(() => fond.Opacity = 1);
         switch (m.Genre) { case GenreMenu.Rangee: Rangee(); break; case GenreMenu.Grille: Grille(); break; default: Roue(); break; }

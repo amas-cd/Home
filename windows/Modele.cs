@@ -35,6 +35,7 @@ public sealed class Config
     public bool Fenetre { get; set; }                         // en fenêtre plutôt qu'en plein écran
     /// Ce que Home sert à faire sur ce PC, choisi au premier lancement (« Bienvenue ») : tout, nintendo ou pc. null = pas encore choisi.
     public string? Mode { get; set; }
+    public bool Ouverture { get; set; } = true;               // l'écran de démarrage (logo et jingle) au lancement de Home
     public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
 }
 

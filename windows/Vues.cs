@@ -616,14 +616,15 @@ sealed class BienvenueVue : Panel
             Child = U.Ligne(12, U.Touche(lib.Aides.Ok, U.Noir(0.7)), new TextBlock { Text = "Commencer", FontSize = 24, FontWeight = FontWeight.Bold, FontFamily = U.Police, Foreground = Brushes.Black, VerticalAlignment = VerticalAlignment.Center }) };
         bouton.PointerPressed += (_, e) => { e.Handled = true; lib.BienvenueValider(); };
         paraitre.Add(() => bouton.Opacity = 1);
-        Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children =
+        Children.Add(dessus = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children =
         {
             titre, Ligne("À quoi vas-tu jouer ? Home installe ce qu'il faut.", 24, 0.72, 14), Ligne("Home ne contient aucun jeu : il utilise ceux que tu possèdes, copiés depuis ta propre console.", 15, 0.45, 8), rangee, bouton,
         } });
         // « Ignorer » : là pour qui le cherche, pas pour qui hésite
         var ignorer = U.Ligne(6, U.Touche(lib.Aides.Options), U.Texte("Ignorer", 13, FontWeight.Medium)); ignorer.Opacity = 0.26; ignorer.HorizontalAlignment = HorizontalAlignment.Right; ignorer.VerticalAlignment = VerticalAlignment.Bottom; ignorer.Margin = new Thickness(0, 0, 44, 30); ignorer.Background = Brushes.Transparent;
         ignorer.PointerPressed += (_, e) => { e.Handled = true; lib.BienvenueIgnorer(); };
-        Children.Add(ignorer);
+        Children.Add(ignorer); bas = ignorer;
+        dessus.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()) }; bas.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()) };
         // tout est en place d'emblée : l'écran est déjà complet sous l'écran de démarrage, qui s'efface dessus. (Sur Mac les cartes
         // arrivent l'une après l'autre ; ici ça faisait attendre avant de pouvoir choisir.)
         foreach (var a in paraitre) a();
@@ -631,6 +632,10 @@ sealed class BienvenueVue : Panel
     }
     static Control Centre(Control c, double haut = 0) { c.HorizontalAlignment = HorizontalAlignment.Center; c.Margin = new Thickness(0, haut, 0, 0); return c; }
     static Control Centrer(Control c) { c.HorizontalAlignment = HorizontalAlignment.Center; c.VerticalAlignment = VerticalAlignment.Center; return c; }
+    readonly StackPanel dessus; readonly Control bas; bool efface;
+    /// Le choix est fait et l'écran suivant (les clés) est un menu : les cartes s'effacent, le fond de la bienvenue reste dessous.
+    /// On ne voit ainsi jamais la bibliothèque entre deux écrans du premier lancement.
+    public void Effacer(bool oui) { if (oui == efface) return; efface = oui; dessus.Opacity = oui ? 0 : 1; bas.Opacity = oui ? 0 : 0.26; dessus.IsHitTestVisible = !oui; }
     public void Viser(int i)
     {
         if (i == vise) return;
@@ -699,6 +704,104 @@ sealed class PastilleTache : Border
     }
 }
 
+/// L'installation du moteur en plein écran (`InstallationView` sur Mac), comme la mise en route d'une console : un titre qui dit ce qui
+/// s'installe, un grand anneau blanc avec le pourcentage, et à côté de grands titres cochés un à un. Rien d'autre n'est accessible.
+/// Sur Windows il n'y a qu'un moteur à installer (ScarletNX) : deux titres, son téléchargement puis sa mise en place.
+sealed class InstallationVue : Panel
+{
+    static readonly (string nom, string cle, string etape)[] groupes =
+        [("Téléchargement", "Téléchargement", "ScarletNX, le moteur des jeux Switch"), ("Mise en place", "Installation", "Vérification et installation")];
+    readonly Bibliotheque lib; readonly DateTime debut = DateTime.Now; Tache? tache; int rang; string cle = "";
+    readonly Anneau anneau = new() { Width = 380, Height = 380, Epaisseur = 10, Piste = U.Blanc(0.12) };
+    readonly Panel centre = new() { Width = 380, Height = 380 };
+    readonly TextBlock titre = U.Titre("Installation des moteurs", 46, 4), phrase = U.Texte("", 24, FontWeight.Medium, 0.6), reste = U.Texte(" ", 21, FontWeight.Medium, 0.55);
+    readonly TextBlock nombre = new() { FontSize = 120, FontWeight = FontWeight.SemiBold, FontFamily = U.Police, Foreground = Brushes.White };
+    readonly StackPanel liste = new() { Spacing = 38, Width = 540, VerticalAlignment = VerticalAlignment.Center }, aides, contenu;
+    Border? barre; readonly DispatcherTimer seconde = new() { Interval = TimeSpan.FromSeconds(1) };
+
+    public InstallationVue(Bibliotheque lib)
+    {
+        this.lib = lib; Background = new SolidColorBrush(Color.FromRgb(5, 5, 13));
+        // une seule lueur, basse et discrète ; pas de dégradé de couleurs
+        Children.Add(Avec(U.Lueur(Color.FromRgb(84, 43, 204), 1500, 0.22), l => { l.VerticalAlignment = VerticalAlignment.Center; l.HorizontalAlignment = HorizontalAlignment.Center; l.RenderTransform = new TranslateTransform(0, 320); }));
+        anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.9), Easing = new CubicEaseInOut() } };
+        centre.Children.Add(anneau);
+        titre.HorizontalAlignment = phrase.HorizontalAlignment = reste.HorizontalAlignment = HorizontalAlignment.Center; phrase.Margin = new Thickness(0, 16, 0, 0); phrase.TextAlignment = TextAlignment.Center; phrase.MaxWidth = 1100; phrase.TextWrapping = TextWrapping.Wrap;
+        aides = U.Ligne(12, U.Pilule(lib.Aides.Ok, "Réessayer"), U.Pilule(lib.Aides.Retour, "Continuer sans")); aides.HorizontalAlignment = HorizontalAlignment.Center; aides.Margin = new Thickness(0, 60, 0, 0); aides.Opacity = 0;
+        aides.Transitions = new Transitions { Mouvement.Opacite(0.5, new CubicEaseInOut()) };
+        var milieu = U.Ligne(120, U.Colonne(30, centre, reste), liste); milieu.HorizontalAlignment = HorizontalAlignment.Center; milieu.Margin = new Thickness(0, 84, 0, 0);
+        contenu = U.Colonne(0, titre, phrase, milieu, aides); contenu.VerticalAlignment = VerticalAlignment.Center; contenu.HorizontalAlignment = HorizontalAlignment.Center;
+        contenu.Opacity = 0; contenu.RenderTransform = Mouvement.Deplace(0, 18);
+        contenu.Transitions = new Transitions { Mouvement.Opacite(0.7, new SplineEasing(0.2, 0.8, 0.2, 1)), Mouvement.Transfo(0.7, new SplineEasing(0.2, 0.8, 0.2, 1)) };
+        Children.Add(contenu);
+        Opacity = 0; Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) };
+        PointerPressed += (_, e) => e.Handled = true;   // rien dessous n'est cliquable
+        AttachedToVisualTree += (_, _) => Mouvement.Apres(() => { Opacity = 1; contenu.Opacity = 1; contenu.RenderTransform = Mouvement.Deplace(0, 0); });
+        seconde.Tick += (_, _) => Restant(); seconde.Start(); DetachedFromVisualTree += (_, _) => seconde.Stop();
+    }
+    /// La bibliothèque revient en fondu
+    public void Partir() { IsHitTestVisible = false; Transitions = new Transitions { Mouvement.Opacite(0.6, new CubicEaseInOut()) }; Opacity = 0; }
+
+    public void Mettre(Tache t)
+    {
+        tache = t;
+        bool echec = t.Erreur != null, fini = t.Fini && !echec;
+        var i = Array.FindLastIndex(groupes, g => t.Etape.StartsWith(g.cle)); if (i > rang) rang = i;   // une étape sans titre ne fait pas reculer
+        var fr = fini ? 1 : Math.Min(0.995, Math.Max(0, t.Fraction ?? 0));
+        anneau.Fraction = Math.Max(0.01, fr); anneau.Couleur = echec ? new SolidColorBrush(Icones.Orange) : Brushes.White;
+        nombre.Text = ((int)(fr * 100)).ToString();
+        var nouvelle = $"{rang}{echec}{fini}";
+        if (nouvelle != cle)
+        {
+            cle = nouvelle;
+            titre.Text = echec ? "INSTALLATION INTERROMPUE" : fini ? "MOTEURS INSTALLÉS" : "INSTALLATION DES MOTEURS";
+            phrase.Text = echec ? "Vérifie la connexion à Internet, puis réessaie." : "Home installe le moteur des jeux Switch : ce qui fait tourner tes jeux sur ce PC.";
+            aides.Opacity = echec ? 1 : 0;
+            while (centre.Children.Count > 1) centre.Children.RemoveAt(1);
+            if (echec) centre.Children.Add(U.Icone("exclamationmark", 110, new SolidColorBrush(Icones.Orange)));
+            else if (fini) centre.Children.Add(U.Icone("checkmark", 110));
+            else centre.Children.Add(Avec(U.Ligne(4, nombre, Avec(U.Texte("%", 42, FontWeight.SemiBold, 0.5), p => { p.VerticalAlignment = VerticalAlignment.Bottom; p.Margin = new Thickness(0, 0, 0, 24); })), l => { l.HorizontalAlignment = HorizontalAlignment.Center; l.VerticalAlignment = VerticalAlignment.Center; }));
+            liste.Children.Clear(); barre = null;
+            for (var g = 0; g < groupes.Length; g++)
+            {
+                bool fait = fini || rang > g, dedans = !fini && rang == g, enCours = dedans && !echec, rate = dedans && echec;
+                // coche pleine = fait, cercle pointillé = en cours, cercle pâle = à venir
+                Control pastille = fait ? new Panel { Children = { new Ellipse { Width = 34, Height = 34, Fill = Brushes.White }, U.Icone("checkmark", 18, Brushes.Black) } }
+                    : rate ? new Panel { Children = { new Ellipse { Width = 34, Height = 34, Fill = new SolidColorBrush(Icones.Orange) }, U.Icone("exclamationmark", 18, Brushes.Black) } }
+                    : new Ellipse { Width = 34, Height = 34, Stroke = U.Blanc(enCours ? 1 : 0.28), StrokeThickness = 3, StrokeDashArray = enCours ? [0.3, 2.2] : null, StrokeLineCap = PenLineCap.Round };
+                pastille.Width = 40; pastille.VerticalAlignment = VerticalAlignment.Top; pastille.Margin = new Thickness(0, 2, 0, 0);
+                var nom = new TextBlock { Text = groupes[g].nom, FontSize = 32, FontWeight = enCours || rate ? FontWeight.Bold : FontWeight.SemiBold, FontFamily = U.Police, Foreground = rate ? new SolidColorBrush(Icones.Orange) : Brushes.White, Opacity = fait ? 0.6 : enCours || rate ? 1 : 0.32 };
+                var textes = U.Colonne(5, nom);
+                if (enCours)
+                {   // le détail du titre en cours : quelle étape, laquelle sur combien, et une barre fine quand l'avancement réel est connu
+                    textes.Children.Add(U.Texte($"{groupes[g].etape} · 1 sur 1", 19, FontWeight.Medium, 0.55));
+                    if (g == 0)
+                    {
+                        barre = new Border { Width = 420, Height = 6, Background = Brushes.White, HorizontalAlignment = HorizontalAlignment.Left, RenderTransformOrigin = new RelativePoint(0, 0.5, RelativeUnit.Relative), RenderTransform = Mouvement.Echelle(0.015, 1) };
+                        barre.Transitions = new Transitions { Mouvement.Transfo(0.6, new CubicEaseInOut()) };
+                        textes.Children.Add(new Border { Width = 420, Height = 6, CornerRadius = new CornerRadius(3), ClipToBounds = true, Background = U.Blanc(0.14), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), Child = barre });
+                    }
+                }
+                if (rate && t.Erreur is { } raison) textes.Children.Add(new TextBlock { Text = raison, FontSize = 19, FontWeight = FontWeight.Medium, FontFamily = U.Police, Foreground = new SolidColorBrush(Icones.Orange), MaxWidth = 460, MaxLines = 3, TextWrapping = TextWrapping.Wrap });
+                liste.Children.Add(U.Ligne(20, pastille, textes));
+            }
+        }
+        // la barre suit le téléchargement lui-même (Moteur.Preparer compte 90 % de la tâche pour lui)
+        if (barre != null && t.Fraction is { } f) barre.RenderTransform = Mouvement.Echelle(Math.Clamp(f / 0.9, 0.015, 1), 1);
+        Restant();
+    }
+    void Restant()
+    {
+        if (tache is not { } t) return;
+        if (t.Erreur != null) { reste.Text = " "; return; }
+        if (t.Fini) { reste.Text = "Tout est prêt"; return; }
+        var passe = (DateTime.Now - debut).TotalSeconds;
+        if (t.Fraction is not { } f || f < 0.02 || passe < 8) { reste.Text = "Estimation du temps restant…"; return; }
+        var r = passe * (1 - f) / f; reste.Text = r < 10 ? "Presque fini" : r < 60 ? "Moins d'une minute" : $"Environ {(int)Math.Ceiling(r / 60)} min";
+    }
+    static T Avec<T>(T c, Action<T> a) { a(c); return c; }
+}
+
 /// L'écran : le fond, la bibliothèque (onglets, nom du jeu, pile de rangées, aides), puis par-dessus les menus, la tâche, « en cours de
 /// jeu », les messages, la saisie et l'écran de démarrage (`Screen` sur Mac).
 public sealed class Ecran : Panel
@@ -743,7 +846,8 @@ public sealed class Ecran : Panel
         toast.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()), Mouvement.Transfo(0.4, new SplineEasing(0.2, 0.8, 0.2, 1)) };
         pastille.Clic = () => { if (lib.Menu == null && lib.EnCours == null) lib.OuvrirTacheMenu(); };
         coucheJeu.Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) }; coucheSaisie.Transitions = new Transitions { Mouvement.Opacite(0.2) };
-        Children.AddRange([scene, voile, coucheBienvenue, coucheMenu, pastille, coucheJeu, toast, coucheSaisie, coucheOuverture]);
+        // l'installation recouvre tout, messages compris : seuls une saisie et l'écran de démarrage passent devant
+        Children.AddRange([scene, voile, coucheBienvenue, coucheMenu, pastille, coucheJeu, toast, coucheInstallation, coucheSaisie, coucheOuverture]);
         lib.Change += Rafraichir;
         lib.PasserOuverture = () => ouverture?.Passer() ?? false;
         horloge.Tick += (_, _) => Seconde(); horloge.Start();
@@ -775,7 +879,18 @@ public sealed class Ecran : Panel
         Haut(); Infos(j, art); Pile(); Aides(j);
         Menus();
         Voiler(lib.Menu != null || lib.Saisie != null);
-        Jeu(); pastille.Mettre(lib.Tache); Toast(); MontrerSaisie(); Bienvenue();
+        Jeu(); pastille.Mettre(lib.Tache); Toast(); MontrerSaisie(); Bienvenue(); Installation();
+    }
+    /// L'installation du moteur : tout l'écran tant qu'elle dure ; à la fin la bibliothèque revient en fondu
+    InstallationVue? installation; readonly Panel coucheInstallation = new();
+    void Installation()
+    {
+        if (lib.Installation)
+        {
+            if (installation == null) { installation = new InstallationVue(lib); coucheInstallation.Children.Add(installation); }
+            if (lib.Tache is { } t) installation.Mettre(t);
+        }
+        else if (installation is { } i) { installation = null; i.Partir(); Mouvement.Dans(0.7, () => coucheInstallation.Children.Remove(i)); }
     }
     /// L'accueil du premier lancement : posé dès le début, il est là quand l'écran de démarrage s'efface ; il part quand le choix est fait
     BienvenueVue? bienvenue;
@@ -783,7 +898,7 @@ public sealed class Ecran : Panel
     {
         if (lib.Bienvenue && bienvenue == null) { bienvenue = new BienvenueVue(lib); coucheBienvenue.Children.Add(bienvenue); }   // tout de suite, sous l'écran de démarrage
         if (!lib.Bienvenue && bienvenue is { } b) { bienvenue = null; b.IsHitTestVisible = false; b.Opacity = 0; Mouvement.Dans(0.5, () => coucheBienvenue.Children.Remove(b)); }
-        bienvenue?.Viser(lib.BienvenueIndex);
+        bienvenue?.Viser(lib.BienvenueIndex); bienvenue?.Effacer(lib.BienvenueFige && lib.Menu != null);
     }
 
     /// La bibliothèque derrière un menu est floue. Pas de flou en direct (il serait refait à chaque image tant que le menu bouge) : une

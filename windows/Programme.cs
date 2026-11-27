@@ -62,7 +62,7 @@ sealed class Fenetre : Window
             Journal.Ecrire($"Home {Bibliotheque.Version} démarre ({Environment.OSVersion})");
             manette = new Manette(lib, () => IsActive);
             if (Icones.Inconnues().ToList() is { Count: > 0 } inconnues) Journal.Ecrire("icônes inconnues : " + string.Join(", ", inconnues));
-            if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
+            if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null && lib.Config.Ouverture) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
             Scenario();
             // le tout premier lancement : « Bienvenue », que veux-tu faire avec Home ? (pas pendant une capture ni en démonstration)
@@ -99,7 +99,7 @@ sealed class Fenetre : Window
         var etapes = (Environment.GetEnvironmentVariable("HOME_SCENARIO") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
         var capture = Environment.GetEnvironmentVariable("HOME_CAPTURE");
         if (etapes.Length == 0 && capture == null) return;
-        await Task.Delay(capture != null ? 7000 : 1500);   // le temps que les images arrivent
+        await Task.Delay(capture != null ? 7000 : 1800);   // le temps que les images arrivent
         foreach (var s in etapes)
         {
             switch (s)
@@ -123,6 +123,8 @@ sealed class Fenetre : Window
                 case "place": MenusSwitch.LibererPlace(lib); break;
                 case "saisie": lib.Demander("Nouveau nom", "Au clavier", _ => { }); break;
                 case "tache": lib.Tache = new Tache { Titre = "Construction de Zelda", Etape = "Recompilation du code…" }; lib.Dire("Bibliothèque actualisée"); break;
+                case "installation": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur… 21 Mo sur 58", Fraction = 0.33 }; lib.Signaler(); break;
+                case "installationechec": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur…", Fraction = 0.33, Fini = true, Erreur = "la liste des versions de ScarletNX n'a pas pu être lue" }; lib.Signaler(); break;
                 case "echec": { var te = new Tache { Titre = "Construction de Zelda", Etape = "Échec", Erreur = "Le fichier du jeu n'est plus là", Fini = true }; lib.Tache = te; lib.FinTache(te); } break;
                 default: lib.Nav(s); break;
             }
