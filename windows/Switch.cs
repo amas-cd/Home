@@ -251,10 +251,19 @@ public static class Construction
             var exe = await Moteur.Preparer(t, lib.Signaler);
             t.Etape = "Lecture du jeu…"; t.Fraction = null; lib.Signaler();
             var avant = Directory.Exists(Recompiles) ? Directory.GetDirectories(Recompiles).ToHashSet() : new HashSet<string>();
+            // Une reprise après un échec survenu une fois le jeu construit (la pose du mod, par exemple) : le jeu est déjà là, fait
+            // pendant ce chantier. On ne relance pas ScarletNX dessus (il refuse d'extraire sur un jeu fini : « Extraction failed ») ;
+            // on reprend à l'étape du mod.
+            try
+            {
+                if (Trouvailles.Lire(c.Dump).titre is { Length: > 0 } titre && Directory.GetDirectories(Recompiles).FirstOrDefault(d => Path.GetFileName(d).Equals(titre, StringComparison.OrdinalIgnoreCase)) is { } fait
+                    && Pret(fait) && Directory.GetLastWriteTime(fait) >= c.Debut.AddMinutes(-1)) { dossier = fait; Journal.Ecrire($"construction de {c.Titre} : le jeu est déjà construit, reprise à l'étape du mod"); }
+            }
+            catch { }
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Moteur.Donnees };
             foreach (var a in Arguments(c)) psi.ArgumentList.Add(a);
             string derniere = ""; var verrou = new object(); DateTime vu = DateTime.MinValue;
-            await using (var journal = new StreamWriter(c.Journal, false, Encoding.UTF8) { AutoFlush = true })
+            if (dossier == null) await using (var journal = new StreamWriter(c.Journal, false, Encoding.UTF8) { AutoFlush = true })
             {
                 journal.WriteLine($"{DateTime.Now:dd/MM/yyyy HH:mm:ss}  ScarletNX {Moteur.Version}  " + string.Join(' ', psi.ArgumentList.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)));
                 void Ligne(string? l)
@@ -277,7 +286,7 @@ public static class Construction
                 await p.WaitForExitAsync(); p.WaitForExit();
                 processus = null;
                 if (abandon) throw new OperationCanceledException();
-                if (p.ExitCode != 0) throw new InvalidOperationException(derniere != "" ? derniere : $"ScarletNX s'est arrêté (code {p.ExitCode})");
+                if (p.ExitCode != 0) { journal.Flush(); throw new InvalidOperationException(Raison(c.Journal, derniere != "" ? derniere : $"ScarletNX s'est arrêté (code {p.ExitCode})")); }
             }
             dossier ??= Directory.GetDirectories(Recompiles).Where(d => !avant.Contains(d)).OrderByDescending(Directory.GetLastWriteTime).FirstOrDefault()
                 ?? Directory.GetDirectories(Recompiles).OrderByDescending(Directory.GetLastWriteTime).FirstOrDefault();
@@ -317,6 +326,24 @@ public static class Construction
         lib.FinTache(t);
     }
     /// Lance ScarletNX et attend la fin, ce qu'il écrit ajouté au journal : son code de sortie et sa dernière ligne
+    /// Pourquoi ScarletNX s'est arrêté. Sa dernière ligne est souvent générale (« Extraction failed (exit status 1). You can run the
+    /// same command again. ») : la vraie raison est écrite juste avant, par l'étape qui a échoué. On rend la dernière ligne du journal
+    /// qui parle d'une erreur sans être cette phrase générale ; à défaut, la dernière ligne telle quelle.
+    static string Raison(string journal, string derniere)
+    {
+        try
+        {
+            string[] mots = ["error", "failed", "fail:", "cannot", "can't", "could not", "couldn't", "missing", "not found", "no such", "invalid", "denied", "not enough", "no space", "corrupt", "wrong", "unsupported", "needs "];
+            using var f = new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.ReadWrite); using var r = new StreamReader(f);
+            var lignes = r.ReadToEnd().Split('\n').Select(l => l.Trim()).Where(l => l != "").TakeLast(400).ToList();
+            bool Generale(string l) => l.Contains("You can run the same command", StringComparison.OrdinalIgnoreCase) || l.Contains("exit status", StringComparison.OrdinalIgnoreCase);
+            var precise = lignes.LastOrDefault(l => !Generale(l) && mots.Any(m => l.Contains(m, StringComparison.OrdinalIgnoreCase)));
+            if (precise == null) return derniere;
+            precise = System.Text.RegularExpressions.Regex.Replace(precise, @"^scarletnx(\.exe)?:\s*", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            return Generale(derniere) ? precise : derniere;
+        }
+        catch { return derniere; }
+    }
     static async Task<(int code, string derniere)> Executer(string exe, string[] arguments, string journal)
     {
         var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Moteur.Donnees };
