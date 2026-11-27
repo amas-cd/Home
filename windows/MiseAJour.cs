@@ -59,7 +59,7 @@ public static class MiseAJour
         {
             try { File.Delete(setup); } catch { }
             t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire("mise à jour de Home : " + e); lib.Signaler();
-            _ = Task.Delay(6000).ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
+            lib.FinTache(t);
         }
     }
 }

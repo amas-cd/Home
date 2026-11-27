@@ -62,7 +62,9 @@ public sealed class Menu
 /// Une question posée au clavier (recherche, clé SteamGridDB)
 public sealed class Saisie { public string Titre = ""; public string? Aide; public string Texte = ""; public Action<string> Valider = _ => { }; }
 /// Une tâche de fond (construction d'un jeu, mise à jour de Home) : son étape, sa progression
-public sealed class Tache { public string Titre = ""; public string Etape = "Démarrage…"; public double? Fraction; public bool Fini; public string? Erreur; }
+public sealed class Tache { public string Titre = ""; public string Etape = "Démarrage…"; public double? Fraction; public bool Fini; public string? Erreur;
+    public string? Journal; public Action? Arreter;   // le journal à montrer dans l'Explorateur ; de quoi arrêter la tâche, si elle sait s'arrêter
+}
 
 /// Une touche affichée dans les aides : lettre de la manette (A, B…) ou touche du clavier
 public sealed record Aides(string Ok, string Retour, string Options, string Plus, string Cat, string? Nom)

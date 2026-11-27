@@ -42,7 +42,8 @@ public sealed class Bibliotheque
     /// Les jeux de la catégorie choisie : le dernier joué d'abord, puis par nom
     public List<Jeu> Visibles => JeuxDe(IndexCategorie);
     public List<Jeu> JeuxDe(int categorie) => Jeux.Where(j => !Config.Masques.Contains(j.Id) && (categorie == 0 || j.Categorie == Categories.ElementAtOrDefault(categorie)))
-        .OrderByDescending(j => Stats.TryGetValue(j.Id, out var s) ? s.DernierePartie ?? DateTime.MinValue : DateTime.MinValue).ThenBy(j => j.Nom, StringComparer.CurrentCultureIgnoreCase).ToList();
+        .OrderByDescending(j => j.EnConstruction)   // les chantiers en tête : on voit tout de suite ce qui se construit
+        .ThenByDescending(j => Stats.TryGetValue(j.Id, out var s) ? s.DernierePartie ?? DateTime.MinValue : DateTime.MinValue).ThenBy(j => j.Nom, StringComparer.CurrentCultureIgnoreCase).ToList();
     public Jeu? Courant { get { var v = Visibles; return Selection < v.Count ? v[Selection] : null; } }
     /// D'où vient un jeu, pour l'afficher à côté de son nom : sa console, ou sa boutique. L'icône est un logo (« logo:switch »,
     /// « logo:steam », « logo:epic » : les images de app/logos) ou un symbole.
@@ -164,11 +165,37 @@ public sealed class Bibliotheque
     public void Dire(string texte)
     {
         Toast = texte; Signaler();
-        _ = Task.Delay(3500).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (Toast == texte) { Toast = null; Signaler(); } }));
+        _ = Task.Delay(3000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (Toast == texte) { Toast = null; Signaler(); } }));
     }
     /// `aide` : l'exemple écrit en gris dans le champ vide ; `texte` : ce que le champ contient déjà (le nom actuel, pour renommer)
     public void Demander(string titre, string? aide, Action<string> valider, string texte = "") { Saisie = new Saisie { Titre = titre, Aide = aide, Texte = texte, Valider = valider }; Signaler(); }
     /// Ferme la carte d'une tâche finie ou en échec (B / Échap) ; une tâche en cours reste affichée
+    /// La fin d'une tâche. Réussie : sa carte s'en va seule au bout de 8 s. Échouée : son menu s'ouvre tout seul et la carte reste
+    /// jusqu'à « Fermer » ou B.
+    public void FinTache(Tache t)
+    {
+        if (t.Erreur == null) { Son("valider"); _ = Task.Delay(8000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (Tache == t) { Tache = null; Signaler(); } })); return; }
+        Son("retour"); if (Tache == t && EnCours == null && Menu == null && !Bienvenue) OuvrirTacheMenu();
+    }
+    /// Le menu de la carte d'une tâche (openTacheMenu sur Mac)
+    public void OuvrirTacheMenu()
+    {
+        if (Tache is not { } t) return;
+        var m = new Menu { Titre = t.Titre, SousTitre = t.Erreur ?? t.Etape, Symbole = t.Erreur != null ? "exclamationmark" : "hammer" };
+        var journal = t.Journal != null && File.Exists(t.Journal) ? t.Journal : null;
+        if (t.Fini)
+        {
+            if (journal != null) m.Elements.Add(new("Ouvrir dans le dossier", "folder", () => { FermerMenus(); Systeme.Montrer(journal); }, Path.GetFileName(journal)));
+            m.Elements.Add(new("Fermer", "xmark", () => { FermerMenus(); if (Tache == t) { Tache = null; Signaler(); } }) { Teinte = Icones.Gris });
+        }
+        else
+        {
+            m.Elements.Add(new("Continuer", "play.fill", FermerMenus, t.Etape));
+            if (journal != null) m.Elements.Add(new("Ouvrir le journal dans le dossier", "folder", () => { FermerMenus(); Systeme.Montrer(journal); }, Path.GetFileName(journal)));
+            if (t.Arreter is { } arreter) m.Elements.Add(new("Arrêter", "stop", () => { FermerMenus(); arreter(); }) { Destructif = true });
+        }
+        Ouvrir(m);
+    }
     public bool FermerTache() { if (Tache is not { Fini: true }) return false; Son("retour"); Tache = null; Signaler(); return true; }
     public void OuvrirQuitter()
     {

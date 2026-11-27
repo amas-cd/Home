@@ -123,6 +123,7 @@ sealed class Fenetre : Window
                 case "place": MenusSwitch.LibererPlace(lib); break;
                 case "saisie": lib.Demander("Nouveau nom", "Au clavier", _ => { }); break;
                 case "tache": lib.Tache = new Tache { Titre = "Construction de Zelda", Etape = "Recompilation du code…" }; lib.Dire("Bibliothèque actualisée"); break;
+                case "echec": { var te = new Tache { Titre = "Construction de Zelda", Etape = "Échec", Erreur = "Le fichier du jeu n'est plus là", Fini = true }; lib.Tache = te; lib.FinTache(te); } break;
                 default: lib.Nav(s); break;
             }
             await Task.Delay(1200);

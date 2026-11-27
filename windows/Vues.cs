@@ -649,12 +649,13 @@ sealed class PastilleTache : Border
 {
     readonly Anneau anneau = new() { Width = 44, Height = 44, Epaisseur = 4, Piste = U.Blanc(0.16), RenderTransformOrigin = U.Centre };
     readonly Panel symbole = new() { Width = 44, Height = 44 }; readonly TextBlock titre, etape, pourcent;
-    Tache? montree; CancellationTokenSource? tourne; string etat = "";
+    Tache? montree; CancellationTokenSource? tourne; string etat = ""; public Action? Clic;
     public PastilleTache()
     {
         Height = 68; CornerRadius = new CornerRadius(34); Padding = new Thickness(10, 0, 22, 0); Background = new SolidColorBrush(Color.FromArgb(215, 84, 84, 88)); BorderThickness = new Thickness(1); BorderBrush = U.Blanc(0.16);
         BoxShadow = BoxShadows.Parse("0 10 22 0 #66000000"); HorizontalAlignment = HorizontalAlignment.Right; VerticalAlignment = VerticalAlignment.Bottom; Margin = new Thickness(0, 0, 84, 30);
-        Opacity = 0; IsHitTestVisible = false; RenderTransform = Mouvement.Deplace(0, 16);
+        Opacity = 0; IsHitTestVisible = false; RenderTransform = Mouvement.Deplace(0, 16); Cursor = new Cursor(StandardCursorType.Hand);
+        PointerPressed += (_, e) => { e.Handled = true; Clic?.Invoke(); };   // la carte ouvre son menu : avancement, journal, arrêter
         anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.9), Easing = new CubicEaseInOut() } };
         titre = U.Titre("", 13, 1); etape = U.Texte("", 14, FontWeight.Medium, 0.7); etape.MaxWidth = 380; etape.TextTrimming = TextTrimming.CharacterEllipsis; titre.MaxWidth = 380;
         pourcent = new TextBlock { FontSize = 20, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
@@ -665,12 +666,13 @@ sealed class PastilleTache : Border
     {
         if (t == null)
         {
+            IsHitTestVisible = false;
             if (montree != null) { montree = null; Transitions = new Transitions { Mouvement.Opacite(0.5, new CubicEaseInOut()) }; Opacity = 0; }   // elle part en fondu, sans bouger
             return;
         }
         if (t != montree)
         {   // une nouvelle tâche : la pastille arrive en montant
-            montree = t; etat = "";
+            montree = t; etat = ""; IsHitTestVisible = true;
             Mouvement.SansAnimer(this, () => { Opacity = 0; RenderTransform = Mouvement.Deplace(0, 16); });
             Mouvement.SansAnimer(anneau, () => anneau.Fraction = 0);
             Transitions = new Transitions { Mouvement.Opacite(0.6), Mouvement.Transfo(0.6, new SplineEasing(0.2, 0.9, 0.2, 1)) };
@@ -714,8 +716,8 @@ public sealed class Ecran : Panel
     readonly StackPanel aides = new() { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(84, 0, 84, 40) };
     readonly Panel coucheMenu = new(), coucheJeu = new() { Opacity = 0, IsHitTestVisible = false }, coucheSaisie = new() { Opacity = 0, IsHitTestVisible = false }, coucheBienvenue = new(), coucheOuverture = new();
     readonly PastilleTache pastille = new();
-    readonly Border toast = new() { Opacity = 0, IsHitTestVisible = false, Padding = new Thickness(20, 12), CornerRadius = new CornerRadius(24), Background = U.Noir(0.6), BorderBrush = U.Blanc(0.16), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 130) };
-    readonly TextBlock texteToast = U.Texte("", 18, FontWeight.Medium);
+    readonly Border toast = new() { Opacity = 0, IsHitTestVisible = false, Padding = new Thickness(20, 12), CornerRadius = new CornerRadius(24), Background = U.Noir(0.6), BorderBrush = U.Blanc(0.16), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 84, 30), MaxWidth = 640, MinHeight = 52 };
+    readonly TextBlock texteToast = U.Texte("", 16, FontWeight.SemiBold);
     readonly DispatcherTimer horloge = new() { Interval = TimeSpan.FromSeconds(1) };
     readonly List<RangeeJeux> rangees = new(); readonly List<int?> ecarts = new(); readonly List<(TextBlock texte, Border trait)> vuesOnglets = new();
     readonly List<CancellationTokenSource> boucles = new();
@@ -734,7 +736,12 @@ public sealed class Ecran : Panel
         pile.Opacity = 0; pile.RenderTransform = Mouvement.Deplace(0, 36);
         pile.Transitions = new Transitions { Mouvement.Transfo(0.45, Mouvement.Glisse), Mouvement.Opacite(0.45, Mouvement.Glisse) };
         pile.AttachedToVisualTree += (_, _) => Mouvement.Dans(0.1, () => { pile.Opacity = 1; pile.RenderTransform = Mouvement.Deplace(0, 0); });
-        toast.Child = texteToast; toast.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()) };
+        // le message : en bas à droite, un point blanc devant, au-dessus de la carte d'une tâche quand il y en a une
+        texteToast.TextWrapping = TextWrapping.Wrap; texteToast.MaxLines = 2; texteToast.MaxWidth = 570; texteToast.VerticalAlignment = VerticalAlignment.Center;
+        toast.Padding = new Thickness(22, 8); toast.CornerRadius = new CornerRadius(26);
+        toast.Child = U.Ligne(12, new Ellipse { Width = 8, Height = 8, Fill = Brushes.White, VerticalAlignment = VerticalAlignment.Center }, texteToast);
+        toast.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()), Mouvement.Transfo(0.4, new SplineEasing(0.2, 0.8, 0.2, 1)) };
+        pastille.Clic = () => { if (lib.Menu == null && lib.EnCours == null) lib.OuvrirTacheMenu(); };
         coucheJeu.Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) }; coucheSaisie.Transitions = new Transitions { Mouvement.Opacite(0.2) };
         Children.AddRange([scene, voile, coucheBienvenue, coucheMenu, pastille, coucheJeu, toast, coucheSaisie, coucheOuverture]);
         lib.Change += Rafraichir;
@@ -865,7 +872,7 @@ public sealed class Ecran : Panel
             else bloc.Children.Add(U.Titre(j.Nom, 52, 1, place: 1500));
             var options = new Border { Width = 54, Height = 54, CornerRadius = new CornerRadius(27), Background = U.Noir(0.4), BorderBrush = U.Blanc(0.24), BorderThickness = new Thickness(1.5), Child = U.Icone("ellipsis", 22), VerticalAlignment = VerticalAlignment.Center };
             options.PointerPressed += (_, _) => { if (lib.Menu == null && lib.EnCours == null) lib.OuvrirOptions(); };
-            bloc.Children.Add(Avec(U.Ligne(16, Jouer("Jouer", lib.Lancer), options), l => l.Margin = new Thickness(0, 14, 0, 0)));
+            bloc.Children.Add(Avec(U.Ligne(16, Jouer(j.EnConstruction ? "Construction" : "Jouer", lib.Lancer), options), l => l.Margin = new Thickness(0, 14, 0, 0)));
         }
         // un autre jeu : son nom arrive en glissant de 28 ; le même jeu dont le logo vient d'arriver : un simple fondu
         var id = j?.Id ?? "+"; var autre = id != jeuInfos; var premier = jeuInfos == "?"; jeuInfos = id;
@@ -911,10 +918,10 @@ public sealed class Ecran : Panel
 
     void Aides(Jeu? j)
     {
-        var cle = lib.Aides.Ok + lib.Aides.Cat + (j == null);
+        var cle = lib.Aides.Ok + lib.Aides.Cat + (j == null) + (j?.EnConstruction == true);
         if (cle == cleAides) return;
         cleAides = cle; aides.Children.Clear();
-        aides.Children.Add(U.Pilule(lib.Aides.Ok, j == null ? "Ajouter" : "Jouer"));
+        aides.Children.Add(U.Pilule(lib.Aides.Ok, j == null ? "Ajouter" : j.EnConstruction ? "Construction" : "Jouer"));
         if (j != null) aides.Children.Add(U.Pilule(lib.Aides.Options, "Options"));
         aides.Children.Add(U.Pilule(lib.Aides.Plus, "Menu")); aides.Children.Add(U.Pilule(lib.Aides.Cat, "Catégorie"));
     }
@@ -979,7 +986,9 @@ public sealed class Ecran : Panel
 
     void Toast()
     {
-        if (lib.Toast is { } t) { texteToast.Text = t; toast.Opacity = 1; } else toast.Opacity = 0;   // le texte reste pendant qu'il s'efface
+        var haut = lib.Tache != null ? -82 : 0;   // la carte de la tâche fait 68 de haut
+        if (lib.Toast is { } t) { texteToast.Text = t; toast.Opacity = 1; toast.RenderTransform = Mouvement.Deplace(0, haut); }
+        else if (toast.Opacity != 0) { toast.Opacity = 0; }   // le texte reste pendant qu'il s'efface
     }
 
     /// Une question au clavier (recherche, clé, nouveau nom) : Entrée valide, Échap annule

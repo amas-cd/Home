@@ -120,6 +120,12 @@ public static class Systeme
         var op = new Operation { Quoi = 3, De = chemin + "\0\0", Drapeaux = 0x40 | 0x10 | 0x4 | 0x400 };   // FO_DELETE ; ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI
         return SHFileOperation(ref op) == 0 && !op.Annule;
     }
+    /// Montre un fichier dans l'Explorateur, sélectionné
+    public static void Montrer(string fichier)
+    {
+        try { if (OperatingSystem.IsWindows()) System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{fichier}\""); }
+        catch (Exception e) { Journal.Ecrire($"ouverture de {fichier} : {e.Message}"); }
+    }
     public static void Ouvrir(string cible)
     {
         try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(cible) { UseShellExecute = true }); }

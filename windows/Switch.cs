@@ -140,6 +140,7 @@ public sealed class Chantier
     public List<string> Ajouts { get; set; } = new();   // mises à jour et DLC
     public string? Mod { get; set; }       // un mod à installer dès que le jeu est construit (dossier ou .zip)
     public string? Serveur { get; set; }   // l'adresse du serveur de ce mod, s'il joue en ligne
+    public string? Raison { get; set; }    // pourquoi la construction s'est arrêtée, pour le dire sur sa tuile
     public string Journal { get; set; } = ""; public DateTime Debut { get; set; } = DateTime.Now;
 }
 
@@ -150,7 +151,10 @@ public static class Construction
     static void Noter(List<Chantier> c) => Json.Ecrire(Fichier, c);
     /// Le chantier qui tourne en ce moment (un seul à la fois : une recompilation prend presque tout le processeur)
     public static string? EnCours { get; private set; }
-    static Process? processus; static bool abandon;
+    static Process? processus; static bool abandon, arret;
+    /// Arrête la construction en cours sans rien jeter : le chantier reste, « Reprendre » repart de là
+    public static void Arreter() { if (processus is { } p) { arret = true; try { p.Kill(true); } catch { } } }
+    static void Garder(Chantier c) { var tous = Chantiers(); var i = tous.FindIndex(x => x.Id == c.Id); if (i >= 0) { tous[i] = c; Noter(tous); } }
     public static string Recompiles => Path.Combine(Moteur.Donnees, "recompiled");
     public static string ClesProd => Path.Combine(Moteur.Donnees, "prod.keys");
     public static string ClesTitres => Path.Combine(Moteur.Donnees, "title.keys");
@@ -223,8 +227,9 @@ public static class Construction
     public static async Task Lancer(Bibliotheque lib, Chantier c)
     {
         if (lib.Tache is { Fini: false }) { lib.Dire("Une autre tâche est en cours : attends qu'elle finisse"); return; }
-        var t = new Tache { Titre = "Construction de " + c.Titre, Etape = "Préparation du moteur…" };
-        lib.Tache = t; EnCours = c.Id; abandon = false; lib.FermerMenus();
+        var t = new Tache { Titre = "Construction de " + c.Titre, Etape = "Préparation du moteur…", Journal = c.Journal, Arreter = Arreter };
+        lib.Tache = t; EnCours = c.Id; abandon = false; arret = false; lib.FermerMenus();
+        if (c.Raison != null) { c.Raison = null; Garder(c); }
         string? dossier = null;
         try
         {
@@ -287,15 +292,17 @@ public static class Construction
         catch (OperationCanceledException)
         {
             Noter(Chantiers().Where(x => x.Id != c.Id).ToList());
-            t.Etape = "Construction abandonnée"; t.Erreur = "Construction abandonnée"; t.Fini = true; EnCours = null; lib.Recharger();
+            t.Etape = "Construction abandonnée"; t.Fini = true;   // voulu : pas une erreur, la carte s'en va seule EnCours = null; lib.Recharger();
         }
         catch (Exception e)
         {
-            // le chantier reste : sa tuile propose « Reprendre »
-            t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire($"construction de {c.Titre} : {e.Message}");
+            // le chantier reste : sa tuile propose « Reprendre », et dit pourquoi il s'est arrêté
+            var raison = arret ? "Construction arrêtée" : e.Message.Length > 160 ? e.Message[..160] : e.Message;
+            t.Erreur = raison; t.Etape = arret ? raison : "Échec : " + raison; t.Fini = true; Journal.Ecrire($"construction de {c.Titre} : {e.Message}");
+            c.Raison = arret ? null : raison; Garder(c);
         }
         EnCours = null; processus = null; lib.Signaler();
-        _ = Task.Delay(8000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
+        lib.FinTache(t);
     }
     /// Lance ScarletNX et attend la fin, ce qu'il écrit ajouté au journal : son code de sortie et sa dernière ligne
     static async Task<(int code, string derniere)> Executer(string exe, string[] arguments, string journal)
@@ -372,7 +379,7 @@ public static class Construction
         try { await Moteur.Preparer(t, lib.Signaler, derniere); t.Etape = "Prêt"; t.Fraction = 1; t.Fini = true; reussi = true; }
         catch (Exception e) { t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire("moteur : " + e.Message); }
         lib.Signaler(); if (reussi) ensuite?.Invoke();
-        _ = Task.Delay(6000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
+        lib.FinTache(t);
     }
 
     /// Recompile le code d'un jeu déjà construit, sans son dump : nécessaire après un changement de mod de code (exefs)
@@ -395,7 +402,7 @@ public static class Construction
         }
         catch (Exception e) { t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire($"recompilation de {j.Nom} : {e.Message}"); }
         lib.Signaler();
-        _ = Task.Delay(8000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
+        lib.FinTache(t);
     }
 }
 
@@ -823,19 +830,16 @@ public static class MenusSwitch
     public static void Chantier(Bibliotheque lib, Jeu j)
     {
         if (Construction.Chantiers().FirstOrDefault(c => c.Id == j.Id) is not { } c) { lib.Recharger(); return; }
-        var m = new Menu { Titre = c.Titre, SousTitre = "En construction", Symbole = "hammer" };
         if (Construction.EnCours == c.Id)
-        {
-            m.Texte = "La construction tourne. Tu peux continuer à te servir de Home ; évite seulement de lancer un jeu pendant ce temps, la recompilation prend presque tout le processeur.";
-            m.Elements.Add(new("Abandonner", "xmark", () => Construction.Abandonner(lib, c), "Arrête la construction et retire la tuile") { Destructif = true });
+        {   // en cours : un seul choix, qui mène au menu de la tâche (Continuer, journal, Arrêter)
+            lib.Ouvrir(new Menu { Titre = c.Titre, SousTitre = "En construction", Symbole = "hammer", Elements = { new("Voir l'avancement", "chart.bar", lib.OuvrirTacheMenu) { Teinte = Icones.Bleu } } });
+            return;
         }
-        else
-        {
-            m.Texte = "La construction s'est arrêtée avant la fin. Elle peut repartir avec ce qui avait été demandé.";
-            m.Elements.Add(new("Reprendre", "play.fill", () => _ = Construction.Lancer(lib, c), "La construction repart de là où elle peut"));
-            m.Elements.Add(new("Abandonner", "xmark", () => Construction.Abandonner(lib, c), "Retire la tuile ; « Libérer de la place » enlève ce qui a été fait") { Destructif = true });
-        }
-        if (File.Exists(c.Journal)) m.Elements.Add(new("Voir le journal", "doc", () => Systeme.Ouvrir(c.Journal), "Ce que ScarletNX a écrit"));
+        // arrêtée : la raison en orange sous le titre, puis reprendre, lire le journal ou abandonner
+        var m = new Menu { Titre = c.Titre, SousTitre = "Construction arrêtée", Symbole = "hammer", Alerte = c.Raison };
+        m.Elements.Add(new("Reprendre", "play.fill", () => _ = Construction.Lancer(lib, c), "La construction repart de là où elle peut") { Teinte = Icones.Vert });
+        if (File.Exists(c.Journal)) m.Elements.Add(new("Voir le journal", "doc", () => Systeme.Ouvrir(c.Journal), "Ce que la construction a écrit") { Teinte = Icones.Gris });
+        m.Elements.Add(new("Abandonner", "trash", () => Construction.Abandonner(lib, c), "Retire la tuile ; « Libérer de la place » enlève ce qui a été fait") { Destructif = true });
         lib.Ouvrir(m);
     }
 
