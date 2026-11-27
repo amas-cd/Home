@@ -166,6 +166,15 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   (`Bibliotheque.AppliquerMode` : « Installation pour : … », ou « tout est déjà installé ») ; « Tes bibliothèques »
   (`AccueilBibliotheques` : sur Windows rien à connecter, Home montre ce que Steam et Epic ont installé). Le choix (`Config.Mode`)
   se change dans Menu → Composants (`OuvrirMode`), qui montre aussi ScarletNX et le met à jour. Pas d'étape « Moteurs » (un seul).
+  L'installation du moteur occupe tout l'écran (`InstallationVue`, `Bibliotheque.Installation`, recopie d'`InstallationView`) : deux
+  grands titres (Téléchargement, Mise en place), Réessayer / Continuer sans après un échec. La bienvenue reste dessous jusqu'à l'écran
+  suivant (`BienvenueFige`) : on ne voit jamais la bibliothèque entre deux écrans.
+- **Comme sur Mac** : haut / bas changent de catégorie, B demande « Quitter Home ? », Options revient d'un niveau, la carte d'une
+  tâche a son menu (`OuvrirTacheMenu`), les catégories à soi (`Config.Categories`, `CategoriesJeux`), les points d'étape de
+  l'assistant (`Menu.Etape`, `Bibliotheque.Pas`), les listes « Quelle mise à jour ? » / « Quels DLC ? » (`MenusSwitch.Proposer`).
+- **ScarletNX, d'après sa documentation** (`docs/user/usage.md`, `settings.md`) : les sauvegardes sont dans `save/` du dossier de
+  données (hors du jeu), sauf `save_layout=game` (`<id>_data/save`) ; `-r recompiled/<id>/<id> --update X.nsp` ajoute une mise à jour
+  ou un DLC à un jeu déjà construit, sans le dump ; `-q` construit sans afficher l'avancement. Pas encore utilisés par Home.
 - **Repères des services** : `U.Repere` et `U.Console` recopient `Symbole` du Mac (console portable, quatre carreaux, bielle,
   écusson). Ce sont des dessins de Home : aucun logo de marque dans le dépôt.
 - **Désinstaller** : un jeu Switch part à la Corbeille. Pour un jeu Steam ou Epic, Home ne supprime rien lui-même : il ouvre la
@@ -209,7 +218,7 @@ dotnet build windows/Home.csproj
 HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=options HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
 ```
 `HOME_DEMO=1` remplit la bibliothèque avec des tuiles d'exemple (aucun jeu n'est là). `HOME_SCENARIO` enchaîne des écrans ou des touches
-(`options`, `plus`, `ajout`, `bienvenue`, `mode`, `modeinconnu`, `enligne`, `maj`, `sur`, `recap`, `mods`, `place`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
+(`options`, `plus`, `ajout`, `bienvenue`, `mode`, `modeinconnu`, `enligne`, `maj`, `sur`, `recap`, `mods`, `place`, `saisie`, `tache`, `echec`, `installation`, `installationechec`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
 la fenêtre puis quitte : lis le PNG. Cette image ne montre ni les flous ni un mouvement en cours : pour les voir, lance sans
 `HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille,
 ScarletNX : aucun jeu ne tourne sur macOS) ne se teste pas sur Mac. Dans un compte rendu, sépare toujours « compilé », « vu à l'écran »

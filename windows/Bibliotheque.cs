@@ -429,7 +429,7 @@ public sealed class Bibliotheque
         m.Elements.Add(new("Apparence", "paintbrush", () => OuvrirApparence(j), "Jaquette, fond, logo et nom"));
         m.Elements.Add(new("Catégorie", "tag", () => OuvrirCategorie(j), j.Categorie));
         if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier), j.Dossier));
-        m.Elements.Add(new("Masquer", "eye.slash", () => { Config.Masques.Add(j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le jeu reste installé ; Menu → Jeux masqués pour le remettre"));
+        m.Elements.Add(new("Masquer ce jeu", "eye.slash", () => { Config.Masques.Add(j.Id); Enregistrer(); FermerMenus(); Recharger(); }, "Le jeu reste installé ; Menu → Jeux masqués pour le remettre"));
         if (j.Origine == Origine.Switch) m.Elements.Add(new("Désinstaller", "trash", () => Ouvrir(new Menu
         {
             Titre = "Désinstaller " + j.Nom + " ?", Symbole = "trash", Retour = OuvrirOptions,
@@ -480,9 +480,9 @@ public sealed class Bibliotheque
             Titre = "Apparence", SousTitre = j.Nom, Symbole = "paintbrush", Retour = OuvrirOptions,
             Elements =
             {
-                new("Changer la jaquette", "photo", () => _ = ChoisirImage(j, "couverture"), "Depuis un fichier image"),
-                new("Changer le fond", "photo.fill", () => _ = ChoisirImage(j, "fond"), "Depuis un fichier image"),
-                new("Changer le logo", "textformat", () => _ = ChoisirImage(j, "logo"), "Depuis un fichier image (PNG transparent)"),
+                new("Jaquette", "photo", () => _ = ChoisirImage(j, "couverture"), "Depuis un fichier image"),
+                new("Fond", "photo.fill", () => _ = ChoisirImage(j, "fond"), "Depuis un fichier image"),
+                new("Logo", "textformat", () => _ = ChoisirImage(j, "logo"), "Depuis un fichier image (PNG transparent)"),
                 new("Rechercher les images", "magnifyingglass", () => RechercherImages(j), SteamGridDB.Cle != null ? "SteamGridDB, boutiques officielles, Steam" : "Boutiques officielles et Steam (sans clé SteamGridDB)"),
                 new("Renommer", "pencil", () => Demander("Nouveau nom", null, n => { Config.Noms[j.Id] = n; Enregistrer(); FermerMenus(); Recharger(); }, texte: j.Nom), j.Nom),
             },
@@ -503,17 +503,18 @@ public sealed class Bibliotheque
 
     public void OuvrirPlus()
     {
-        var m = new Menu { Titre = "Home", SousTitre = "Version " + Version, Symbole = "gear" };
+        var jeux = Jeux.Count(j => !Config.Masques.Contains(j.Id)); var cats = Categories.Count - 1;
+        var m = new Menu { Titre = "Home", SousTitre = $"{jeux} jeu{(jeux > 1 ? "x" : "")} · {cats} catégorie{(cats > 1 ? "s" : "")}", Symbole = "gear" };
         if (MiseAJour.Version is { } nouvelle) m.Elements.Add(new("Mettre à jour Home", "arrow.down.circle", () => _ = MiseAJour.Installer(this), $"{Version} → {nouvelle} · Home se ferme, s'installe et se rouvre"));
         m.Elements.Add(new("Ajouter un jeu", "plus", OuvrirAjout, "Jeux Switch, apps et jeux Windows"));
         m.Elements.Add(new("Actualiser la bibliothèque", "arrow.clockwise", () => { FermerMenus(); Recharger(); Dire("Bibliothèque actualisée"); }, "Relit Steam, Epic Games et les jeux Switch"));
         if (Config.Masques.Count > 0) m.Elements.Add(new("Jeux masqués", "eye", OuvrirMasques, $"{Config.Masques.Count} masqué{(Config.Masques.Count > 1 ? "s" : "")}"));
         // « Nom : état » : la roue montre l'état dans une capsule, à côté du choix visé
-        m.Elements.Add(new("Sons de l'interface : " + (Config.Sons ? "activés" : "coupés"), Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, "Les sons des menus et de la bibliothèque") { Section = "Réglages" });
+        m.Elements.Add(new("Sons de Home : " + (Config.Sons ? "Activés" : "Coupés"), Config.Sons ? "speaker.wave.2" : "speaker.slash", () => { Config.Sons = !Config.Sons; Sons.Actifs = Config.Sons; Enregistrer(); OuvrirPlus(); }, "Les sons des menus et de la bibliothèque") { Section = "Réglages" });
         m.Elements.Add(new("Affichage : " + (Config.Fenetre ? "en fenêtre" : "plein écran"), "rectangle", () => { Config.Fenetre = !Config.Fenetre; Enregistrer(); AppliquerFenetre?.Invoke(); OuvrirPlus(); }, "F11 change aussi"));
         m.Elements.Add(new("Écran de démarrage : " + (Config.Ouverture ? "oui" : "non"), "sparkles", () => { Config.Ouverture = !Config.Ouverture; Enregistrer(); OuvrirPlus(); }, "Le logo et le jingle au lancement de Home"));
-        m.Elements.Add(new("Animations : " + (Config.AnimationsReduites ? "réduites" : "complètes"), "sparkles", () => { Config.AnimationsReduites = !Config.AnimationsReduites; Mouvement.Reduit = Config.AnimationsReduites; Enregistrer(); Reconstruire?.Invoke(); OuvrirPlus(); },
-            "Réduites : les mouvements deviennent un fondu très court"));
+        m.Elements.Add(new("Animations réduites : " + (Config.AnimationsReduites ? "oui" : "non"), "sparkles", () => { Config.AnimationsReduites = !Config.AnimationsReduites; Mouvement.Reduit = Config.AnimationsReduites; Enregistrer(); Reconstruire?.Invoke(); OuvrirPlus(); },
+            "Des fondus courts à la place des mouvements"));
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
         m.Elements.Add(new("Composants", "sparkles", () => OuvrirMode(), Config.Mode switch { "nintendo" => "Jeux Nintendo", "pc" => "Jeux PC", _ => "Jeux Nintendo et jeux PC" }));
@@ -527,7 +528,7 @@ public sealed class Bibliotheque
             if (!OperatingSystem.IsWindows() || Environment.ProcessPath is not { } exe) { Dire("Home ne se redémarre que sur Windows"); return; }
             try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true }); Quitter?.Invoke(); } catch (Exception e) { Journal.Ecrire("redémarrage : " + e.Message); Dire("Home n'a pas pu se relancer"); }
         }, "Home se ferme et se rouvre"));
-        m.Elements.Add(new("Quitter Home", "power", () => Quitter?.Invoke()) { Destructif = true });
+        m.Elements.Add(new("Quitter", "power", () => { FermerMenus(); Son("retour"); _ = Task.Delay(300).ContinueWith(_ => Dispatcher.UIThread.Post(() => Quitter?.Invoke())); }) { Destructif = true });
         Ouvrir(m);
     }
     void OuvrirMasques()
@@ -556,7 +557,7 @@ public sealed class Bibliotheque
     {
         Pas = null;
         int steam = Jeux.Count(j => j.Origine == Origine.Steam), epic = Jeux.Count(j => j.Origine == Origine.Epic);
-        var m = new Menu { Titre = "Ajouter un jeu", Symbole = "plus" };
+        var m = new Menu { Titre = "Ajouter un jeu", SousTitre = "Que veux-tu ajouter ?", Symbole = "plus" };
         if (ModeNintendo) m.Elements.Add(new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir du fichier de ton jeu et de tes clés") { Teinte = Icones.Rouge });
         if (ModePC)
         {
