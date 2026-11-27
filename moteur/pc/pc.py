@@ -28,6 +28,7 @@ compatibilité (moteur/compat/pc.json), avec sa raison et sa source.
   pc.py deconnexion             oublie le compte Epic actif
   pc.py bibliotheque            les jeux du compte, en JSON, avec leur compatibilité
   pc.py installer APP           télécharge un jeu dans <Home>/pc/jeux
+  pc.py oublier APP             le jeu est désinstallé (dossier mis à la Corbeille par Home) : il sort des listes
   pc.py lancer APP [--essai]    lance un jeu (--essai : affiche la commande sans rien lancer, code Epic masqué)
   pc.py ajouter-exe EXE [--nom NOM] [--prefixe DOSSIER]   un jeu déjà installé : son .exe devient une tuile (app « exe:<id> »)
   pc.py setup SETUP --nom NOM   lance un installateur (.exe 32 ou 64 bits, .msi) sur le moteur Rosetta, puis liste ce qu'il a installé
@@ -409,6 +410,19 @@ def cmd_installer(app):
     noter_jeu(app, g.app_title, i.install_path, g.namespace)
     dire(f'done in : {g.app_title} installé dans {i.install_path}')
 
+def cmd_oublier(app):
+    """Home a mis le dossier du jeu à la Corbeille : le jeu sort de jeux.json et, pour un jeu Epic, de la liste de Legendary
+    (sinon « installer » le croirait encore là). Rien n'est supprimé ici."""
+    l = jeux_home(); j = next((x for x in l if x.get('app') == app), None)
+    if not j: echec(f'{app} n\'est pas un jeu installé par Home')
+    ecrire_json(PC / 'jeux.json', [x for x in l if x.get('app') != app])
+    if not app.startswith('exe:'):
+        try:
+            c = coeur(j.get('compte'))
+            if c.get_installed_game(app): c.lgd.remove_installed_game(app)
+        except Exception as e: dire(f'Legendary : {e}')
+    dire(json.dumps({'oublie': app}, ensure_ascii=False))
+
 def cmd_lancer(app, essai=False):
     if app.startswith('exe:'): return cmd_lancer_local(app, essai)
     v = voile_installe()
@@ -646,6 +660,7 @@ def main():
     elif c == 'importer': cmd_importer()
     elif c == 'images' and len(a) == 2: cmd_images(a[1])
     elif c == 'installer' and len(a) == 2: cmd_installer(a[1])
+    elif c == 'oublier' and len(a) == 2: cmd_oublier(a[1])
     elif c == 'lancer' and len(a) >= 2: cmd_lancer(a[1], essai='--essai' in a[2:])
     elif c == 'ajouter-exe' and len(a) >= 2:
         o = a[2:]; cmd_ajouter_exe(a[1], o[o.index('--nom') + 1] if '--nom' in o else None, o[o.index('--prefixe') + 1] if '--prefixe' in o else None)

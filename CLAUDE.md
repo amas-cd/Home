@@ -348,7 +348,7 @@ Décidé avec Anas pour Home autonome (pour lui et ses amis) :
      `preparer-steam.command` installe rustup (cible Intel, dans `<Home>/moteur/.rustup`), clone Obelisk au commit de `moteur/steam/OBELISK-REF`
      et compile tout dans `<Home>/moteur/bin`. Jeux dans `<Home>/pc/steam`. Tuiles `pc:steam:<appid>`, lancées par `steam.command lancer`.
      Pas encore vérifié : un téléchargement et un lancement réels (il faut le compte d'Anas connecté).
-   - Reste : GOG, désinstaller un jeu PC depuis Home, serveurs en ligne.
+   - Reste : GOG, serveurs en ligne. Désinstaller un jeu PC : fait (Plus → Désinstaller ; `pc.py oublier`), pas encore essayé sur un vrai jeu.
      Un jeu Epic 32 bits ou .NET passe par le moteur Rosetta (`lancer_rosetta`) : pas encore essayé avec un vrai jeu.
    - Steam sans Obelisk (étudié, pas fait) : Obelisk fait tourner la vraie bibliothèque `steamclient.dylib` de Valve dans un petit programme
      Rust (`obelisk-steam-host`, interfaces privées figées sur une version) et télécharge avec son propre code Rust (`steam-kit`). Le reprendre

@@ -847,9 +847,9 @@ final class Library: ObservableObject {
             SalonMenuItem(label: "Renommer", icon: "pencil", action: { self.menu = nil; self.rename(g) }),
             SalonMenuItem(label: "Afficher dans le Finder", detail: g.viaHome ? g.url.path : g.url.deletingLastPathComponent().path, icon: "folder.fill", action: { self.menu = nil; self.reveal(g) }),
             SalonMenuItem(label: "Masquer ce jeu", icon: "eye.slash", destructive: true, action: { self.menu = nil; self.hide(g) }),
-        ] + (g.pc ? [SalonMenuItem]() : [
-            SalonMenuItem(label: "Désinstaller", detail: "Les sauvegardes restent", icon: "trash.fill", destructive: true, action: { self.openDesinstaller(g) }),
-        ]), hero: "ellipsis.circle.fill", back: { self.menu = self.optionsMenu(g) })
+        ] + [
+            SalonMenuItem(label: "Désinstaller", detail: "Les sauvegardes restent", icon: "trash.fill", destructive: true, action: { if g.pc { self.openDesinstallerPC(g) } else { self.openDesinstaller(g) } }),
+        ], hero: "ellipsis.circle.fill", back: { self.menu = self.optionsMenu(g) })
     }
 
     // MARK: Désinstaller : l'app, sa construction, ses caches, journaux, réglages, mods et illustrations vont à la corbeille ; les sauvegardes restent
@@ -942,6 +942,44 @@ final class Library: ObservableObject {
         saveConfig(); stats[g.id] = nil; saveStats(); art[g.id] = nil
         selected = 0; load()
         toast = rates.isEmpty ? "\(g.name) désinstallé · sauvegardes gardées · vide la corbeille pour libérer la place" : "\(g.name) désinstallé, sauf : " + rates.joined(separator: ", ")
+    }
+    // MARK: Désinstaller un jeu PC : son dossier va à la corbeille ; ses données Windows (sauvegardes locales, réglages) restent, sauf si on le demande
+    func openDesinstallerPC(_ g: Game) {
+        if running?.id == g.id { toast = "Quitte d'abord le jeu"; return }
+        if let t = tache, !t.fini, t.erreur == nil, t.jeux.contains(g.id) { toast = "Une installation de ce jeu est en cours"; return }
+        let fm = FileManager.default; let app = String(g.id.dropFirst(3)); let main = app.hasPrefix("exe:"), steam = app.hasPrefix("steam:")
+        let prefixes = Atelier.home.appendingPathComponent("pc/prefixes"); let fiche = PCHome.fiche(app)
+        // ses données : le préfixe Windows du jeu. Celui d'un jeu Steam est tenu par home-steam : Home n'y touche pas.
+        var donnees: [URL] = []
+        if main { donnees = [app.replacingOccurrences(of: ":", with: "-") + "-linux", app.replacingOccurrences(of: ":", with: "-")].map { prefixes.appendingPathComponent($0) } + ((fiche?["prefixe"] as? String).map { [URL(fileURLWithPath: $0)] } ?? []) }
+        else if !steam { donnees = ["-linux", "-rosetta"].map { prefixes.appendingPathComponent(g.url.lastPathComponent + $0) } }
+        donnees = donnees.filter { fm.fileExists(atPath: $0.path) }
+        // un jeu installé par un setup vit dans son préfixe : le jeu et ses données partent ensemble
+        let dedans = donnees.contains { g.url.path.hasPrefix($0.path + "/") }
+        // jamais un dossier trop haut (Bureau, dossier personnel, Applications) : seulement un dossier de jeu
+        let sur = g.url.pathComponents.count > 4 && !Atelier.home.path.hasPrefix(g.url.path) && fm.fileExists(atPath: g.url.path)
+        let court: (URL) -> String = { $0.path.replacingOccurrences(of: fm.homeDirectoryForCurrentUser.path, with: "~") }
+        var items: [SalonMenuItem] = []
+        if main { items.append(SalonMenuItem(label: "Retirer de Home", detail: "Le dossier du jeu reste où il est", icon: "minus.circle.fill", action: { self.desinstallerPC(g, jeter: []) })) }
+        if sur && !dedans { items.append(SalonMenuItem(label: "Désinstaller", detail: donnees.isEmpty ? "Le dossier du jeu va à la corbeille" : "Sauvegardes locales et réglages gardés", icon: "trash.fill", destructive: true, action: { self.desinstallerPC(g, jeter: [g.url]) })) }
+        if !donnees.isEmpty { items.append(SalonMenuItem(label: dedans ? "Désinstaller" : "Désinstaller avec ses données", detail: "Sauvegardes locales et réglages aussi à la corbeille", icon: "trash.slash.fill", destructive: true, action: { self.desinstallerPC(g, jeter: (sur && !dedans ? [g.url] : []) + donnees) })) }
+        let texte = "Le jeu : " + court(g.url) + (donnees.isEmpty ? "" : "\nSes données : " + donnees.map(court).joined(separator: ", ")) + "\n\nLes sauvegardes en ligne (Epic, Steam Cloud) ne sont pas touchées."
+        menu = SalonMenu(title: "Désinstaller", subtitle: g.name, items: items, hero: "trash.fill", text: texte, back: { self.openMoreOptions(g) })
+    }
+    func desinstallerPC(_ g: Game, jeter: [URL]) {
+        menu = nil
+        let fm = FileManager.default; let app = String(g.id.dropFirst(3)); var rates: [String] = []
+        // d'abord l'oublier là où il est noté (jeux.json et Legendary, ou les reçus de home-steam), sinon il serait cru encore installé
+        if app.hasPrefix("steam:") { if let n = Int(app.dropFirst(6)) { PCHome.oublierSteam(n) } }
+        else { let s = PCHome.run(["oublier", app], timeout: 60); if let e = PCHome.echec(s) { log("Désinstaller \(g.name) : \(e)") } }
+        for u in jeter + [salonRoot.appendingPathComponent("media").appendingPathComponent(g.name), salonRoot.appendingPathComponent("cache").appendingPathComponent(safeName(g.name))] where fm.fileExists(atPath: u.path) {
+            do { try fm.trashItem(at: u, resultingItemURL: nil) } catch { rates.append(u.lastPathComponent); log("Désinstaller : \(u.path) — \(error.localizedDescription)") }
+        }
+        config.reglages?[g.id] = nil; config.volumes?[g.id] = nil; config.jeux.removeAll { $0.chemin == g.id }
+        saveConfig(); stats[g.id] = nil; saveStats(); art[g.id] = nil
+        selected = 0; load()
+        log("Désinstaller \(g.name) (\(app)) : \(jeter.count) dossier(s) à la corbeille")
+        toast = !rates.isEmpty ? "\(g.name) désinstallé, sauf : " + rates.joined(separator: ", ") : jeter.isEmpty ? "\(g.name) retiré de Home" : "\(g.name) désinstallé · vide la corbeille pour libérer la place"
     }
     func openPlusMenu() {
         guard running == nil else { return }
@@ -2138,6 +2176,20 @@ enum PCHome {
             }
         }
         return out
+    }
+    /// La fiche d'un jeu dans jeux.json, telle que pc.py l'a écrite (le préfixe d'un jeu installé par un setup)
+    static func fiche(_ app: String) -> [String: Any]? {
+        guard let d = try? Data(contentsOf: Atelier.home.appendingPathComponent("pc/jeux.json")), let l = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return nil }
+        return l.first { $0["app"] as? String == app }
+    }
+    /// Un jeu Steam désinstallé sort des reçus de home-steam : sinon il le croirait encore installé et ne le retéléchargerait pas
+    static func oublierSteam(_ id: Int) {
+        let d = Atelier.home.appendingPathComponent("pc/steam")
+        for f in ((try? FileManager.default.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? []) where f.lastPathComponent.hasPrefix("steam-installations-") && f.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: f), let l = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { continue }
+            let reste = l.filter { $0["appId"] as? Int != id }
+            if reste.count != l.count, let out = try? JSONSerialization.data(withJSONObject: reste, options: [.prettyPrinted]) { try? out.write(to: f, options: .atomic) }
+        }
     }
     /// pc.command <arguments> : sa sortie (la dernière ligne JSON pour etat et bibliotheque)
     static func run(_ args: [String], timeout: TimeInterval = 40) -> String {
