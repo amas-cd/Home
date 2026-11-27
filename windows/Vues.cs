@@ -112,7 +112,7 @@ static class U
         "logo:switch" => Color.FromRgb(224, 5, 23), "logo:steam" => Color.FromRgb(18, 43, 97), "logo:windows" => Color.FromRgb(5, 117, 219), _ => Color.FromRgb(41, 41, 48),
     };
     /// Le disque derrière un repère : la couleur du service, plus claire en haut à gauche pour lui donner du volume
-    static IBrush DegradeRepere(string nom)
+    public static IBrush DegradeRepere(string nom)
     {
         var c = Rvb(nom); Color N(double k, double p) => Color.FromRgb((byte)Math.Min(255, c.R * k + p * 255), (byte)Math.Min(255, c.G * k + p * 255), (byte)Math.Min(255, c.B * k + p * 255));
         return Degrade(0, 0, 1, 1, (N(1.18, 0.10), 0), (N(1, 0), 0.5), (N(0.58, 0), 1));
@@ -175,6 +175,8 @@ static class U
             default: return Icone(nom.StartsWith("logo:") ? "person" : nom, taille, encre);
         }
     }
+    /// Le symbole d'un choix de menu : un repère de service (« logo:… »), un peu plus petit comme sur Mac, ou une icône
+    public static Control Symbole(string nom, double taille, IBrush encre) => nom.StartsWith("logo:") ? Repere(nom, taille * 0.62, nom == "logo:steam" ? new SolidColorBrush(Color.FromRgb(204, 230, 255)) : encre, new SolidColorBrush(Rvb(nom))) : Icone(nom, taille, encre);
     /// La pastille d'une console ou d'une boutique : son repère sur un disque à sa couleur
     public static Control Console(string icone, double taille)
     {

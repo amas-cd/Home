@@ -223,13 +223,42 @@ public sealed class Bibliotheque
     }
     // MARK: L'accueil du premier lancement (BienvenueVue) : un écran à part, pas un menu
     public bool Bienvenue; public int BienvenueIndex;
-    /// La suite, dans l'ordre où les choses servent, comme sur Mac : les clés de la console (sans elles aucun jeu Switch ne se
-    /// construit), puis le moteur. Les comptes Epic et Steam du Mac n'ont pas d'équivalent ici : leurs jeux installés sont détectés.
+    /// La suite, dans l'ordre du Mac, chaque étape à valider : les clés de la console (sans elles aucun jeu Switch ne se construit),
+    /// puis l'installation des composants, puis seulement les bibliothèques Steam et Epic Games.
     public void BienvenueValider()
     {
         Son("valider"); Config.Mode = new[] { "tout", "nintendo", "pc" }[BienvenueIndex]; Enregistrer(); Bienvenue = false; Recharger();
-        void Installer() { if (ModeNintendo && OperatingSystem.IsWindows() && Moteur.Exe == null) _ = Construction.PreparerMoteur(this); }
+        void Comptes() { if (ModePC) AccueilBibliotheques(); }
+        void Installer() => AppliquerMode(Comptes);
         if (ModeNintendo) MenusSwitch.AccueilCles(this, Installer); else Installer();
+    }
+    public string ModeResume => Config.Mode switch { "pc" => "Jeux PC", "nintendo" => "Jeux Nintendo", null => "Pas encore choisi", _ => "Jeux Nintendo et jeux PC" };
+    /// Télécharge ce qui manque pour le mode choisi ; `ensuite` se fait quand tout est installé. Sur Windows il n'y a que ScarletNX à
+    /// installer : Steam et Epic Games sont des programmes que le joueur a déjà.
+    void AppliquerMode(Action? ensuite)
+    {
+        if (!ModeNintendo || Moteur.Exe != null) { Dire($"Mode d'utilisation : {ModeResume} — tout est déjà installé"); ensuite?.Invoke(); return; }
+        if (!OperatingSystem.IsWindows()) { Dire("Le moteur des jeux Switch ne s'installe que sur Windows"); ensuite?.Invoke(); return; }
+        _ = Construction.PreparerMoteur(this, "Installation pour : " + ModeResume, ensuite);
+    }
+    /// Premier lancement, jeux PC : sur Mac on connecte ses comptes Epic et Steam ; sur Windows il n'y a rien à connecter, Home lit les
+    /// jeux que ces boutiques ont installés. L'étape montre ce qu'il a trouvé.
+    public void AccueilBibliotheques()
+    {
+        int steam = Jeux.Count(j => j.Origine == Origine.Steam), epic = Jeux.Count(j => j.Origine == Origine.Epic);
+        string Trouves(int n) => n == 0 ? "aucun jeu installé" : n == 1 ? "1 jeu trouvé" : $"{n} jeux trouvés";
+        Ouvrir(new Menu
+        {
+            Titre = "Tes bibliothèques", Symbole = "person", Roue = true,
+            Texte = "Sur Windows il n'y a pas de compte à connecter : Home montre les jeux que Steam et Epic Games ont déjà installés sur ce PC. Installe un jeu dans sa boutique, il apparaît ici.",
+            Elements =
+            {
+                new() { Libelle = "Steam · " + Trouves(steam), Icone = "logo:steam", Info = true },
+                new() { Libelle = "Epic Games · " + Trouves(epic), Icone = "logo:epic", Info = true },
+                new("Continuer", "arrow.right", FermerMenus, "Menu → Actualiser la bibliothèque pour relire") { Teinte = Icones.Vert },
+                new("Actualiser", "arrow.clockwise", () => { Recharger(); AccueilBibliotheques(); }, "Relit Steam et Epic Games") { Teinte = Icones.Gris },
+            },
+        });
     }
     public void BienvenueIgnorer() { Config.Mode = "tout"; Enregistrer(); Son("retour"); Bienvenue = false; Signaler(); }
 
@@ -241,11 +270,7 @@ public sealed class Bibliotheque
     public void OuvrirMode(bool premier = false)
     {
         var mode = Config.Mode ?? "tout";
-        void Appliquer(string cle)
-        {
-            Config.Mode = cle; Enregistrer(); FermerMenus(); Recharger();
-            if (cle != "pc" && OperatingSystem.IsWindows() && Moteur.Exe == null) _ = Construction.PreparerMoteur(this);
-        }
+        void Appliquer(string cle) { Config.Mode = cle; Enregistrer(); FermerMenus(); Recharger(); AppliquerMode(null); }
         ElementMenu Choix(string nom, string precision, string symbole, Avalonia.Media.Color teinte, string cle) =>
             new(nom + (!premier && cle == mode ? " : actuel" : ""), symbole, () => Appliquer(cle), precision) { Teinte = teinte };
         var m = new Menu { Titre = premier ? "Bienvenue" : "Composants", SousTitre = premier ? "Que veux-tu faire avec Home ?" : null, Symbole = "sparkles", Roue = true, Retour = premier ? () => Appliquer("tout") : OuvrirPlus };
@@ -253,6 +278,14 @@ public sealed class Bibliotheque
         m.Elements.Add(Choix("Nintendo", "Switch, à partir des fichiers de tes jeux", "gamecontroller", Icones.Orange, "nintendo"));
         m.Elements.Add(Choix("PC", "Steam, Epic Games et tes jeux Windows", "desktopcomputer", Icones.Bleu, "pc"));
         if (premier) m.Elements.Add(new("Plus tard", "clock", () => Appliquer("tout")) { Teinte = Icones.Gris });
+        // le moteur des jeux Switch : où il en est, et sa mise à jour (ScarletNX sort une version presque chaque jour)
+        if (!premier && ModeNintendo)
+            m.Elements.Add(new("ScarletNX" + (Moteur.Version != null ? " : installé" : ""), "arrow.down.circle", () =>
+            {
+                FermerMenus();
+                if (!OperatingSystem.IsWindows()) { Dire("Le moteur des jeux Switch ne s'installe que sur Windows"); return; }
+                _ = Construction.PreparerMoteur(this, Moteur.Version != null ? "Mise à jour du moteur" : "Installation du moteur", derniere: Moteur.Version != null);
+            }, Moteur.Version != null ? $"Le moteur des jeux Switch — {Moteur.Version} · choisir pour le mettre à jour" : "Le moteur des jeux Switch — pas encore installé") { Section = "Moteur Nintendo" });
         Ouvrir(m);
     }
 

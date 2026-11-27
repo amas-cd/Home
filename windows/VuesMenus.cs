@@ -75,8 +75,8 @@ sealed class VueMenu : Panel
         {
             var e = m.Elements[i]; var k = i; var c = Teinte(e); var teinte = new SolidColorBrush(c);
             // deux états superposés, l'un s'efface quand l'autre vient : au repos, un disque sombre cerclé de la couleur du choix ; visé, plein, cerclé de blanc, avec son halo
-            creux[i] = new Border { CornerRadius = new CornerRadius(Grand / 2), Background = U.Noir(0.5), BorderBrush = new SolidColorBrush(c, 0.45), BorderThickness = new Thickness(1.9), Child = U.Icone(e.Icone, 32, teinte), Transitions = new Transitions { Mouvement.Opacite(0.24, Mouvement.Glisse) } };
-            pleins[i] = new Border { CornerRadius = new CornerRadius(Grand / 2), Background = U.Degrade(c, U.Alpha(c, 0.62)), BorderBrush = U.Blanc(0.9), BorderThickness = new Thickness(3), Child = U.Icone(e.Icone, 32), Opacity = 0,
+            creux[i] = new Border { CornerRadius = new CornerRadius(Grand / 2), Background = U.Noir(0.5), BorderBrush = new SolidColorBrush(c, 0.45), BorderThickness = new Thickness(1.9), Child = U.Symbole(e.Icone, 32, teinte), Transitions = new Transitions { Mouvement.Opacite(0.24, Mouvement.Glisse) } };
+            pleins[i] = new Border { CornerRadius = new CornerRadius(Grand / 2), Background = U.Degrade(c, U.Alpha(c, 0.62)), BorderBrush = U.Blanc(0.9), BorderThickness = new Thickness(3), Child = U.Symbole(e.Icone, 32, Brushes.White), Opacity = 0,
                 BoxShadow = BoxShadows.Parse($"0 6 26 0 #BF{c.R:X2}{c.G:X2}{c.B:X2}"), Transitions = new Transitions { Mouvement.Opacite(0.24, Mouvement.Glisse) } };
             disques[i] = new Panel { Width = Grand, Height = Grand, RenderTransformOrigin = U.Centre, RenderTransform = Mouvement.Echelle(Petit / Grand), Transitions = new Transitions { Mouvement.Transfo(0.24, Mouvement.Glisse) }, Children = { creux[i], pleins[i] } };
             places[i] = new Panel { RenderTransform = Mouvement.Deplace(0, 0), Transitions = new Transitions { Mouvement.Transfo(0.24, Mouvement.Glisse) }, Children = { disques[i] } };
@@ -183,7 +183,7 @@ sealed class VueMenu : Panel
         Control Apercu(int v, Color c)
         {
             var it = v >= 0 && v < n ? e[v] : null; var icone = it?.Icone ?? m.Symbole ?? "ellipsis";
-            var disque = new Border { Width = 320, Height = 320, CornerRadius = new CornerRadius(160), Background = U.Degrade(c, U.Alpha(c, 0.55)), BoxShadow = BoxShadows.Parse($"0 10 60 0 #99{c.R:X2}{c.G:X2}{c.B:X2}"), Child = U.Icone(icone, 150),
+            var disque = new Border { Width = 320, Height = 320, CornerRadius = new CornerRadius(160), Background = icone.StartsWith("logo:") ? U.DegradeRepere(icone) : U.Degrade(c, U.Alpha(c, 0.55)), BoxShadow = BoxShadows.Parse($"0 10 60 0 #99{c.R:X2}{c.G:X2}{c.B:X2}"), Child = U.Symbole(icone, 150, Brushes.White),
                 HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
             var visuel = new Panel { Width = 600, Height = 500, VerticalAlignment = VerticalAlignment.Center, RenderTransform = new TranslateTransform(0, -65), Children = { disque } };
             if ((it?.Image ?? m.ImageURL) is { } url)

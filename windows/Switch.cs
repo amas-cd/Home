@@ -363,14 +363,15 @@ public static class Construction
         Noter(Chantiers().Where(x => x.Id != c.Id).ToList()); lib.FermerMenus(); lib.Recharger(); lib.Dire("Construction abandonnée");
     }
 
-    /// Télécharge ScarletNX d'avance (au choix « Nintendo » du premier lancement), avec la pastille d'avancement
-    public static async Task PreparerMoteur(Bibliotheque lib)
+    /// Télécharge ScarletNX d'avance, avec la pastille d'avancement ; `ensuite` se fait quand c'est installé (comme `apresTache` sur Mac)
+    public static async Task PreparerMoteur(Bibliotheque lib, string titre = "Composants Nintendo", Action? ensuite = null, bool derniere = false)
     {
-        if (lib.Tache is { Fini: false }) return;
-        var t = new Tache { Titre = "Composants Nintendo", Etape = "Téléchargement du moteur…" }; lib.Tache = t; lib.Signaler();
-        try { await Moteur.Preparer(t, lib.Signaler); t.Etape = "Prêt"; t.Fraction = 1; t.Fini = true; }
+        if (lib.Tache is { Fini: false }) { lib.Dire("Une autre tâche est en cours : attends qu'elle finisse"); return; }
+        var t = new Tache { Titre = titre, Etape = "Téléchargement du moteur…" }; lib.Tache = t; lib.Signaler();
+        var reussi = false;
+        try { await Moteur.Preparer(t, lib.Signaler, derniere); t.Etape = "Prêt"; t.Fraction = 1; t.Fini = true; reussi = true; }
         catch (Exception e) { t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire("moteur : " + e.Message); }
-        lib.Signaler();
+        lib.Signaler(); if (reussi) ensuite?.Invoke();
         _ = Task.Delay(6000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
     }
 
@@ -513,6 +514,13 @@ public static class Trouvailles
         var habituel = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".switch", nom);
         return Environment.GetEnvironmentVariable("HOME_CHERCHER") is not { Length: > 0 } && File.Exists(habituel) ? habituel : Tout().FirstOrDefault(f => Path.GetFileName(f).Equals(nom, StringComparison.OrdinalIgnoreCase));
     }
+    public static List<string> ToutesLesCles(string nom)
+    {
+        var habituel = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".switch", nom);
+        var liste = Tout().Where(f => Path.GetFileName(f).Equals(nom, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (Environment.GetEnvironmentVariable("HOME_CHERCHER") is not { Length: > 0 } && File.Exists(habituel)) liste.Insert(0, habituel);
+        return liste;
+    }
     /// Le mod en ligne d'un jeu, déjà sur le PC : un dossier exefs qui contient son module, ou un .zip qui le contient (on ne lit que sa liste de fichiers)
     public static string? Mod(MenusSwitch.ModEnLigne m)
     {
@@ -575,25 +583,38 @@ public static class MenusSwitch
         try { if (new FileInfo(source).Length > 4 << 20) throw new InvalidDataException("ce fichier est trop gros pour être un fichier de clés"); File.Copy(source, cible, true); return true; }
         catch (Exception e) { Journal.Ecrire("clés : " + e.Message); lib.Dire("Les clés n'ont pas pu être installées : " + e.Message); return false; }
     }
-    /// Premier lancement, jeux Switch : le fichier prod.keys de la console. Home le cherche lui-même et l'installe ; sinon il le demande,
-    /// et « Plus tard » passe l'étape (il sera redemandé à la première construction).
-    public static async void AccueilCles(Bibliotheque lib, Action puis)
+    /// Premier lancement, jeux Switch : le fichier prod.keys de la console, comme `accueilCles` sur Mac. Home regarde d'abord seul
+    /// (« Recherche… ») ; l'étape se valide toujours : « Continuer » si les clés sont trouvées, « Plus tard » sinon (elles seront
+    /// redemandées à la première construction).
+    static string? clesVenuesDe;
+    public static async void AccueilCles(Bibliotheque lib, Action puis, bool cherche = false)
     {
-        if (File.Exists(Construction.ClesProd)) { puis(); return; }
-        if (await Task.Run(() => Trouvailles.Cles("prod.keys")) is { } trouvees && Installer(lib, trouvees, Construction.ClesProd))
+        if (!cherche && !File.Exists(Construction.ClesProd))
         {
-            if (Trouvailles.Cles("title.keys") is { } titres) Installer(lib, titres, Construction.ClesTitres);
-            lib.Dire("Clés trouvées dans " + Trouvailles.Lieu(trouvees, taille: false) + " : installées dans Home"); puis(); return;
+            lib.Ouvrir(new Menu { Titre = "Clés de la console", Symbole = "key", Texte = "Recherche…" });
+            var trouvees = await Task.Run(() => Trouvailles.Cles("prod.keys"));
+            if (lib.Menu?.Titre != "Clés de la console") return;
+            if (trouvees != null && Installer(lib, trouvees, Construction.ClesProd)) { clesVenuesDe = trouvees; if (Trouvailles.Cles("title.keys") is { } titres) Installer(lib, titres, Construction.ClesTitres); }
         }
+        var la = File.Exists(Construction.ClesProd); void Ici() => AccueilCles(lib, puis, cherche: true); void Suite() { lib.FermerMenus(); puis(); }
         lib.Ouvrir(new Menu
         {
-            Titre = "Clés de la console", Symbole = "key", Texte = "Home s'en sert pour construire tes jeux Switch. Elles restent sur ce PC.", Retour = () => { lib.FermerMenus(); puis(); },
+            Titre = "Clés de la console", Symbole = "key", Texte = "Home s'en sert pour construire tes jeux Switch. Elles restent sur ce PC.", Retour = Suite,
             Elements =
             {
-                new("Choisir prod.keys", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier prod.keys de ta console", ["prod.keys", "*.keys"]) is { } f && Installer(lib, f, Construction.ClesProd)) { lib.FermerMenus(); puis(); } }, "Le fichier de clés extrait de ta propre console") { Teinte = Icones.Jaune },
-                new("Plus tard", "arrow.right", () => { lib.FermerMenus(); puis(); }) { Teinte = Icones.Gris },
+                new(la ? "prod.keys : trouvé" : "Choisir prod.keys", "key", () => QuellesCles(lib, Ici), la ? (clesVenuesDe != null ? "Dans " + Trouvailles.Lieu(clesVenuesDe, taille: false) + " · " : "") + "choisir un autre fichier" : "Le fichier de clés extrait de ta propre console") { Teinte = Icones.Jaune },
+                new(la ? "Continuer" : "Plus tard", "arrow.right", Suite) { Teinte = la ? Icones.Vert : Icones.Gris },
             },
         });
+    }
+    /// « Quelles clés ? » : les fichiers prod.keys que Home a trouvés, ou un autre à montrer
+    static void QuellesCles(Bibliotheque lib, Action retour)
+    {
+        void Prendre(string f) { if (Installer(lib, f, Construction.ClesProd)) clesVenuesDe = f; retour(); }
+        var m = new Menu { Titre = "Quelles clés ?", Symbole = "key", Roue = true, Retour = retour };
+        foreach (var f in Trouvailles.ToutesLesCles("prod.keys").Take(12)) m.Elements.Add(new(Trouvailles.Lieu(f, taille: false), "key", () => Prendre(f), f));
+        m.Elements.Add(new("Choisir un autre fichier…", "folder", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier prod.keys de ta console", ["prod.keys", "*.keys"]) is { } f) Prendre(f); else retour(); }, "prod.keys rangé ailleurs") { Section = " " });
+        lib.Ouvrir(m);
     }
     static void ClesTitres(Bibliotheque lib, Demande d) => lib.Ouvrir(new Menu
     {

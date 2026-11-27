@@ -160,10 +160,12 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
 - **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
   haut), choix des images dans Home (un fichier à la place).
-- **Premier lancement** : `BienvenueVue` recopie `BienvenueView` du Mac (trois cartes Tout / Nintendo / PC, « Commencer », « Ignorer »
-  discret), pas un menu. Ensuite, comme sur Mac : les clés de la console (`MenusSwitch.AccueilCles`, installées seules si Home les
-  trouve), puis ScarletNX téléchargé. Le choix (`Config.Mode` : tout / nintendo / pc) se change dans Menu → Composants
-  (`Bibliotheque.OuvrirMode`). Pas d'étape « Moteurs » (un seul moteur) ni « Tes bibliothèques » (Steam et Epic sont détectés).
+- **Premier lancement**, dans l'ordre du Mac, chaque étape à valider : `BienvenueVue` (recopie de `BienvenueView` : trois cartes
+  Tout / Nintendo / PC, « Commencer », « Ignorer » discret) ; « Clés de la console » (`MenusSwitch.AccueilCles` : « Recherche… », puis
+  « prod.keys : trouvé » + « Continuer », ou « Choisir prod.keys » + « Plus tard » ; « Quelles clés ? ») ; l'installation
+  (`Bibliotheque.AppliquerMode` : « Installation pour : … », ou « tout est déjà installé ») ; « Tes bibliothèques »
+  (`AccueilBibliotheques` : sur Windows rien à connecter, Home montre ce que Steam et Epic ont installé). Le choix (`Config.Mode`)
+  se change dans Menu → Composants (`OuvrirMode`), qui montre aussi ScarletNX et le met à jour. Pas d'étape « Moteurs » (un seul).
 - **Repères des services** : `U.Repere` et `U.Console` recopient `Symbole` du Mac (console portable, quatre carreaux, bielle,
   écusson). Ce sont des dessins de Home : aucun logo de marque dans le dépôt.
 - **Désinstaller** : un jeu Switch part à la Corbeille. Pour un jeu Steam ou Epic, Home ne supprime rien lui-même : il ouvre la
