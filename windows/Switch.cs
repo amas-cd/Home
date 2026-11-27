@@ -483,8 +483,9 @@ public static class Trouvailles
         if (id != null) sorte = id.EndsWith("000") ? Sorte.Base : id.EndsWith("800") ? Sorte.Maj : Sorte.Dlc;
         else
         {
+            // « maj » et « upd » seulement en mots entiers, comme sur Mac : « Majora's Mask » n'est pas une mise à jour
             var n = nom.ToLowerInvariant(); var version = System.Text.RegularExpressions.Regex.Match(n, @"\[v(\d+)\]");
-            sorte = n.Contains("dlc") ? Sorte.Dlc : n.Contains("update") || n.Contains("upd") || n.Contains("patch") || n.Contains("mise a jour") || n.Contains("maj") || (version.Success && version.Groups[1].Value.TrimStart('0') != "") ? Sorte.Maj
+            sorte = n.Contains("dlc") ? Sorte.Dlc : n.Contains("update") || n.Contains("patch") || n.Contains("mise a jour") || System.Text.RegularExpressions.Regex.IsMatch(n, "(?<![a-z])(maj|upd)(?![a-z])") || (version.Success && version.Groups[1].Value.TrimStart('0') != "") ? Sorte.Maj
                 : n.EndsWith(".xci") || (version.Success) ? Sorte.Base : Sorte.Inconnu;
         }
         lock (lus) lus[f] = (sorte, id);
