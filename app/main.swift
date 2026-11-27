@@ -391,7 +391,7 @@ final class Library: ObservableObject {
     @Published var categories: [String] = []
     @Published var categoryIndex = 0
     @Published var selected = 0
-    @Published var running: Game? = nil
+    @Published var running: Game? = nil { didSet { if running?.id != oldValue?.id { Discord.shared.montrer(presenceDiscord()) } } }   // Discord suit : dans le menu, ou dans ce jeu
     @Published var stats: [String: Stat] = [:]
     @Published var menu: SalonMenu? = nil
     @Published var ouverturePart = false   // l'ouverture est en train de s'effacer
@@ -636,7 +636,7 @@ final class Library: ObservableObject {
             // d'Epic (déjà connues de Legendary) ou celles de Steam (par le numéro du jeu) pour un jeu PC
             func prendre(_ u: URL?, _ fichier: String) async -> NSImage? {
                 guard let u, let (d, r) = try? await URLSession.shared.data(from: u), (r as? HTTPURLResponse)?.statusCode == 200, let i = NSImage(data: d) else { return nil }
-                try? d.write(to: cache.appendingPathComponent(fichier)); return i
+                try? d.write(to: cache.appendingPathComponent(fichier)); Discord.noterSource(u, de: cache.appendingPathComponent(fichier)); return i
             }
             if a.cover == nil, got.cover == nil, let t = g.storeID, let sq = await EShop.info(titleID: t)?.square {
                 let grand = URL(string: sq.absoluteString.replacingOccurrences(of: "image500w.jpg", with: "image1600w.jpg"))   // la même image en 1600 px, quand Nintendo l'a
@@ -662,7 +662,7 @@ final class Library: ObservableObject {
                 for (slot, have) in [(Slot.cover, a.cover ?? got.cover), (.background, a.background ?? got.background), (.logo, a.logo ?? got.logo)] where have == nil {
                     if let c = await SteamGridDB.candidates(slot, gameID: gid, key: key).first, let full = c.full, let d = try? await URLSession.shared.data(from: full).0, let i = NSImage(data: d) {
                         let name = slot == .cover ? "square.jpg" : slot == .background ? "hero.jpg" : "logo.png"
-                        try? d.write(to: cache.appendingPathComponent(name))
+                        try? d.write(to: cache.appendingPathComponent(name)); Discord.noterSource(full, de: cache.appendingPathComponent(name))
                         switch slot { case .cover: got.cover = i; case .background: got.background = i; case .logo: got.logo = trimTransparent(i) }
                     }
                 }
@@ -861,6 +861,16 @@ final class Library: ObservableObject {
         log("Nom de recherche \(g.name) : \(config.nomsArt?[g.id] ?? "(nom du jeu)")")
         toast = n.isEmpty || n == g.name ? "Recherche par le nom du jeu" : "Recherche : « \(n) » — choisis Jaquette, Fond ou Logo"
         openApparence(g)
+    }
+    /// Ce que Discord affiche : « Dans le menu », ou le jeu en cours avec sa jaquette et sa console ou sa boutique
+    func presenceDiscord() -> [String: Any] {
+        guard let g = running else {
+            return ["details": "Dans le menu", "timestamps": ["start": Int(Discord.depuis.timeIntervalSince1970)], "assets": ["large_image": "home", "large_text": "Home"]]
+        }
+        let ou = g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "Steam" : g.appPC?.hasPrefix("exe:") == true ? "Windows" : "Epic Games") : g.category
+        var images: [String: Any] = ["large_text": g.name]
+        if let j = Discord.jaquette(g) { images["large_image"] = j; images["small_image"] = "home"; images["small_text"] = "Home" } else { images["large_image"] = "home" }
+        return ["details": g.name, "state": ou, "timestamps": ["start": Int((startedAt ?? Date()).timeIntervalSince1970)], "assets": images]
     }
     func openMoreOptions(_ g: Game) {
         menu = SalonMenu(title: "Plus", subtitle: g.name, items: [
@@ -1120,6 +1130,8 @@ final class Library: ObservableObject {
                 self.config.ouverture = !(self.config.ouverture ?? true); self.saveConfig(); ici() }),
             SalonMenuItem(label: "Animations réduites : \(reduit ? "oui" : "non")", detail: "Des fondus courts à la place des mouvements", icon: reduit ? "hand.raised.fill" : "hand.wave.fill", tint: .teal, action: {
                 UserDefaults.standard.set(!reduit, forKey: "animationsReduites"); ici() }),
+            SalonMenuItem(label: "Discord : \(Discord.voulu ? "oui" : "non")", detail: Discord.appID.isEmpty ? "Pas encore réglé dans cette version de Home" : "Tes amis voient « Dans le menu », ou le jeu en cours et sa jaquette", icon: "bubble.left.and.bubble.right.fill", tint: .indigo, action: {
+                UserDefaults.standard.set(!Discord.voulu, forKey: "discord"); Discord.shared.montrer(self.presenceDiscord()); ici() }),
             SalonMenuItem(label: "Clavier du Mac en jeu : \(ClavierJeu.voulu ? "oui" : "non")", detail: "Rocket League et les jeux du même moteur écrivent en AZERTY", icon: "keyboard.fill", tint: .orange, action: {
                 UserDefaults.standard.set(!ClavierJeu.voulu, forKey: "clavierMac"); ici() }),
             SalonMenuItem(label: "Images", detail: "Jaquettes, fonds et logos", icon: "photo.fill", tint: .blue, action: { self.openAvanceImages() }),
@@ -1236,6 +1248,7 @@ final class Library: ObservableObject {
         let isVideo = ["mp4", "mov"].contains(src.pathExtension.lowercased())
         let base = slot == .cover ? "cover" : slot == .background ? "fond" : "logo"
         for ext in ["jpg", "png", "mp4", "mov"] { try? FileManager.default.removeItem(at: media.appendingPathComponent("\(base).\(ext)")) }
+        Discord.noterSource(nil, de: media.appendingPathComponent("\(base).jpg"))   // une image de ce Mac n'a pas d'adresse publique
         let dst = media.appendingPathComponent("\(base).\(isVideo ? src.pathExtension.lowercased() : (slot == .logo ? "png" : "jpg"))")
         if isVideo || slot == .logo || ["jpg", "jpeg"].contains(src.pathExtension.lowercased()) { try? FileManager.default.copyItem(at: src, to: dst) }   // tel quel, sans recompression
         else if let i = NSImage(contentsOf: src), let t = i.tiffRepresentation, let r = NSBitmapImageRep(data: t), let d = r.representation(using: .jpeg, properties: [.compressionFactor: 0.95]) { try? d.write(to: dst) }
@@ -1311,6 +1324,7 @@ final class Library: ObservableObject {
             let base = p.slot == .cover ? "cover" : p.slot == .background ? "fond" : "logo"
             for ext in ["jpg", "png", "mp4", "mov"] { try? FileManager.default.removeItem(at: media.appendingPathComponent("\(base).\(ext)")) }
             let dst = media.appendingPathComponent("\(base).\(p.slot == .logo || full.pathExtension.lowercased() == "png" ? "png" : "jpg")")
+            Discord.noterSource(full, de: media.appendingPathComponent("\(base).jpg"))
             do { try d.write(to: dst); log("\(p.slot.rawValue) \(p.game.name) : écrit \(dst.path) (\(d.count) octets)") } catch { log("\(p.slot.rawValue) \(p.game.name) : écriture impossible \(dst.path) : \(error)") }
             await MainActor.run { self.load(); self.toast = NSImage(data: d) == nil ? "Image illisible, essaie-en une autre" : "\(p.slot.rawValue) mise à jour" }
         }
@@ -3830,6 +3844,93 @@ struct PadSnap { var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0;
 /// chat écrit « q » quand on tape « a ». Tant qu'un de ces jeux est devant, Home échange les codes des touches pour que chaque lettre
 /// soit la bonne. Seul ce qui se tape sans Majuscule suit (lettres, virgule…) ; la rangée des chiffres ne bouge pas, et un clavier
 /// américain ne change rien. Il faut l'autorisation Accessibilité, que Home a déjà pour le plein écran.
+// MARK: - Discord : la présence (« Joue à Home »), par la porte locale de l'app Discord
+/// Discord écoute sur un socket du dossier temporaire (discord-ipc-0 à 9). On s'y présente avec l'identifiant de l'application
+/// « Home » (créée sur discord.com/developers : public, ce n'est pas un secret), puis on lui donne l'activité à afficher. Rien ne
+/// passe par Internet depuis Home, et sans Discord ouvert il ne se passe rien. La jaquette doit être une image publique : Home
+/// retient l'adresse d'où il a téléchargé chaque jaquette (fichier .url à côté), sinon il prend celle de la boutique du jeu.
+final class Discord {
+    static let shared = Discord()
+    static let appID = ""   // l'identifiant de l'application Discord « Home » ; vide = pas de présence
+    static let depuis = Date()
+    static var voulu: Bool { UserDefaults.standard.object(forKey: "discord") as? Bool ?? true }
+    private let file = DispatchQueue(label: "fr.anas.home.discord")
+    private var fd: Int32 = -1
+    private var voulue: [String: Any]? = nil, aEnvoyer = false, attente = false
+
+    /// L'adresse d'où vient une image téléchargée, gardée à côté d'elle (square.jpg → square.url) ; nil l'efface
+    static func noterSource(_ u: URL?, de fichier: URL) {
+        let f = fichier.deletingPathExtension().appendingPathExtension("url")
+        if let u, u.scheme == "https", u.absoluteString.count < 250 { try? u.absoluteString.write(to: f, atomically: true, encoding: .utf8) } else { try? FileManager.default.removeItem(at: f) }
+    }
+    /// Une adresse publique de la jaquette du jeu : celle que le joueur a choisie, celle que Home a trouvée, sinon celle de sa boutique
+    static func jaquette(_ g: Game) -> String? {
+        let fm = FileManager.default
+        let media = salonRoot.appendingPathComponent("media").appendingPathComponent(g.name), cache = salonRoot.appendingPathComponent("cache").appendingPathComponent(safeName(g.name))
+        func lue(_ f: URL) -> String? { (try? String(contentsOf: f, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines).nilSiVide }
+        if let u = lue(media.appendingPathComponent("cover.url")) { return u }
+        let choisie = ["cover.jpg", "cover.png", "jaquette.jpg", "jaquette.png"].contains { fm.fileExists(atPath: media.appendingPathComponent($0).path) }
+        if !choisie, let u = lue(cache.appendingPathComponent("square.url")) { return u }
+        if let t = g.storeID { return "https://api.nlib.cc/nx/\(t)/icon" }
+        if let a = g.appPC, a.hasPrefix("steam:") { return "https://cdn.cloudflare.steamstatic.com/steam/apps/\(a.dropFirst(6))/library_600x900.jpg" }
+        return choisie ? nil : lue(cache.appendingPathComponent("square.url"))
+    }
+
+    func montrer(_ activite: [String: Any]) { file.async { self.voulue = Discord.voulu ? activite : nil; self.aEnvoyer = true; self.pousser() } }
+    private func pousser() {
+        guard !Discord.appID.isEmpty, aEnvoyer else { return }
+        if fd < 0 {
+            if voulue == nil { aEnvoyer = false; return }   // rien à afficher et pas connecté : rien à effacer
+            guard ouvrir() else { reessayer(); return }
+        }
+        let args: [String: Any] = ["pid": Int(ProcessInfo.processInfo.processIdentifier), "activity": voulue ?? NSNull()]
+        if envoyer(1, ["cmd": "SET_ACTIVITY", "args": args, "nonce": UUID().uuidString]) { aEnvoyer = false; _ = lire() } else { fermer(); reessayer() }
+    }
+    /// Discord fermé, ou relancé entre-temps : on réessaie toutes les 30 s tant qu'il reste quelque chose à afficher
+    private func reessayer() {
+        guard !attente, voulue != nil else { return }
+        attente = true; file.asyncAfter(deadline: .now() + 30) { self.attente = false; self.pousser() }
+    }
+    private func fermer() { if fd >= 0 { close(fd); fd = -1 } }
+    private func ouvrir() -> Bool {
+        for i in 0..<10 {
+            let chemin = NSTemporaryDirectory() + "discord-ipc-\(i)"
+            guard FileManager.default.fileExists(atPath: chemin) else { continue }
+            let s = socket(AF_UNIX, SOCK_STREAM, 0); guard s >= 0 else { continue }
+            var adr = sockaddr_un(); adr.sun_family = sa_family_t(AF_UNIX)
+            let octets = Array(chemin.utf8)
+            guard octets.count < MemoryLayout.size(ofValue: adr.sun_path) else { close(s); continue }
+            withUnsafeMutableBytes(of: &adr.sun_path) { p in for (k, o) in octets.enumerated() { p[k] = o } }
+            let ok = withUnsafePointer(to: &adr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(s, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } } == 0
+            guard ok else { close(s); continue }
+            var un: Int32 = 1; setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &un, socklen_t(MemoryLayout<Int32>.size))   // Discord qui se ferme ne doit pas tuer Home
+            var delai = timeval(tv_sec: 3, tv_usec: 0); setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &delai, socklen_t(MemoryLayout<timeval>.size))
+            fd = s
+            if envoyer(0, ["v": 1, "client_id": Discord.appID]), let r = lire(), r["evt"] as? String == "READY" { log("Discord : présence reliée"); return true }
+            fermer()
+        }
+        return false
+    }
+    /// Une trame : le code de l'opération et la taille (deux entiers de 32 bits, petit-boutiste), puis le JSON
+    private func envoyer(_ op: UInt32, _ json: [String: Any]) -> Bool {
+        guard fd >= 0, let corps = try? JSONSerialization.data(withJSONObject: json) else { return false }
+        var trame = Data(); var o = op.littleEndian, n = UInt32(corps.count).littleEndian
+        withUnsafeBytes(of: &o) { trame.append(contentsOf: $0) }; withUnsafeBytes(of: &n) { trame.append(contentsOf: $0) }; trame.append(corps)
+        return trame.withUnsafeBytes { p in var fait = 0
+            while fait < p.count { let r = write(fd, p.baseAddress! + fait, p.count - fait); if r <= 0 { return false }; fait += r }
+            return true }
+    }
+    private func lire() -> [String: Any]? {
+        func octets(_ n: Int) -> Data? { var d = Data(count: n); var lu = 0
+            while lu < n { let r = d.withUnsafeMutableBytes { read(fd, $0.baseAddress! + lu, n - lu) }; if r <= 0 { return nil }; lu += r }
+            return d }
+        guard fd >= 0, let tete = octets(8) else { return nil }
+        let n = Int(tete.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 4, as: UInt32.self) }.littleEndian)
+        guard n > 0, n < 1 << 20, let corps = octets(n) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: corps)) as? [String: Any]
+    }
+}
+extension String { var nilSiVide: String? { isEmpty ? nil : self } }
 final class ClavierJeu {
     static let shared = ClavierJeu()
     static var voulu: Bool { UserDefaults.standard.object(forKey: "clavierMac") as? Bool ?? true }
@@ -4051,7 +4152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // l'ouverture : le logo et le jingle, sauf si le réglage la coupe ; l'écran du premier lancement attend qu'elle soit passée
         let ouvre = lib.config.ouverture ?? true
         if ouvre { lib.ouverture = true; Sounds.shared.play("lancer") }
-        if lib.config.mode == nil { lib.bienvenue = true }   // premier lancement : choisir le mode d'utilisation
+        if lib.config.mode == nil { lib.bienvenue = true }
+        Discord.shared.montrer(lib.presenceDiscord())   // « Dans le menu », dès l'ouverture   // premier lancement : choisir le mode d'utilisation
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
