@@ -23,23 +23,28 @@ public sealed class Manette
     int tours; bool disponible = OperatingSystem.IsWindows();
 
     /// `active` : Home est au premier plan. XInput lit la manette même quand un jeu est devant : sans ce test, jouer ferait défiler Home derrière.
-    public Manette(Bibliotheque lib, Func<bool> active) { this.lib = lib; this.active = active; minuteur.Tick += (_, _) => Lire(); if (disponible) minuteur.Start(); }
+    public Manette(Bibliotheque lib, Func<bool> active) { this.lib = lib; this.active = active; minuteur.Tick += (_, _) => Lire(); if (disponible) { minuteur.Start(); ManetteSony.Demarrer(); } }
 
     void Lire()
     {
         Etat e = default; uint n = 0; bool branchee = false;
         try { for (n = 0; n < 4 && !branchee; n++) branchee = XInputGetState(n, out e) == 0; }
         catch (Exception x) { disponible = false; minuteur.Stop(); Journal.Ecrire("XInput indisponible : " + x.Message); return; }
-        var aides = branchee ? Aides.Xbox : Aides.Clavier;
+        // pas de manette pour XInput : une manette PlayStation branchée telle quelle, lue directement
+        var sony = false; var pave = false;
+        if (!branchee && ManetteSony.Etat is { } ps) { branchee = sony = true; pave = ps.pave; e.Pad = new Pad { Boutons = ps.boutons, LX = ps.lx, LY = ps.ly }; }
+        var aides = sony ? Aides.PlayStation : branchee ? Aides.Xbox : Aides.Clavier;
         if (lib.Aides != aides) { lib.Aides = aides; lib.Signaler(); }
         if (!branchee) { if (lib.Batterie != null) { lib.Batterie = null; lib.Signaler(); } return; }
-        if (++tours % 600 == 1) LireBatterie(n - 1);   // toutes les 10 s
-        // En jeu : le bouton Xbox, ou Select + Start ensemble, ouvre et ferme le menu en jeu. Tant qu'il est fermé, rien d'autre ne compte.
+        if (sony) { if (lib.Batterie != null) { lib.Batterie = null; lib.Signaler(); } } else if (++tours % 600 == 1) LireBatterie(n - 1);   // toutes les 10 s
+        // En jeu, un bouton dont les jeux ne se servent presque pas ouvre et ferme le menu en jeu : le pavé tactile d'une manette
+        // PlayStation (comme sur Mac) ou son bouton PS, le bouton Xbox, ou Select + Start ensemble sur n'importe quelle manette.
+        // Tant que le menu est fermé, rien d'autre ne compte : le reste appartient au jeu.
         if (lib.EnCours != null)
         {
             var b = e.Pad.Boutons;
-            if (avecXbox) try { if (XInputGetStateEx(n - 1, out var ex) == 0) b = ex.Pad.Boutons; } catch { avecXbox = false; }
-            var menu = (b & Xbox) != 0 || (b & (Start | Back)) == (Start | Back);
+            if (!sony && avecXbox) try { if (XInputGetStateEx(n - 1, out var ex) == 0) b = ex.Pad.Boutons; } catch { avecXbox = false; }
+            var menu = pave || (b & Xbox) != 0 || (b & (Start | Back)) == (Start | Back);
             if (menu && !menuTenu) { Journal.Ecrire("manette en jeu : menu en jeu"); lib.BasculerRapide(); }
             menuTenu = menu;
             if (!lib.Rapide || menu) { touches.Clear(); dernierX = dernierY = 0; return; }
@@ -82,6 +87,94 @@ public sealed class Manette
             if (lib.Batterie != pct) { lib.Batterie = pct; lib.Signaler(); }
         }
         catch { }
+    }
+}
+
+/// Les manettes PlayStation (DualShock 4, DualSense) branchées telles quelles, en USB ou en Bluetooth : Windows ne les présente pas à
+/// XInput, Home les lit donc directement (HID). C'est aussi ce qui donne le pavé tactile, que XInput n'a pas : comme sur Mac, c'est
+/// lui qui ouvre le menu en jeu, un bouton dont les jeux ne se servent presque pas.
+/// L'état est rendu dans la forme de XInput (mêmes bits de boutons, mêmes axes) : le reste de `Manette` ne fait pas la différence.
+static class ManetteSony
+{
+    [DllImport("hid.dll")] static extern void HidD_GetHidGuid(out Guid g);
+    [StructLayout(LayoutKind.Sequential)] struct Interface { public int Taille; public Guid Classe; public int Drapeaux; public IntPtr Reserve; }
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr SetupDiGetClassDevs(ref Guid g, IntPtr enumerateur, IntPtr fenetre, uint drapeaux);
+    [DllImport("setupapi.dll", SetLastError = true)] static extern bool SetupDiEnumDeviceInterfaces(IntPtr liste, IntPtr info, ref Guid g, uint index, ref Interface i);
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool SetupDiGetDeviceInterfaceDetail(IntPtr liste, ref Interface i, IntPtr detail, int taille, out int voulu, IntPtr info);
+    [DllImport("setupapi.dll")] static extern bool SetupDiDestroyDeviceInfoList(IntPtr liste);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string nom, uint acces, uint partage, IntPtr securite, uint creation, uint drapeaux, IntPtr modele);
+
+    static readonly object verrou = new(); static (ushort boutons, short lx, short ly, bool pave, DateTime quand) etat; static bool lance;
+    /// L'état de la manette PlayStation, s'il y en a une qui parle (lu il y a moins d'une seconde et demie)
+    public static (ushort boutons, short lx, short ly, bool pave)? Etat { get { lock (verrou) return (DateTime.Now - etat.quand).TotalSeconds < 1.5 ? (etat.boutons, etat.lx, etat.ly, etat.pave) : null; } }
+
+    public static void Demarrer()
+    {
+        if (lance || !OperatingSystem.IsWindows()) return;
+        lance = true;
+        new Thread(() =>
+        {
+            while (true)
+            {
+                try { if (Trouver() is { } m) Ecouter(m.chemin, m.dualsense); }
+                catch (Exception e) { Journal.Ecrire("manette PlayStation : " + e.Message); }
+                Thread.Sleep(3000);   // aucune manette, ou elle vient d'être débranchée : on regarde à nouveau
+            }
+        }) { IsBackground = true, Name = "manette PlayStation" }.Start();
+    }
+    /// Le premier périphérique HID de Sony qui est une DualShock 4 ou une DualSense
+    static (string chemin, bool dualsense)? Trouver()
+    {
+        HidD_GetHidGuid(out var hid);
+        var liste = SetupDiGetClassDevs(ref hid, IntPtr.Zero, IntPtr.Zero, 0x12);   // DIGCF_PRESENT | DIGCF_DEVICEINTERFACE
+        if (liste == IntPtr.Zero || liste == new IntPtr(-1)) return null;
+        try
+        {
+            for (uint n = 0; n < 256; n++)
+            {
+                var i = new Interface { Taille = Marshal.SizeOf<Interface>() };
+                if (!SetupDiEnumDeviceInterfaces(liste, IntPtr.Zero, ref hid, n, ref i)) break;
+                SetupDiGetDeviceInterfaceDetail(liste, ref i, IntPtr.Zero, 0, out var taille, IntPtr.Zero);
+                if (taille <= 0) continue;
+                var detail = Marshal.AllocHGlobal(taille);
+                try
+                {
+                    Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);   // cbSize de la structure, pas de la mémoire
+                    if (!SetupDiGetDeviceInterfaceDetail(liste, ref i, detail, taille, out _, IntPtr.Zero)) continue;
+                    var chemin = Marshal.PtrToStringUni(detail + 4)?.ToLowerInvariant() ?? "";
+                    if (!chemin.Contains("054c")) continue;   // Sony
+                    if (chemin.Contains("0ce6") || chemin.Contains("0df2")) return (chemin, true);                              // DualSense, DualSense Edge
+                    if (chemin.Contains("05c4") || chemin.Contains("09cc") || chemin.Contains("0ba0")) return (chemin, false);   // DualShock 4, et son adaptateur
+                }
+                finally { Marshal.FreeHGlobal(detail); }
+            }
+        }
+        finally { SetupDiDestroyDeviceInfoList(liste); }
+        return null;
+    }
+    static void Ecouter(string chemin, bool dualsense)
+    {
+        using var poignee = CreateFile(chemin, 0x80000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);   // lecture seule, partagée : le jeu la lit aussi
+        if (poignee.IsInvalid) return;
+        using var flux = new FileStream(poignee, FileAccess.Read, 1, false);
+        Journal.Ecrire("manette PlayStation reliée (" + (dualsense ? "DualSense" : "DualShock 4") + ")");
+        var b = new byte[1024];
+        while (true)
+        {
+            var n = flux.Read(b, 0, b.Length); if (n <= 0) return;
+            // où sont les sticks et les trois octets de boutons, selon la manette et la liaison
+            int s, f;
+            if (dualsense) { if (b[0] == 0x31) { s = 2; f = 9; } else if (b[0] == 0x01 && n >= 64) { s = 1; f = 8; } else if (b[0] == 0x01) { s = 1; f = 5; } else continue; }
+            else { if (b[0] == 0x11) { s = 3; f = 7; } else if (b[0] == 0x01) { s = 1; f = 5; } else continue; }
+            if (n < f + 3) continue;
+            byte face = b[f], epaule = b[f + 1], systeme = b[f + 2]; int croix = face & 0x0F; ushort x = 0;
+            if (croix is 7 or 0 or 1) x |= 1; if (croix is 3 or 4 or 5) x |= 2; if (croix is 5 or 6 or 7) x |= 4; if (croix is 1 or 2 or 3) x |= 8;   // haut, bas, gauche, droite
+            if ((face & 0x20) != 0) x |= 0x1000; if ((face & 0x40) != 0) x |= 0x2000; if ((face & 0x80) != 0) x |= 0x8000;                       // croix = A, rond = B, triangle = Y
+            if ((epaule & 0x01) != 0) x |= 0x100; if ((epaule & 0x02) != 0) x |= 0x200; if ((epaule & 0x10) != 0) x |= 0x20; if ((epaule & 0x20) != 0) x |= 0x10;   // L1, R1, Share, Options
+            if ((systeme & 0x01) != 0) x |= 0x400;   // le bouton PS, comme le bouton Xbox
+            short Axe(byte v, bool inverse) => (short)Math.Clamp((inverse ? 128 - v : v - 128) * 256, short.MinValue, short.MaxValue);
+            lock (verrou) etat = (x, Axe(b[s], false), Axe(b[s + 1], true), (systeme & 0x02) != 0, DateTime.Now);   // XInput : le haut est positif
+        }
     }
 }
 

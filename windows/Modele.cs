@@ -80,6 +80,7 @@ public sealed record Aides(string Ok, string Retour, string Options, string Plus
 {
     public static readonly Aides Clavier = new("Entrée", "Échap", "O", "N", "Tab", null);
     public static readonly Aides Xbox = new("A", "B", "≡", "⧉", "LB RB", "Manette Xbox");
+    public static readonly Aides PlayStation = new("✕", "○", "OPTIONS", "SHARE", "L1 R1", "Manette PlayStation");
 }
 
 public static class Dossiers

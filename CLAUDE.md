@@ -165,7 +165,8 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     Un mod en ligne et l'adresse d'un serveur ne sont jamais dans le dépôt ni dans l'installeur sans l'accord écrit de l'auteur.
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
 - **Menu en jeu** (`EnJeu.cs`, recopie de `HUDView` / `toggleQuick` / `quickAct`) : une fenêtre à part, transparente, toujours devant
-  le jeu (`FenetreRapide`), ouverte par le bouton Xbox ou Select + Start. Fermer le jeu, Retour à Home, Volume du jeu (`SonJeu` : la
+  le jeu (`FenetreRapide`), ouverte par le pavé tactile d'une manette PlayStation (lue directement en HID, `ManetteSony` : XInput ne
+  la voit pas), le bouton PS ou Xbox, ou Select + Start. Fermer le jeu, Retour à Home, Volume du jeu (`SonJeu` : la
   session du jeu dans le mélangeur de Windows, gardé par jeu dans `Config.Volumes`), et Joueurs pour un jeu en ligne. Limites de
   Windows : la manette n'est pas retirée au jeu pendant que le menu est ouvert, et rien ne passe devant un plein écran exclusif.
   La liste des joueurs ne vient pas du SSH (la clé ne se partage pas) : le serveur la publie lui-même avec `serveur/totk-etat.py`,

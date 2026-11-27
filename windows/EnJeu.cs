@@ -216,7 +216,7 @@ sealed class VueRapide : Panel
             rangee.Children.Add(disque);
         }
         bas.Children.Add(Carte(rangee, 56, new Thickness(22, 14)));
-        var aides = lib.RapideCurseur ? U.Ligne(10, U.Pilule("Y", lib.Muet ? "Son" : "Muet"), U.Pilule(lib.Aides.Retour, "Retour"))
+        var aides = lib.RapideCurseur ? U.Ligne(10, U.Pilule(lib.Aides == Aides.PlayStation ? "△" : "Y", lib.Muet ? "Son" : "Muet"), U.Pilule(lib.Aides.Retour, "Retour"))
             : lib.RapideJoueurs ? U.Ligne(10, U.Pilule(lib.Aides.Retour, "Fermer")) : U.Ligne(10, U.Pilule(lib.Aides.Ok, i >= 2 ? "Ouvrir" : "Valider"), U.Pilule(lib.Aides.Retour, "Fermer"));
         aides.HorizontalAlignment = HorizontalAlignment.Center; aides.RenderTransformOrigin = U.Centre; aides.RenderTransform = new ScaleTransform(0.86, 0.86);
         bas.Children.Add(aides);
