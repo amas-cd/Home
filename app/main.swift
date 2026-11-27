@@ -3305,62 +3305,46 @@ struct SaisieView: View {
         .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { champ = true } }
     }
 }
-/// L'installation des composants, en plein écran, comme la mise en route d'une console : les lueurs de l'écran de démarrage, un grand
-/// anneau qui se remplit avec le pourcentage au centre, l'étape en cours et le temps restant. Rien d'autre n'est accessible.
+/// L'installation des moteurs de jeu, en plein écran, comme la mise en route d'une console. Sobre : un titre qui dit ce qui
+/// s'installe, un anneau blanc fin avec le pourcentage, l'étape en cours et le temps restant. Rien d'autre n'est accessible ni affiché.
 struct InstallationView: View {
     @ObservedObject var lib: Library; let t: Tache
     @State private var paru = false
-    @State private var souffle = false
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { tl in
             let echec = t.erreur != nil, fini = t.fini && !echec
             let fr = fini ? 1 : min(0.995, max(0, TacheView.fraction(t, tl.date) ?? 0))
+            let quoi = lib.config.mode == "pc" ? "le moteur des jeux PC" : lib.config.mode == "nintendo" ? "les moteurs des jeux Switch" : "les moteurs des jeux Switch et PC"
             ZStack {
                 Color(red: 0.02, green: 0.02, blue: 0.05)
-                GeometryReader { g in   // trois lueurs qui dérivent lentement : l'écran vit pendant l'attente
-                    ZStack {
-                        Circle().fill(Library.violet[0]).frame(width: 640, height: 640).blur(radius: 170).opacity(0.50).offset(x: -g.size.width * 0.24, y: souffle ? -70 : 50)
-                        Circle().fill(Library.bleu[0]).frame(width: 600, height: 600).blur(radius: 170).opacity(0.42).offset(x: g.size.width * 0.26, y: souffle ? 80 : -40)
-                        Circle().fill(echec ? Color.orange : Library.orange[0]).frame(width: 520, height: 520).blur(radius: 170).opacity(echec ? 0.45 : 0.30).offset(x: souffle ? 60 : -60, y: g.size.height * 0.34)
-                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+                Circle().fill(Library.violet[1]).frame(width: 900, height: 900).blur(radius: 220).opacity(0.22).offset(y: 260)   // une seule lueur, basse et discrète
                 VStack(spacing: 0) {
-                    Text(echec ? "INSTALLATION INTERROMPUE" : fini ? "C'EST PRÊT" : "INSTALLATION").font(.system(size: 50, weight: .black).width(.expanded)).tracking(paru ? 8 : 30).lineLimit(1).minimumScaleFactor(0.6)
-                        .id(echec ? 2 : fini ? 1 : 0).transition(.opacity)
-                    Text(lib.modeResume.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(3).opacity(0.6).padding(.top, 14)
+                    Text(echec ? "INSTALLATION INTERROMPUE" : fini ? "MOTEURS INSTALLÉS" : "INSTALLATION DES MOTEURS").font(.system(size: 34, weight: .black).width(.expanded)).tracking(4).lineLimit(1).minimumScaleFactor(0.6)
+                    Text(echec ? "Vérifie la connexion à Internet, puis réessaie." : "Home installe \(quoi) : ce qui fait tourner tes jeux sur ce Mac.")
+                        .font(.system(size: 20, weight: .medium)).opacity(0.6).multilineTextAlignment(.center).frame(maxWidth: 900).padding(.top, 14)
                     ZStack {
-                        // un anneau qui s'élargit et s'efface, sans fin : le signe que ça travaille
-                        if !echec && !fini { Circle().stroke(.white.opacity(0.35), lineWidth: 2).scaleEffect(souffle ? 1.34 : 1).opacity(souffle ? 0 : 0.7) }
-                        Circle().stroke(.white.opacity(0.10), lineWidth: 16)
-                        Circle().trim(from: 0, to: max(0.012, fr))
-                            .stroke(echec ? AngularGradient(colors: [.orange, .red, .orange], center: .center) : AngularGradient(colors: [Library.violet[0], Library.bleu[0], Library.orange[0], Library.violet[0]], center: .center),
-                                    style: StrokeStyle(lineWidth: 16, lineCap: .round))
-                            .rotationEffect(.degrees(-90)).shadow(color: (echec ? Color.orange : Library.violet[0]).opacity(0.7), radius: 22).animation(.easeInOut(duration: 0.9), value: fr)
-                        if echec { Image(systemName: "exclamationmark").font(.system(size: 96, weight: .black)) }
-                        else if fini { Image(systemName: "checkmark").font(.system(size: 96, weight: .black)).transition(.scale(scale: 0.6).combined(with: .opacity)) }
+                        Circle().stroke(.white.opacity(0.12), lineWidth: 6)
+                        Circle().trim(from: 0, to: max(0.01, fr)).stroke(echec ? Color.orange : Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                            .rotationEffect(.degrees(-90)).animation(.easeInOut(duration: 0.9), value: fr)
+                        if echec { Image(systemName: "exclamationmark").font(.system(size: 64, weight: .bold)).foregroundStyle(Color.orange) }
+                        else if fini { Image(systemName: "checkmark").font(.system(size: 64, weight: .bold)) }
                         else {
-                            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                                Text("\(Int(fr * 100))").font(.system(size: 104, weight: .black).width(.expanded)).monospacedDigit().contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(fr * 100))
-                                Text("%").font(.system(size: 34, weight: .black).width(.expanded)).opacity(0.6)
+                            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                                Text("\(Int(fr * 100))").font(.system(size: 68, weight: .semibold, design: .rounded)).monospacedDigit().contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(fr * 100))
+                                Text("%").font(.system(size: 26, weight: .semibold, design: .rounded)).opacity(0.5)
                             }
                         }
-                    }.frame(width: 330, height: 330).padding(.top, 64).padding(.bottom, 56).scaleEffect(paru ? 1 : 0.8).opacity(paru ? 1 : 0)
-                    Text(echec ? (t.erreur ?? "Échec") : fini ? "Tout est installé" : t.etape).font(.system(size: 28, weight: .semibold, design: .rounded)).lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: 1000)
+                    }.frame(width: 230, height: 230).padding(.top, 70).padding(.bottom, 54)
+                    Text(echec ? (t.erreur ?? "Échec") : fini ? "Tout est prêt" : t.etape).font(.system(size: 24, weight: .semibold, design: .rounded)).lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: 900)
                         .id(echec ? "échec" : t.etape).transition(.opacity)
-                    Text(echec ? "Vérifie la connexion à Internet, puis réessaie." : fini ? " " : TacheView.restant(t, tl.date)).font(.system(size: 19, weight: .medium)).opacity(0.6).padding(.top, 10)
-                    Group {
-                        if echec { HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") } }
-                        else { Text("Laisse le Mac allumé : ta bibliothèque s'ouvre dès que c'est fini.").font(.system(size: 17, weight: .medium)).opacity(0.45) }
-                    }.padding(.top, 46).frame(height: 90, alignment: .top)
-                }.foregroundStyle(.white).opacity(paru ? 1 : 0)
+                    Text(echec || fini ? " " : TacheView.restant(t, tl.date)).font(.system(size: 17, weight: .medium)).opacity(0.5).padding(.top, 8)
+                    HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") }.padding(.top, 40).opacity(echec ? 1 : 0)
+                }.foregroundStyle(.white).opacity(paru ? 1 : 0).offset(y: paru ? 0 : 18)
                 .animation(.easeInOut(duration: 0.4), value: t.etape).animation(.easeInOut(duration: 0.5), value: echec).animation(.easeInOut(duration: 0.5), value: fini)
             }
         }
         .ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
-        .onAppear {
-            withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.9)) { paru = true }
-            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: false)) { souffle = true }
-        }
+        .onAppear { withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.7)) { paru = true } }
     }
 }
 struct PickerView: View {
@@ -3585,7 +3569,7 @@ struct Screen: View {
             // les messages (« déjà à jour », « clé enregistrée »…) : une pastille en bas à droite, à la marge de l'écran et sur la ligne des aides,
             // au-dessus de la pastille d'avancement quand il y en a une ; elle monte en fondu et repart en fondu
             ZStack(alignment: .bottomTrailing) {
-                if let t = lib.toast {
+                if let t = lib.toast, !lib.installation {   // rien par-dessus l'écran d'installation
                     HStack(spacing: 12) {
                         Circle().fill(.white).frame(width: 8, height: 8).shadow(color: .white.opacity(0.7), radius: 5)
                         Text(t).font(.system(size: 16, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
