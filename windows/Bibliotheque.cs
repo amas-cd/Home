@@ -6,7 +6,7 @@ using Avalonia.Threading;
 
 namespace Home;
 
-public sealed class Bibliotheque
+public sealed partial class Bibliotheque
 {
     public event Action? Change;
     public Config Config = Json.Lire<Config>(FichierConfig);
@@ -298,21 +298,22 @@ public sealed class Bibliotheque
             }
             else if (!Demo) { Dire("Les jeux ne se lancent que sur Windows"); return; }
             Journal.Ecrire($"lancement : {j.Nom} ({j.Id})");
+            Lance = j.Origine is Origine.Switch or Origine.App ? p : null;
             EnCours = j; EnCoursDepuis = DateTime.Now;
             if (!Stats.TryGetValue(j.Id, out var s)) Stats[j.Id] = s = new Stat();
             s.DernierePartie = DateTime.Now; Json.Ecrire(FichierStats, Stats); Signaler();
-            var vu = await Task.Run(() => Attendre(j, p, dossier));
+            var vu = await Task.Run(() => Attendre(j, p, dossier, () => RemettreVolume(j)));
             if (vu) { s.Minutes += (int)Math.Round((DateTime.Now - EnCoursDepuis).TotalMinutes); Json.Ecrire(FichierStats, Stats); }
             Journal.Ecrire($"fin : {j.Nom}, {(DateTime.Now - EnCoursDepuis).TotalMinutes:0} min{(vu ? "" : " (le jeu n'a pas été vu en train de tourner)")}");
         }
         catch (Exception e) { Journal.Ecrire($"lancement de {j.Nom} : {e.Message}"); Dire("Impossible de lancer " + j.Nom); }
-        EnCours = null;
+        EnCours = null; Lance = null; FermerRapide();
         var i = Visibles.FindIndex(x => x.Id == j.Id); if (i >= 0) Selection = i;
         Devant?.Invoke(); Son("ouvrir"); Signaler();
     }
     /// Attend la fin de la partie. Une app lancée directement : on attend son processus. Steam, Epic et les jeux Switch : on regarde si un
     /// programme du dossier du jeu tourne (le launcher rend la main tout de suite, et beaucoup de jeux se relancent eux-mêmes).
-    static bool Attendre(Jeu j, Process? p, string dossier)
+    static bool Attendre(Jeu j, Process? p, string dossier, Action? vuTourner = null)
     {
         if (!OperatingSystem.IsWindows()) { Thread.Sleep(6000); return false; }   // démonstration sur Mac : l'écran « en cours de jeu » quelques secondes
         if (j.Origine == Origine.App && p != null) { p.WaitForExit(); return true; }
@@ -320,7 +321,7 @@ public sealed class Bibliotheque
         while (true)
         {
             Thread.Sleep(vu ? 4000 : 2000);
-            if (Systeme.TourneDans(dossier)) { vu = true; absences = 0; }
+            if (Systeme.TourneDans(dossier)) { if (!vu || (DateTime.Now - debut).TotalSeconds < 40) vuTourner?.Invoke(); vu = true; absences = 0; }   // son volume, dès qu'il joue du son
             else if (vu) { if (++absences >= 2) return true; }   // deux absences de suite : le jeu est fermé (pas juste en train de se relancer)
             else if (DateTime.Now - debut > TimeSpan.FromSeconds(120)) return false;   // jamais démarré (lancement annulé, mise à jour du launcher…)
         }

@@ -54,6 +54,7 @@ Il n'y a qu'un dépôt : le code, et les releases que Home lit sans jeton pour s
 | `moteur/pc/pc.py` | Jeux PC sans Obelisk : télécharge Voile, compte Epic (Legendary), bibliothèque, installation, lancement. Lancé par `outils/pc.command` |
 | `moteur/compat/pc.json` | Liste de compatibilité PC, avec sources : `bloque` (jamais lancé), `verifie`, `linux`. Un jeu absent n'est jamais bloqué |
 | `moteur/.upstream-ref`, `moteur/mng/` | Versions figées : commit de nxnative ; commit de MacNativeGames + les commits d'Anas en patchs |
+| `serveur/totk-etat.py` | À poser sur un serveur TOTK Online : publie en lecture seule les pseudos des joueurs connectés (pour Home sur Windows). Aucune adresse dedans |
 | `scripts/installer-local.sh` | Recopie le dépôt dans `~/Library/Application Support/Home/moteur`, puis compile et installe Home sur ce Mac |
 | `.github/workflows/release.yml` | Compile Home.app sur `macos-26` (Swift 6.3) à chaque push. Publie une release avec `Home-macSilicon.dmg` et `Home-win64-setup.exe` (chacun avec son `.sha256`) pour un tag `v*` ou pour « Run workflow » avec une version |
 | `.claude/` | Ce contexte : le hook Stop qui te rappelle de demander l'envoi de la mise à jour |
@@ -158,8 +159,13 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     donnée, dans `recompiled/<id>/serveur.txt` (sur le PC seulement), qu'il passe à chaque lancement (`--swkbd-text=`).
     Un mod en ligne et l'adresse d'un serveur ne sont jamais dans le dépôt ni dans l'installeur sans l'accord écrit de l'auteur.
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
-- **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
-  haut), choix des images dans Home (un fichier à la place).
+- **Menu en jeu** (`EnJeu.cs`, recopie de `HUDView` / `toggleQuick` / `quickAct`) : une fenêtre à part, transparente, toujours devant
+  le jeu (`FenetreRapide`), ouverte par le bouton Xbox ou Select + Start. Fermer le jeu, Retour à Home, Volume du jeu (`SonJeu` : la
+  session du jeu dans le mélangeur de Windows, gardé par jeu dans `Config.Volumes`), et Joueurs pour un jeu en ligne. Limites de
+  Windows : la manette n'est pas retirée au jeu pendant que le menu est ouvert, et rien ne passe devant un plein écran exclusif.
+  La liste des joueurs ne vient pas du SSH (la clé ne se partage pas) : le serveur la publie lui-même avec `serveur/totk-etat.py`,
+  sur le port juste après celui du jeu (`JoueursEnLigne`). Scénarios `rapide`, `rapidevolume`, `rapidejoueurs`. Jamais essayé sur un PC.
+- **Pas sur Windows** : SMO Online, GameBanana, capture, la barre de volume du haut, choix des images dans Home (un fichier à la place).
 - **Premier lancement**, dans l'ordre du Mac, chaque étape à valider : `BienvenueVue` (recopie de `BienvenueView` : trois cartes
   Tout / Nintendo / PC, « Commencer », « Ignorer » discret) ; « Clés de la console » (`MenusSwitch.AccueilCles` : « Recherche… », puis
   « prod.keys : trouvé » + « Continuer », ou « Choisir prod.keys » + « Plus tard » ; « Quelles clés ? ») ; l'installation
@@ -202,6 +208,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `Vues.cs` | `Mouvement` (courbes et durées), `Ecran`, `Tuile`, `RangeeJeux`, `FondVue`, `Ouverture` (écran de démarrage), `PastilleTache`, « en cours de jeu », saisie |
 | `VuesMenus.cs` | `VueMenu` : les trois formes de `MenuView` (rangée de pastilles, roue, grille d'affiches). `Menu.Genre` choisit la forme, comme sur Mac |
 | `ANIMATIONS.md` | La fiche des animations de l'app Mac (courbes, durées, distances) : la référence de `Vues.cs` et `VuesMenus.cs` |
+| `EnJeu.cs` | Le menu en jeu : `SonJeu` (volume du jeu), `JoueursEnLigne`, la partie de `Bibliotheque` qui le conduit, `VueRapide`, `FenetreRapide` |
 | `Manette.cs` | `Manette` (XInput), `Sons` (les .wav de `app/sons`), `Systeme` (processus d'un dossier, Corbeille) |
 | `MiseAJour.cs` | Mise à jour de Home depuis les releases de amas-cd/Home |
 | `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |

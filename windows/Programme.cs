@@ -61,6 +61,7 @@ sealed class Fenetre : Window
         {
             Journal.Ecrire($"Home {Bibliotheque.Version} démarre ({Environment.OSVersion})");
             manette = new Manette(lib, () => IsActive);
+            if (OperatingSystem.IsWindows()) _ = new FenetreRapide(lib, this);   // le menu en jeu : une fenêtre à part, devant le jeu
             if (Icones.Inconnues().ToList() is { Count: > 0 } inconnues) Journal.Ecrire("icônes inconnues : " + string.Join(", ", inconnues));
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null && lib.Config.Ouverture) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
@@ -123,6 +124,13 @@ sealed class Fenetre : Window
                 case "place": MenusSwitch.LibererPlace(lib); break;
                 case "saisie": lib.Demander("Nouveau nom", "Au clavier", _ => { }); break;
                 case "tache": lib.Tache = new Tache { Titre = "Construction de Zelda", Etape = "Recompilation du code…" }; lib.Dire("Bibliothèque actualisée"); break;
+                case "rapide" or "rapidevolume" or "rapidejoueurs":
+                    // le menu en jeu, dessiné ici dans la fenêtre de Home pour le voir sans jeu (sur Windows il est dans sa propre fenêtre, devant le jeu)
+                    lib.EnCours = lib.Courant; lib.EnCoursDepuis = DateTime.Now.AddMinutes(-83); lib.Rapide = true; lib.Volume = 0.65; lib.Batterie = 80;
+                    if (s == "rapidevolume") { lib.IndexRapide = 2; lib.RapideCurseur = true; }
+                    if (s == "rapidejoueurs") { lib.RapideJoueurs = true; lib.JoueursLus = true; lib.Joueurs = ["Joueur 1", "Joueur 2", "Joueur 3"]; }
+                    racine.Children.Add(new VueRapide(lib) { Width = 1920, Height = ecran.Height, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative), RenderTransform = new ScaleTransform(echelle, echelle) });
+                    lib.Signaler(); break;
                 case "installation": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur… 21 Mo sur 58", Fraction = 0.33 }; lib.Signaler(); break;
                 case "installationechec": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur…", Fraction = 0.33, Fini = true, Erreur = "la liste des versions de ScarletNX n'a pas pu être lue" }; lib.Signaler(); break;
                 case "echec": { var te = new Tache { Titre = "Construction de Zelda", Etape = "Échec", Erreur = "Le fichier du jeu n'est plus là", Fini = true }; lib.Tache = te; lib.FinTache(te); } break;

@@ -39,6 +39,7 @@ public sealed class Config
     public string? Mode { get; set; }
     public List<string> Categories { get; set; } = new();                    // les catégories à soi, en plus de celles de base
     public Dictionary<string, string> CategoriesJeux { get; set; } = new();  // le jeu → la catégorie où on l'a rangé
+    public Dictionary<string, double> Volumes { get; set; } = new();        // le volume réglé pour chaque jeu dans le menu en jeu (0 à 1)
     public bool Ouverture { get; set; } = true;               // l'écran de démarrage (logo et jingle) au lancement de Home
     public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
 }
@@ -122,7 +123,7 @@ public static class Icones
 {
     static readonly (string sf, string fluent)[] table =
     [
-        ("play", "Play"), ("photo", "Image"), ("paint", "PaintBrush"), ("textformat", "TextFont"), ("tag", "Tag"), ("puzzle", "PuzzlePiece"),
+        ("play", "Play"), ("photo", "Image"), ("paint", "PaintBrush"), ("textformat", "TextFont"), ("tag", "Tag"), ("house", "Home"), ("stop", "Stop"), ("chart.bar", "DataBarVertical"), ("arrow.uturn.backward", "ArrowUndo"), ("person.2", "People"), ("xmark.circle", "DismissCircle"), ("puzzle", "PuzzlePiece"),
         ("square.and.arrow.down", "ArrowDownload"), ("arrow.down.circle", "ArrowCircleDown"), ("arrow.down", "ArrowDown"), ("arrow.clockwise", "ArrowClockwise"), ("arrow.up", "ArrowUp"), ("arrow.left", "ArrowLeft"), ("arrow", "ArrowRight"),
         ("hammer", "WrenchScrewdriver"), ("folder", "Folder"), ("gamecontroller", "Games"), ("globe", "Globe"), ("magnifying", "Search"),
         ("shippingbox", "Box"), ("pencil", "Edit"), ("ellipsis", "MoreHorizontal"), ("checkmark", "Checkmark"), ("doc.on.clipboard", "ClipboardPaste"), ("doc", "Document"),
