@@ -570,10 +570,30 @@ public static class MenusSwitch
         if (dump.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase) && !File.Exists(Construction.ClesTitres)) ClesTitres(lib, d); else Mode(lib, d);
     }
     /// Les clés sont copiées dans le dossier de Home, sur ce PC seulement : le jeu en a besoin à chaque lancement
-    static bool Installer(Bibliotheque lib, string source, string cible)
+    public static bool Installer(Bibliotheque lib, string source, string cible)
     {
         try { if (new FileInfo(source).Length > 4 << 20) throw new InvalidDataException("ce fichier est trop gros pour être un fichier de clés"); File.Copy(source, cible, true); return true; }
         catch (Exception e) { Journal.Ecrire("clés : " + e.Message); lib.Dire("Les clés n'ont pas pu être installées : " + e.Message); return false; }
+    }
+    /// Premier lancement, jeux Switch : le fichier prod.keys de la console. Home le cherche lui-même et l'installe ; sinon il le demande,
+    /// et « Plus tard » passe l'étape (il sera redemandé à la première construction).
+    public static async void AccueilCles(Bibliotheque lib, Action puis)
+    {
+        if (File.Exists(Construction.ClesProd)) { puis(); return; }
+        if (await Task.Run(() => Trouvailles.Cles("prod.keys")) is { } trouvees && Installer(lib, trouvees, Construction.ClesProd))
+        {
+            if (Trouvailles.Cles("title.keys") is { } titres) Installer(lib, titres, Construction.ClesTitres);
+            lib.Dire("Clés trouvées dans " + Trouvailles.Lieu(trouvees, taille: false) + " : installées dans Home"); puis(); return;
+        }
+        lib.Ouvrir(new Menu
+        {
+            Titre = "Clés de la console", Symbole = "key", Texte = "Home s'en sert pour construire tes jeux Switch. Elles restent sur ce PC.", Retour = () => { lib.FermerMenus(); puis(); },
+            Elements =
+            {
+                new("Choisir prod.keys", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier prod.keys de ta console", ["prod.keys", "*.keys"]) is { } f && Installer(lib, f, Construction.ClesProd)) { lib.FermerMenus(); puis(); } }, "Le fichier de clés extrait de ta propre console") { Teinte = Icones.Jaune },
+                new("Plus tard", "arrow.right", () => { lib.FermerMenus(); puis(); }) { Teinte = Icones.Gris },
+            },
+        });
     }
     static void ClesTitres(Bibliotheque lib, Demande d) => lib.Ouvrir(new Menu
     {

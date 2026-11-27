@@ -160,8 +160,12 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
 - **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
   haut), choix des images dans Home (un fichier à la place).
-- **Mode d'utilisation** (`Config.Mode` : tout / nintendo / pc, `Bibliotheque.OuvrirMode`) : « Bienvenue » au premier lancement, puis
-  Menu → Composants, avec les mots du Mac. Nintendo télécharge ScarletNX tout de suite ; il n'y a pas d'étape « Moteurs » (un seul moteur).
+- **Premier lancement** : `BienvenueVue` recopie `BienvenueView` du Mac (trois cartes Tout / Nintendo / PC, « Commencer », « Ignorer »
+  discret), pas un menu. Ensuite, comme sur Mac : les clés de la console (`MenusSwitch.AccueilCles`, installées seules si Home les
+  trouve), puis ScarletNX téléchargé. Le choix (`Config.Mode` : tout / nintendo / pc) se change dans Menu → Composants
+  (`Bibliotheque.OuvrirMode`). Pas d'étape « Moteurs » (un seul moteur) ni « Tes bibliothèques » (Steam et Epic sont détectés).
+- **Repères des services** : `U.Repere` et `U.Console` recopient `Symbole` du Mac (console portable, quatre carreaux, bielle,
+  écusson). Ce sont des dessins de Home : aucun logo de marque dans le dépôt.
 - **Désinstaller** : un jeu Switch part à la Corbeille. Pour un jeu Steam ou Epic, Home ne supprime rien lui-même : il ouvre la
   désinstallation de la boutique (`steam://uninstall/<appid>`, le lanceur Epic). Une app ajoutée à la main : « Retirer de Home » seulement.
 - **Graphisme** : l'app Mac fait foi. `windows/` la recopie vue par vue ; une vue reste en place et on change ses propriétés (c'est ce

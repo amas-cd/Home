@@ -49,7 +49,7 @@ public sealed class Bibliotheque
     {
         Origine.Steam => ("Steam", "logo:steam"), Origine.Epic => ("Epic Games", "logo:epic"),
         Origine.Switch => j.EnConstruction ? ("En construction", "hammer") : ("Nintendo Switch", "logo:switch"),
-        _ => ("App Windows", "pc"),
+        _ => ("App Windows", "logo:windows"),
     };
 
     public void Recharger(string? selectionner = null)
@@ -86,6 +86,12 @@ public sealed class Bibliotheque
     public void Nav(string k)
     {
         if (PasserOuverture?.Invoke() == true) return;
+        if (Bienvenue)
+        {   // l'accueil du premier lancement : gauche et droite choisissent une carte, la touche des options l'ignore
+            if (k is "left" or "right") { var carte = Math.Clamp(BienvenueIndex + (k == "left" ? -1 : 1), 0, 2); if (carte != BienvenueIndex) { BienvenueIndex = carte; Son("deplacer"); Signaler(); } }
+            else if (k == "ok") BienvenueValider(); else if (k == "options") BienvenueIgnorer();
+            return;
+        }
         if (Saisie != null) { if (k == "back") { Saisie = null; Son("retour"); Signaler(); } return; }
         if (EnCours != null) return;
         if (Menu != null) { NavMenu(k); return; }
@@ -215,6 +221,18 @@ public sealed class Bibliotheque
             else if (DateTime.Now - debut > TimeSpan.FromSeconds(120)) return false;   // jamais démarré (lancement annulé, mise à jour du launcher…)
         }
     }
+    // MARK: L'accueil du premier lancement (BienvenueVue) : un écran à part, pas un menu
+    public bool Bienvenue; public int BienvenueIndex;
+    /// La suite, dans l'ordre où les choses servent, comme sur Mac : les clés de la console (sans elles aucun jeu Switch ne se
+    /// construit), puis le moteur. Les comptes Epic et Steam du Mac n'ont pas d'équivalent ici : leurs jeux installés sont détectés.
+    public void BienvenueValider()
+    {
+        Son("valider"); Config.Mode = new[] { "tout", "nintendo", "pc" }[BienvenueIndex]; Enregistrer(); Bienvenue = false; Recharger();
+        void Installer() { if (ModeNintendo && OperatingSystem.IsWindows() && Moteur.Exe == null) _ = Construction.PreparerMoteur(this); }
+        if (ModeNintendo) MenusSwitch.AccueilCles(this, Installer); else Installer();
+    }
+    public void BienvenueIgnorer() { Config.Mode = "tout"; Enregistrer(); Son("retour"); Bienvenue = false; Signaler(); }
+
     // MARK: Mode d'utilisation : ce que Home sert à faire sur ce PC (jeux Nintendo, jeux PC, les deux), comme sur Mac
     public bool ModeNintendo => Config.Mode != "pc";
     public bool ModePC => Config.Mode != "nintendo";

@@ -105,21 +105,82 @@ static class U
         var forme = new Avalonia.Controls.Shapes.Path { Data = trace, Fill = couleur ?? Brushes.White, Width = 100, Height = 100, Stretch = Stretch.None, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative), RenderTransform = new ScaleTransform(taille / 100, taille / 100) };
         return new Canvas { Width = taille, Height = taille, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, Children = { forme } };
     }
-    static readonly Dictionary<string, Bitmap?> logos = new();
-    /// La pastille d'une console ou d'une boutique (`Symbole` sur Mac) : son logo sur un disque à sa couleur (le rouge de la Switch, le
-    /// bleu nuit de Steam), ou un symbole sur un disque sombre
+    // Les repères des services (`Symbole` sur Mac) : des dessins de Home, pas des logos de marques (le dépôt est public). Une console
+    // portable pour la Switch, quatre carreaux pour Windows, une bielle pour Steam, un écusson pour Epic Games.
+    static Color Rvb(string nom) => nom switch
+    {
+        "logo:switch" => Color.FromRgb(224, 5, 23), "logo:steam" => Color.FromRgb(18, 43, 97), "logo:windows" => Color.FromRgb(5, 117, 219), _ => Color.FromRgb(41, 41, 48),
+    };
+    /// Le disque derrière un repère : la couleur du service, plus claire en haut à gauche pour lui donner du volume
+    static IBrush DegradeRepere(string nom)
+    {
+        var c = Rvb(nom); Color N(double k, double p) => Color.FromRgb((byte)Math.Min(255, c.R * k + p * 255), (byte)Math.Min(255, c.G * k + p * 255), (byte)Math.Min(255, c.B * k + p * 255));
+        return Degrade(0, 0, 1, 1, (N(1.18, 0.10), 0), (N(1, 0), 0.5), (N(0.58, 0), 1));
+    }
+    static Geometry Bielle(double t)
+    {
+        Geometry Rond(double x, double y, double r) => new EllipseGeometry(new Rect((x - r) * t, (y - r) * t, 2 * r * t, 2 * r * t));
+        var bras = new StreamGeometry();
+        using (var g = bras.Open()) { g.BeginFigure(new Point(0.537 * t, 0.251 * t), true); g.LineTo(new Point(0.743 * t, 0.469 * t)); g.LineTo(new Point(0.315 * t, 0.838 * t)); g.LineTo(new Point(0.165 * t, 0.682 * t)); g.EndFigure(true); }
+        Geometry Plus(Geometry a, Geometry b) => new CombinedGeometry(GeometryCombineMode.Union, a, b);
+        Geometry Moins(Geometry a, Geometry b) => new CombinedGeometry(GeometryCombineMode.Exclude, a, b);
+        // le volant, son moyeu, le bras qui s'affine, le palier : d'un seul bloc, avec deux découpes
+        return Moins(Plus(Moins(Plus(Plus(bras, Rond(0.64, 0.36, 0.285)), Rond(0.24, 0.76, 0.155)), Rond(0.645, 0.355, 0.195)), Rond(0.648, 0.352, 0.112)), Rond(0.238, 0.762, 0.066));
+    }
+    static Geometry Ecusson(double l, double h)
+    {
+        var e = new StreamGeometry(); double c = l * 0.14, y = h * 0.58;
+        using (var g = e.Open())
+        {
+            g.BeginFigure(new Point(c, 0), true); g.LineTo(new Point(l - c, 0)); g.QuadraticBezierTo(new Point(l, 0), new Point(l, c)); g.LineTo(new Point(l, y));
+            g.QuadraticBezierTo(new Point(l, h * 0.88), new Point(l / 2, h)); g.QuadraticBezierTo(new Point(0, h * 0.88), new Point(0, y)); g.LineTo(new Point(0, c)); g.QuadraticBezierTo(new Point(0, 0), new Point(c, 0)); g.EndFigure(true);
+        }
+        return e;
+    }
+    /// Le dessin d'un repère, à l'encre donnée ; `creux` : la couleur de ce qui est découpé dedans (le fond sur lequel il est posé)
+    public static Control Repere(string nom, double taille, IBrush encre, IBrush? creux = null)
+    {
+        creux ??= Noir(0.35);
+        switch (nom)
+        {
+            case "logo:switch":
+            {   // une console portable vue de face : l'écran entre ses deux manettes, un stick de chaque côté
+                double h = taille * 0.86, l = taille * 1.62, m = l * 0.21, r = h * 0.30;
+                Border Manette(bool gauche) => new()
+                {
+                    Width = m, Height = h, Background = encre, CornerRadius = gauche ? new CornerRadius(r, 3, 3, r) : new CornerRadius(3, r, r, 3),
+                    Child = new Border { Width = m * 0.46, Height = m * 0.46, CornerRadius = new CornerRadius(m), Background = Noir(0.42), HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = gauche ? VerticalAlignment.Top : VerticalAlignment.Bottom, Margin = gauche ? new Thickness(0, h * 0.20, 0, 0) : new Thickness(0, 0, 0, h * 0.20) },
+                };
+                var ecran = new Border { Width = l - 2 * m - taille * 0.10, Height = h, CornerRadius = new CornerRadius(4), Background = encre, Child = new Border { Margin = new Thickness(taille * 0.07), CornerRadius = new CornerRadius(2), Background = Noir(0.30) } };
+                var s = Ligne(taille * 0.05, Manette(true), ecran, Manette(false)); s.HorizontalAlignment = HorizontalAlignment.Center; s.VerticalAlignment = VerticalAlignment.Center; return s;
+            }
+            case "logo:windows":
+            {   // quatre carreaux nets et serrés
+                double t = taille * 1.16, j = t * 0.07, c = (t - j) / 2; var grille = new Canvas { Width = t, Height = t, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+                foreach (var (x, y) in new[] { (0d, 0d), (c + j, 0d), (0d, c + j), (c + j, c + j) }) { var carreau = new Border { Width = c, Height = c, Background = encre }; Canvas.SetLeft(carreau, x); Canvas.SetTop(carreau, y); grille.Children.Add(carreau); }
+                return grille;
+            }
+            case "logo:steam":
+            {   var t = taille * 1.42; return new Avalonia.Controls.Shapes.Path { Data = Bielle(t), Fill = encre, Width = t, Height = t, Stretch = Stretch.None, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }; }
+            case "logo:epic":
+            {   // un écusson plein, l'initiale découpée dedans
+                double l = taille * 1.12, h = taille * 1.36;
+                return new Panel { Width = l, Height = h, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Children =
+                {
+                    new Avalonia.Controls.Shapes.Path { Data = Ecusson(l, h), Fill = encre, Stretch = Stretch.None },
+                    new TextBlock { Text = "E", FontSize = taille * 0.86, FontWeight = FontWeight.Black, FontFamily = Police, Foreground = creux, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, taille * 0.04, 0, 0) },
+                } };
+            }
+            default: return Icone(nom.StartsWith("logo:") ? "person" : nom, taille, encre);
+        }
+    }
+    /// La pastille d'une console ou d'une boutique : son repère sur un disque à sa couleur
     public static Control Console(string icone, double taille)
     {
-        var disque = new Border { Width = taille, Height = taille, CornerRadius = new CornerRadius(taille / 2), ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(icone == "logo:switch" ? Color.FromRgb(230, 0, 18) : icone == "logo:steam" ? Color.FromRgb(8, 20, 51) : Color.FromRgb(31, 31, 31)) };
-        if (!icone.StartsWith("logo:")) { disque.Child = Icone(icone, taille * 0.58); return disque; }
-        if (!logos.TryGetValue(icone, out var logo))
-        {
-            var f = Path.Combine(AppContext.BaseDirectory, "logos", icone[5..] + ".png");
-            try { logos[icone] = logo = File.Exists(f) ? new Bitmap(f) : null; } catch { logos[icone] = logo = null; }
-        }
-        var image = new Image { Source = logo, Stretch = Stretch.Uniform, Margin = new Thickness(taille * (icone == "logo:steam" ? 0 : 0.2)) }; RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.HighQuality);
-        disque.Child = logo != null ? image : Icone("gamecontroller", taille * 0.58); return disque;
+        IBrush encre = icone == "logo:steam" ? new SolidColorBrush(Color.FromRgb(204, 230, 255)) : Brushes.White;
+        var dessin = icone.StartsWith("logo:") ? Repere(icone, taille * (icone == "logo:switch" ? 0.40 : 0.44), encre, new SolidColorBrush(Rvb(icone))) : Icone(icone, taille * 0.58);
+        return new Border { Width = taille, Height = taille, CornerRadius = new CornerRadius(taille / 2), ClipToBounds = true, VerticalAlignment = VerticalAlignment.Center, Background = DegradeRepere(icone), Child = dessin };
     }
     public static LinearGradientBrush Degrade(Color a, Color b, bool diagonale = true) => new()
     {
@@ -450,6 +511,96 @@ sealed class Ouverture : Panel
     }
 }
 
+/// L'accueil du premier lancement (`BienvenueView`). Il ne ressemble pas aux menus : l'ambiance de l'écran de démarrage, trois grandes
+/// cartes, un seul grand bouton. On comprend qu'il faut choisir ; « Ignorer » est petit, dans un coin.
+sealed class BienvenueVue : Panel
+{
+    static Color C(double r, double v, double b) => Color.FromRgb((byte)(r * 255), (byte)(v * 255), (byte)(b * 255));
+    static readonly (string titre, string ligne, string symbole, Color[] teinte)[] cartes =
+    [
+        ("Tout", "Jeux Nintendo et jeux PC", "sparkles", [C(0.58, 0.40, 0.98), C(0.33, 0.17, 0.80)]),
+        ("Nintendo", "Switch et Switch 2", "logo:switch", [C(1.0, 0.70, 0.23), C(1.0, 0.42, 0.24)]),
+        ("PC", "Epic Games, Steam, Windows", "logo:windows", [C(0.19, 0.78, 0.80), C(0.16, 0.38, 1.0)]),
+    ];
+    readonly Panel[] vues = new Panel[3]; readonly Border[] bords = new Border[3], voiles = new Border[3], halos = new Border[3]; readonly Ellipse[] lueurs = new Ellipse[3];
+    int vise = -1;
+    public BienvenueVue(Bibliotheque lib)
+    {
+        Background = new SolidColorBrush(Color.FromRgb(5, 5, 13)); ClipToBounds = true;
+        var douce = Mouvement.Douce; var coule = Mouvement.Coule; var paraitre = new List<Action>();
+        // les lueurs de l'écran de démarrage, celle de la carte visée plus forte
+        var fond = new Canvas { IsHitTestVisible = false };
+        for (var i = 0; i < 3; i++)
+        {
+            var c = cartes[i].teinte[i == 0 ? 0 : 1]; const double d = 1920 * 0.68;
+            fond.Children.Add(U.Lueur(c, d, 0.22));
+            lueurs[i] = U.Lueur(c, d, 0.40); lueurs[i].Opacity = 0; lueurs[i].Transitions = new Transitions { Mouvement.Opacite(0.5, new CubicEaseInOut()) }; fond.Children.Add(lueurs[i]);
+            foreach (var e in fond.Children.TakeLast(2)) { Canvas.SetLeft(e, 1920 * (0.5 + (i - 1) * 0.27) - d / 2); Canvas.SetTop(e, 1080 * (i == 0 ? 0.40 : 0.62) - d / 2); }
+        }
+        Children.Add(fond);
+        var titre = new TextBlock { Text = "BIENVENUE", FontSize = 84, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, LetterSpacing = 30, Opacity = 0, HorizontalAlignment = HorizontalAlignment.Center,
+            Foreground = U.Degrade(0.5, 0, 0.5, 1, (Colors.White, 0), (U.Alpha(Colors.White, 0.78), 1)),
+            Transitions = new Transitions { Mouvement.Opacite(0.8, douce), new DoubleTransition { Property = TextBlock.LetterSpacingProperty, Duration = Mouvement.S(0.8), Easing = douce } } };
+        paraitre.Add(() => { titre.Opacity = 1; titre.LetterSpacing = 6; });
+        TextBlock Ligne(string texte, double taille, double opacite, double haut)
+        {
+            var t = U.Texte(texte, taille, FontWeight.Medium, 0); t.HorizontalAlignment = HorizontalAlignment.Center; t.Margin = new Thickness(0, haut, 0, 0); t.Transitions = new Transitions { Mouvement.Opacite(0.8, douce) };
+            paraitre.Add(() => t.Opacity = opacite); return t;
+        }
+        var rangee = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 34, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 54, 0, 0) };
+        for (var i = 0; i < 3; i++)
+        {
+            var c = cartes[i]; var n = i; var coins = new CornerRadius(44);
+            var symbole = new Panel { Height = 170, Children = { c.symbole.StartsWith("logo:") ? U.Repere(c.symbole, 96, Brushes.White) : U.Icone(c.symbole, 116) } };
+            var recommande = new Border { CornerRadius = new CornerRadius(14), Background = U.Noir(0.28), Padding = new Thickness(12, 5), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 14, 0, 0), Opacity = i == 0 ? 1 : 0, Child = U.Texte("Recommandé", 13, FontWeight.Bold) };
+            var texte = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Children = { Centre(U.Titre(c.titre, 30, 1)), Centre(U.Texte(c.ligne, 17, FontWeight.Medium, 0.85), 8), recommande } };
+            var dedans = new Grid { RowDefinitions = new RowDefinitions("*,Auto"), Margin = new Thickness(0, 30) }; dedans.Children.Add(new Panel { Children = { Centrer(symbole) } }); Grid.SetRow(texte, 1); dedans.Children.Add(texte);
+            halos[i] = new Border { CornerRadius = coins, Background = new SolidColorBrush(c.teinte[1]), BoxShadow = BoxShadows.Parse($"0 18 46 0 #B3{c.teinte[1].R:X2}{c.teinte[1].G:X2}{c.teinte[1].B:X2}"), Opacity = 0, Transitions = new Transitions { Mouvement.Opacite(0.42, coule) } };
+            // une carte pas visée est plus terne et plus sombre : un voile, à la place de la saturation et de la luminosité du Mac
+            voiles[i] = new Border { CornerRadius = coins, Background = new SolidColorBrush(Color.FromRgb(20, 20, 28)), Opacity = 0.42, IsHitTestVisible = false, Transitions = new Transitions { Mouvement.Opacite(0.42, coule) } };
+            bords[i] = new Border { CornerRadius = coins, BorderBrush = Brushes.White, BorderThickness = new Thickness(4), Opacity = 0, IsHitTestVisible = false, Transitions = new Transitions { Mouvement.Opacite(0.42, coule) } };
+            var carte = new Panel { Width = 330, Height = 420, RenderTransformOrigin = U.Centre, RenderTransform = Mouvement.Echelle(0.94), Transitions = new Transitions { Mouvement.Transfo(0.42, coule) }, Children =
+            {
+                halos[i], new Border { CornerRadius = coins, Background = U.Degrade(c.teinte[0], c.teinte[1]), BorderBrush = U.Blanc(0.14), BorderThickness = new Thickness(1.5), Child = dedans }, voiles[i], bords[i],
+            } };
+            vues[i] = carte;
+            // l'arrivée : chaque carte monte de 60 en apparaissant, l'une après l'autre
+            var monte = new Panel { Opacity = 0, RenderTransform = Mouvement.Deplace(0, 60), Background = Brushes.Transparent, Children = { carte },
+                Transitions = new Transitions { Mouvement.Transfo(0.6, douce, 0.25 + i * 0.09), Mouvement.Opacite(0.6, douce, 0.25 + i * 0.09) } };
+            paraitre.Add(() => { monte.Opacity = 1; monte.RenderTransform = Mouvement.Deplace(0, 0); });
+            monte.PointerPressed += (_, e) => { e.Handled = true; if (lib.BienvenueIndex == n) lib.BienvenueValider(); else { lib.BienvenueIndex = n; lib.Son("deplacer"); lib.Signaler(); } };
+            rangee.Children.Add(monte);
+        }
+        var bouton = new Border { Height = 68, CornerRadius = new CornerRadius(34), Background = Brushes.White, Padding = new Thickness(54, 0), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 56, 0, 0), Opacity = 0,
+            BoxShadow = BoxShadows.Parse("0 0 24 0 #40FFFFFF"), Transitions = new Transitions { Mouvement.Opacite(0.5, null, 0.7) },
+            Child = U.Ligne(12, U.Touche(lib.Aides.Ok, U.Noir(0.7)), new TextBlock { Text = "Commencer", FontSize = 24, FontWeight = FontWeight.Bold, FontFamily = U.Police, Foreground = Brushes.Black, VerticalAlignment = VerticalAlignment.Center }) };
+        bouton.PointerPressed += (_, e) => { e.Handled = true; lib.BienvenueValider(); };
+        paraitre.Add(() => bouton.Opacity = 1);
+        Children.Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children =
+        {
+            titre, Ligne("À quoi vas-tu jouer ? Home installe ce qu'il faut.", 24, 0.72, 14), Ligne("Home ne contient aucun jeu : il utilise ceux que tu possèdes, copiés depuis ta propre console.", 15, 0.45, 8), rangee, bouton,
+        } });
+        // « Ignorer » : là pour qui le cherche, pas pour qui hésite
+        var ignorer = U.Ligne(6, U.Touche(lib.Aides.Options), U.Texte("Ignorer", 13, FontWeight.Medium)); ignorer.Opacity = 0.26; ignorer.HorizontalAlignment = HorizontalAlignment.Right; ignorer.VerticalAlignment = VerticalAlignment.Bottom; ignorer.Margin = new Thickness(0, 0, 44, 30); ignorer.Background = Brushes.Transparent;
+        ignorer.PointerPressed += (_, e) => { e.Handled = true; lib.BienvenueIgnorer(); };
+        Children.Add(ignorer);
+        AttachedToVisualTree += (_, _) => Mouvement.Dans(0.05, () => { foreach (var a in paraitre) a(); });
+        Transitions = new Transitions { Mouvement.Opacite(0.45, new CubicEaseInOut()) };
+    }
+    static Control Centre(Control c, double haut = 0) { c.HorizontalAlignment = HorizontalAlignment.Center; c.Margin = new Thickness(0, haut, 0, 0); return c; }
+    static Control Centrer(Control c) { c.HorizontalAlignment = HorizontalAlignment.Center; c.VerticalAlignment = VerticalAlignment.Center; return c; }
+    public void Viser(int i)
+    {
+        if (i == vise) return;
+        vise = i;
+        for (var k = 0; k < 3; k++)
+        {
+            var ici = k == i;
+            vues[k].RenderTransform = Mouvement.Echelle(ici ? 1.07 : 0.94); vues[k].ZIndex = ici ? 1 : 0; bords[k].Opacity = ici ? 0.95 : 0; voiles[k].Opacity = ici ? 0 : 0.42; halos[k].Opacity = ici ? 1 : 0; lueurs[k].Opacity = ici ? 1 : 0;
+        }
+    }
+}
+
 /// L'avancement d'une tâche (`TacheView`) : une pastille en bas à droite, sur la ligne des aides. Un anneau qui se remplit, le nom de la
 /// tâche en capitales, où elle en est, le pourcentage. Elle arrive en montant, repart en fondu.
 sealed class PastilleTache : Border
@@ -519,7 +670,7 @@ public sealed class Ecran : Panel
     readonly Echange infos = new() { Margin = new Thickness(84, 0, 84, 22) };
     readonly Panel pile = new() { Height = 294 };
     readonly StackPanel aides = new() { Orientation = Orientation.Horizontal, Spacing = 12, Margin = new Thickness(84, 0, 84, 40) };
-    readonly Panel coucheMenu = new(), coucheJeu = new() { Opacity = 0, IsHitTestVisible = false }, coucheSaisie = new() { Opacity = 0, IsHitTestVisible = false }, coucheOuverture = new();
+    readonly Panel coucheMenu = new(), coucheJeu = new() { Opacity = 0, IsHitTestVisible = false }, coucheSaisie = new() { Opacity = 0, IsHitTestVisible = false }, coucheBienvenue = new(), coucheOuverture = new();
     readonly PastilleTache pastille = new();
     readonly Border toast = new() { Opacity = 0, IsHitTestVisible = false, Padding = new Thickness(20, 12), CornerRadius = new CornerRadius(24), Background = U.Noir(0.6), BorderBrush = U.Blanc(0.16), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 130) };
     readonly TextBlock texteToast = U.Texte("", 18, FontWeight.Medium);
@@ -543,7 +694,7 @@ public sealed class Ecran : Panel
         pile.AttachedToVisualTree += (_, _) => Mouvement.Dans(0.1, () => { pile.Opacity = 1; pile.RenderTransform = Mouvement.Deplace(0, 0); });
         toast.Child = texteToast; toast.Transitions = new Transitions { Mouvement.Opacite(0.3, new CubicEaseInOut()) };
         coucheJeu.Transitions = new Transitions { Mouvement.Opacite(0.35, new CubicEaseInOut()) }; coucheSaisie.Transitions = new Transitions { Mouvement.Opacite(0.2) };
-        Children.AddRange([scene, voile, coucheMenu, pastille, coucheJeu, toast, coucheSaisie, coucheOuverture]);
+        Children.AddRange([scene, voile, coucheBienvenue, coucheMenu, pastille, coucheJeu, toast, coucheSaisie, coucheOuverture]);
         lib.Change += Rafraichir;
         lib.PasserOuverture = () => ouverture?.Passer() ?? false;
         horloge.Tick += (_, _) => Seconde(); horloge.Start();
@@ -557,7 +708,7 @@ public sealed class Ecran : Panel
     {
         coucheOuverture.Children.Clear();
         ouverture = new Ouverture(fige); var o = ouverture;
-        o.Finie += () => { coucheOuverture.Children.Remove(o); if (ouverture == o) ouverture = null; };
+        o.Finie += () => { coucheOuverture.Children.Remove(o); if (ouverture == o) ouverture = null; Rafraichir(); };
         coucheOuverture.Children.Add(o);
         if (!fige) lib.Son("lancer");
     }
@@ -575,7 +726,15 @@ public sealed class Ecran : Panel
         Haut(); Infos(j, art); Pile(); Aides(j);
         Menus();
         Voiler(lib.Menu != null || lib.Saisie != null);
-        Jeu(); pastille.Mettre(lib.Tache); Toast(); MontrerSaisie();
+        Jeu(); pastille.Mettre(lib.Tache); Toast(); MontrerSaisie(); Bienvenue();
+    }
+    /// L'accueil du premier lancement : il attend que l'écran de démarrage soit passé, puis s'efface quand le choix est fait
+    BienvenueVue? bienvenue;
+    void Bienvenue()
+    {
+        if (lib.Bienvenue && bienvenue == null && ouverture == null) { bienvenue = new BienvenueVue(lib); coucheBienvenue.Children.Add(bienvenue); }
+        if (!lib.Bienvenue && bienvenue is { } b) { bienvenue = null; b.IsHitTestVisible = false; b.Opacity = 0; Mouvement.Dans(0.5, () => coucheBienvenue.Children.Remove(b)); }
+        bienvenue?.Viser(lib.BienvenueIndex);
     }
 
     /// La bibliothèque derrière un menu est floue. Pas de flou calculé (il serait refait à chaque image tant que le menu bouge) : une
