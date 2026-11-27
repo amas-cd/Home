@@ -175,7 +175,8 @@ except Exception: pass
 old = d.get(app) or {}
 if not base:   # une reconstruction sans NSP : les fichiers d'origine restent ceux de la dernière construction
     base, upd, dlc = old.get("base", ""), old.get("update", []), old.get("dlc", [])
-d[app] = {"moteur": moteur, "base": base, "update": upd, "dlc": dlc, "modModule": modmod or None, "travail": work or None, "titre": tid or None}
+d[app] = {"moteur": moteur, "base": base, "update": upd, "dlc": dlc, "modModule": modmod or None, "travail": work or None, "titre": tid or None,
+          "local": (os.environ.get("DM_EXEFS_MODS_AUTO") == "0") or None}   # construit en local : le mod en ligne rangé sur ce Mac n'est pas appliqué
 tmp = reg + ".tmp"; json.dump(d, open(tmp, "w"), indent=1, ensure_ascii=False); os.replace(tmp, reg)
 EOF
 osascript -e "display notification \"$(basename "$SORTIE") est prêt\" with title \"Construction terminée\"" 2>/dev/null

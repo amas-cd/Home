@@ -814,7 +814,7 @@ final class Library: ObservableObject {
             items.append(SalonMenuItem(label: "Processeur : \(rt ? "géré par macOS" : "temps réel (d'origine)")", detail: rt ? "Le jeu n'annonce plus son temps de travail : macOS ne le garde plus à basse fréquence dans les scènes chargées" : "Le jeu annonce son temps de travail à macOS (peut le coincer à basse fréquence dehors)", icon: "cpu", action: {
                 var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]; m["TOTK_RT"] = rt ? nil : "0"; all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) }))
             items.append(SalonMenuItem(label: "Réglages dans le jeu", detail: Atelier.estOot(g) ? "Touche 1 pendant la partie ; ceux d'ici comptent au prochain lancement" : "Touche 1 pendant la partie", icon: "keyboard", tint: .gray, info: true, action: {}))
-            if Atelier.scriptDedie(g) == "totk-mng-online.command" {
+            if Atelier.totkEnLigne(g) {
                 items.append(SalonMenuItem(label: "Moniteur du jeu en ligne", icon: "waveform.path.ecg", tint: .teal, action: { self.menu = nil; Atelier.terminal("totk-moniteur.command") }))
             }
         }
@@ -1350,10 +1350,10 @@ final class Library: ObservableObject {
         let conf = NSWorkspace.OpenConfiguration(); conf.activates = true
         log("Écran des jeux : \(gameScreen.localizedName) (\(config.ecranJeu == nil ? "externe par défaut" : "choisi dans Réglages"))")
         if (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.") { conf.environment = ["TOTK_FULLSCREEN": "1", "TOTK_SCREEN_ID": String(Library.screenID(gameScreen)), "TOTK_DEBUG_LOG": "1", "TOTK_ONLINE_LOG": "1"].merging(config.reglages?[g.id] ?? [:]) { _, b in b }
-            if Atelier.scriptDedie(g) == "totk-mng-online.command" { conf.environment["TOTK_SWKBD_FIRST"] = Atelier.totkAdresse() } }   // TOTK Online : l'adresse du serveur, sans la demander   // fenêtre pleine taille sans Space (patch du front end MNG) + journal ~/Library/Logs/MacNativeGames/totk.log
+            if Atelier.totkEnLigne(g) { conf.environment["TOTK_SWKBD_FIRST"] = Atelier.totkAdresse() } }   // TOTK Online : l'adresse du serveur, sans la demander   // fenêtre pleine taille sans Space (patch du front end MNG) + journal ~/Library/Logs/MacNativeGames/totk.log
         // TOTK Online : le mod se connecte une seule fois au serveur (127.0.0.1:10014) au démarrage ; sans serveur il reste bloqué sur
         // « Syncing saves ». Le Salon démarre donc le serveur, attend qu'il écoute, puis lance le jeu ; il l'arrête à la fin de la partie.
-        if Atelier.scriptDedie(g) == "totk-mng-online.command", Atelier.totkLocal() {   // serveur distant (serveurs/totk-adresse.txt) : rien à démarrer ici
+        if Atelier.totkEnLigne(g), Atelier.totkLocal() {   // serveur distant (serveurs/totk-adresse.txt) : rien à démarrer ici
             startTotkServer { [weak self] ok in
                 guard let self, self.running?.id == g.id else { return }
                 if !ok { self.toast = "Serveur TOTK Online pas prêt (journal : log/totk-server.log) — le jeu se lance quand même" }
@@ -1572,7 +1572,7 @@ final class Library: ObservableObject {
     /// Le jeu en cours joue-t-il en ligne : TOTK Online (serveur Kirbymimi, port 10014) ou un jeu nxnative avec le serveur Super Mario Odyssey: Online (port 1027)
     func enLigne() -> (nom: String, journal: URL, port: UInt16, smo: Bool)? {
         guard let g = running else { return nil }
-        if Atelier.scriptDedie(g) == "totk-mng-online.command" { return ("TOTK Online", Atelier.home.appendingPathComponent(Atelier.totkLocal() ? "log/totk-server.log" : "log/totk-server-distant.log"), 10014, false) }
+        if Atelier.totkEnLigne(g) { return ("TOTK Online", Atelier.home.appendingPathComponent(Atelier.totkLocal() ? "log/totk-server.log" : "log/totk-server-distant.log"), 10014, false) }
         if let tid = g.titleID, let c = Atelier.env(tid)["DM_COMPANION"], c.hasSuffix("smoo-server.sh") { return ("Super Mario Odyssey: Online", Atelier.home.appendingPathComponent("log/smoo-server.log"), 1027, true) }
         return nil
     }
@@ -4183,7 +4183,7 @@ enum Atelier {
     enum Moteur { case nxnative, mng, pc, mac }
     /// Un jeu construit par le Salon (sources/registre.json, écrit par construire-jeu.command) : ce qu'il faut pour le refaire.
     /// travail : son dossier de construction (les fichiers du jeu déjà extraits) ; base / update / dlc : les fichiers donnés la dernière fois
-    struct Inscription: Codable { var moteur: String; var base: String; var update: [String]; var dlc: [String]; var modModule: String?; var travail: String?; var titre: String? }
+    struct Inscription: Codable { var moteur: String; var base: String; var update: [String]; var dlc: [String]; var modModule: String?; var travail: String?; var titre: String?; var local: Bool? = nil }
     struct Mod { let name: String; let url: URL; let romfs: URL?; let exefs: URL?; var actif: Bool }
 
     static func moteurDe(_ g: Game) -> Moteur {
@@ -4359,10 +4359,71 @@ enum Atelier {
         let d = appSupport.appendingPathComponent("MacNativeGames/\(dossier)"); try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         try? (mot + "\n").write(to: d.appendingPathComponent(nom), atomically: true, encoding: .utf8)
     }
-    /// Les jeux construits avant le registre ont leur propre script
+    /// Les jeux construits avant le registre ont leur propre script (un jeu construit par l'assistant est dans le registre : chemin général)
     static func scriptDedie(_ g: Game) -> String? {
-        if (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.totk") { return "totk-mng-online.command" }
+        if (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.totk"), registre()[g.url.path] == nil { return "totk-mng-online.command" }
         return nil
+    }
+    /// Tears of the Kingdom (MacNativeGames) construit avec TOTK Online : le registre le dit (module du mod) ; un jeu d'avant le registre l'a toujours
+    static func totkEnLigne(_ g: Game) -> Bool {
+        guard (Bundle(url: g.url)?.bundleIdentifier ?? "").hasPrefix("org.macnativegames.totk") else { return false }
+        if let r = registre()[g.url.path] { return r.modModule != nil }
+        return true
+    }
+    // MARK: Jeux en ligne : les mods en ligne essayés sur Mac, et où Home les range
+    /// Un mod en ligne appartient à son auteur : Home ne le fournit pas. Le joueur donne une fois le fichier pris chez l'auteur, Home le
+    /// range dans moteur/exefs-mods/<title id>/<dossier> : nxnative l'applique seul à chaque construction, MacNativeGames reçoit son
+    /// module par --mod-module. `maj` : la version du jeu que le mod exige (nil = le jeu de base, sans mise à jour).
+    /// Ajouter un jeu = une ligne ici, après un essai réel de ce jeu avec ce mod.
+    struct ModEnLigne { let tid: String; let nom: String; let auteur: String; let source: String; let dossier: String; let fichier: String; let maj: String?; let indices: [String] }
+    static let modsEnLigne = [
+        ModEnLigne(tid: "0100F2C0115B6000", nom: "TOTK Online", auteur: "Kirbymimi", source: "son serveur Discord, lien sur gamebanana.com/wips/94930", dossier: "TOTK_Online", fichier: "subsdk4", maj: "1.2.1",
+                   indices: ["totk", "tears of the kingdom", "0100f2c0115b6000"]),
+        ModEnLigne(tid: "0100000000010000", nom: "Super Mario Odyssey Online", auteur: "CraftyBoss", source: "github.com/CraftyBoss/SuperMarioOdysseyOnline, le fichier « for Switch »", dossier: "SMO_Online_v1", fichier: "subsdk1", maj: nil,
+                   indices: ["super mario odyssey", "0100000000010000"]),
+    ]
+    static func modEnLigne(_ u: URL?) -> ModEnLigne? {
+        guard let u else { return nil }
+        let ids = titresNSP(u).map { String($0.prefix(13)).uppercased() + "000" }; let n = u.lastPathComponent.lowercased()
+        return modsEnLigne.first { m in ids.contains(m.tid) || m.indices.contains { n.contains($0) } }
+    }
+    static func modEnLigneDossier(_ m: ModEnLigne) -> URL { moteur.appendingPathComponent("exefs-mods/\(m.tid)/\(m.dossier)") }
+    static func modEnLigneModule(_ m: ModEnLigne) -> URL { modEnLigneDossier(m).appendingPathComponent("exefs/\(m.fichier)") }
+    static func modEnLignePret(_ m: ModEnLigne) -> Bool { FileManager.default.fileExists(atPath: modEnLigneModule(m).path) }
+    /// Range le mod donné (.zip ou dossier) : on y cherche exefs/<module du mod> ; le dossier qui contient cet exefs devient le mod.
+    /// Un mod déjà rangé va à la corbeille avant d'être remplacé.
+    static func installerModEnLigne(_ m: ModEnLigne, depuis u: URL) -> Bool {
+        let fm = FileManager.default; var racine = u; var tmp: URL? = nil
+        var estDossier: ObjCBool = false
+        guard fm.fileExists(atPath: u.path, isDirectory: &estDossier) else { return false }
+        if !estDossier.boolValue {
+            let t = fm.temporaryDirectory.appendingPathComponent("home-mod-" + UUID().uuidString); tmp = t
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/ditto"); p.arguments = ["-x", "-k", u.path, t.path]
+            p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { return false }
+            p.waitUntilExit(); racine = t
+        }
+        defer { if let tmp { try? fm.removeItem(at: tmp) } }   // seulement le dossier d'extraction créé ici
+        var source: URL? = nil
+        if let e = fm.enumerator(at: racine, includingPropertiesForKeys: nil) {
+            for case let f as URL in e where f.lastPathComponent == m.fichier && f.deletingLastPathComponent().lastPathComponent.lowercased() == "exefs" { source = f.deletingLastPathComponent().deletingLastPathComponent(); break }
+        }
+        guard let source else { return false }
+        let cible = modEnLigneDossier(m)
+        if source.standardizedFileURL == cible.standardizedFileURL { return true }
+        do {
+            try fm.createDirectory(at: cible.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: cible.path) { try fm.trashItem(at: cible, resultingItemURL: nil) }
+            try fm.copyItem(at: source, to: cible)
+        } catch { log("Mod en ligne \(m.nom) : \(error.localizedDescription)"); return false }
+        return modEnLignePret(m)
+    }
+    /// Un jeu sans mod en ligne connu : la personne le propose dans une demande GitHub pré-remplie, qu'elle complète et envoie elle-même
+    static func suggererModEnLigne(_ jeu: String) {
+        var c = URLComponents(string: "https://github.com/amas-cd/Home/issues/new")!
+        c.queryItems = [URLQueryItem(name: "title", value: "Mod en ligne : \(jeu)"),
+                        URLQueryItem(name: "body", value: "Jeu : \(jeu)\nNom du mod :\nAuteur :\nPage de l'auteur où le trouver :\nVersion du jeu demandée par le mod :\nDéjà essayé sur (Mac, Switch, émulateur) :\n")]
+        if let u = c.url { NSWorkspace.shared.open(u) }
     }
 
     /// Lance un script de moteur/outils/ dans le Terminal, avec ses arguments (un lanceur .command écrit dans moteur/.salon)
@@ -4722,6 +4783,7 @@ extension Library {
         var base: URL? = nil; var updates: [URL] = []; var dlc: [URL] = []
         var travail: String? = nil; var sortie: URL? = nil; var titre: String? = nil
         var mods: [String] = []; var modModule: String? = nil; var icone: String? = nil
+        var enLigne: Atelier.ModEnLigne? = nil; var local = false   // le mode choisi : avec le mod en ligne du jeu, ou en local (le mod rangé sur ce Mac n'est alors pas appliqué)
     }
     /// L'icône d'une app nxnative sans icône (construite sans données de contrôle) : la jaquette
     /// de Home, recadrée en carré, en PNG 1024 px — passée à la construction (build_ipa_from_nsp.py --icon)
@@ -4768,7 +4830,7 @@ extension Library {
         let base = fm.fileExists(atPath: reg.base) ? URL(fileURLWithPath: reg.base) : nil
         var a = Assistant(moteur: reg.moteur, etapes: base == nil ? ["base", "maj", "recap"] : ["maj", "recap"], base: base, sortie: g.url, titre: g.name)
         a.dlc = reg.dlc.filter { fm.fileExists(atPath: $0) }.map { URL(fileURLWithPath: $0) }
-        a.modModule = reg.modModule; a.mods = modsCode(g)
+        a.modModule = reg.modModule; a.local = reg.local ?? false; a.mods = modsCode(g)
         assistant(a, 0, retour: { self.openUpdateMenu(g) })
     }
     func majMoteur() { lancer("mettre-a-jour-et-rebuild.command", env: ["SALON_SANS_VEILLE": "1"], titre: "Mise à jour du moteur nxnative", jeux: Set(games.filter { $0.titleID != nil }.map { $0.id })) }
@@ -4854,14 +4916,14 @@ extension Library {
         var a = Assistant(moteur: reg.moteur, etapes: [], sortie: g.url, titre: g.name)
         if let t = reg.travail, FileManager.default.fileExists(atPath: t) { a.travail = t }
         else { a.base = URL(fileURLWithPath: reg.base); a.updates = reg.update.map { URL(fileURLWithPath: $0) }; a.dlc = reg.dlc.map { URL(fileURLWithPath: $0) } }
-        a.modModule = reg.modModule; a.mods = modsCode(g); a.icone = iconePourBuild(g)
+        a.modModule = reg.modModule; a.local = reg.local ?? false; a.mods = modsCode(g); a.icone = iconePourBuild(g)
         lancerConstruction(a)
     }
     // MARK: Chantiers — un jeu en construction a sa tuile
     /// La construction d'un nouveau jeu dure de vingt minutes à plusieurs heures. Tant qu'elle n'a pas abouti, Home la garde en mémoire
     /// (constructions/.en-cours.json : ce qui a été lancé, et son journal) et lui donne une tuile dans la bibliothèque : on y voit
     /// l'avancement, et si la construction a été coupée (Home fermé, Mac éteint), on la reprend d'ici — elle repart du dossier de travail.
-    struct Chantier: Codable { var id: String; var titre: String; var args: [String]; var log: String; var debut: Date }
+    struct Chantier: Codable { var id: String; var titre: String; var args: [String]; var log: String; var debut: Date; var local: Bool? = nil }
     static var chantiersURL: URL { Atelier.home.appendingPathComponent("constructions/.en-cours.json") }
     static func chantiers() -> [Chantier] { (try? Data(contentsOf: chantiersURL)).flatMap { try? JSONDecoder().decode([Chantier].self, from: $0) } ?? [] }
     static func noterChantiers(_ c: [Chantier]) {
@@ -4885,7 +4947,7 @@ extension Library {
     /// Relance la construction d'un chantier avec ce qui avait été demandé : elle reprend dans son dossier de travail
     func reprendreChantier(_ c: Chantier) {
         menu = nil
-        guard lancer("construire-jeu.command", c.args, env: config.cles.map { ["HOME_CLES": $0] } ?? [:], titre: "Construction de \(c.titre)", jeux: [c.id]), let t = tache else { return }
+        guard lancer("construire-jeu.command", c.args, env: (config.cles.map { ["HOME_CLES": $0] } ?? [:]).merging(c.local == true ? ["DM_EXEFS_MODS_AUTO": "0"] : [:]) { $1 }, titre: "Construction de \(c.titre)", jeux: [c.id]), let t = tache else { return }
         var tous = Library.chantiers(); if let i = tous.firstIndex(where: { $0.id == c.id }) { tous[i].log = t.log.path; Library.noterChantiers(tous) }
     }
     func chantierMenu(_ g: Game) -> SalonMenu {
@@ -4919,10 +4981,29 @@ extension Library {
         // un nouveau jeu (pas de sortie connue) devient un chantier : il a sa tuile jusqu'à ce que la construction aboutisse
         let nom = a.titre ?? a.base?.deletingPathExtension().lastPathComponent ?? "Jeu Switch"
         let cid: String? = a.sortie == nil ? "construction:" + nom : nil
-        let ok = lancer("construire-jeu.command", args, env: config.cles.map { ["HOME_CLES": $0] } ?? [:], titre: a.sortie == nil ? "Construction de \(nom)" : "\(a.base == nil ? "Reconstruction" : "Mise à jour") de \(a.titre ?? "du jeu")", jeux: Set(cid.map { [$0] } ?? []).union(a.sortie.map { [$0.standardizedFileURL.path] } ?? []))
-        if ok, let cid, let t = tache {
-            Library.noterChantiers(Library.chantiers().filter { $0.id != cid } + [Chantier(id: cid, titre: nom, args: args, log: t.log.path, debut: Date())]); load()
+        var env = config.cles.map { ["HOME_CLES": $0] } ?? [:]
+        if a.local { env["DM_EXEFS_MODS_AUTO"] = "0" }   // en local : nxnative n'applique pas le mod en ligne rangé sur ce Mac ; le script le note au registre
+        if let m = a.enLigne, m.tid == "0100000000010000" {   // Super Mario Odyssey Online : son serveur, s'il est sur ce Mac
+            let serveur = Atelier.outils.appendingPathComponent("smoo-server.sh")
+            if FileManager.default.fileExists(atPath: Atelier.home.appendingPathComponent("serveurs/SmoOnlineServer").path) { Atelier.setEnv(m.tid, "DM_COMPANION", serveur.path) }
         }
+        let ok = lancer("construire-jeu.command", args, env: env, titre: a.sortie == nil ? "Construction de \(nom)" : "\(a.base == nil ? "Reconstruction" : "Mise à jour") de \(a.titre ?? "du jeu")", jeux: Set(cid.map { [$0] } ?? []).union(a.sortie.map { [$0.standardizedFileURL.path] } ?? []))
+        if ok, let cid, let t = tache {
+            Library.noterChantiers(Library.chantiers().filter { $0.id != cid } + [Chantier(id: cid, titre: nom, args: args, log: t.log.path, debut: Date(), local: a.local ? true : nil)]); load()
+        }
+    }
+    /// TOTK Online a besoin de l'adresse du serveur : demandée une fois si serveurs/totk-adresse.txt manque (elle ne va jamais dans le dépôt)
+    func adresseEnLigne(_ m: Atelier.ModEnLigne) -> Bool {
+        let f = Atelier.home.appendingPathComponent("serveurs/totk-adresse.txt")
+        guard m.tid == "0100F2C0115B6000", !FileManager.default.fileExists(atPath: f.path) else { return true }
+        let a = NSAlert(); a.messageText = "Adresse du serveur \(m.nom)"
+        a.informativeText = "Celle que t'a donnée la personne qui tient le serveur, par exemple 203.0.113.10:10014. Laisse vide pour un serveur sur ce Mac."
+        let t = NSTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24)); a.accessoryView = t; a.window.initialFirstResponder = t
+        a.addButton(withTitle: "Continuer"); a.addButton(withTitle: "Annuler")
+        guard a.runModal() == .alertFirstButtonReturn else { return false }
+        let s = t.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !s.isEmpty { try? FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true); try? s.write(to: f, atomically: true, encoding: .utf8) }
+        return true
     }
     /// Une étape de l'assistant : une grande illustration, une explication, un ou deux choix
     func assistant(_ a: Assistant, _ i: Int, retour: @escaping () -> Void) {
@@ -4961,14 +5042,60 @@ extension Library {
                 SalonMenuItem(label: nomMoteur(rec.moteur), detail: "Recommandé", icon: "checkmark.seal.fill", tint: .green, action: { var b = a; b.moteur = rec.moteur; suite(b) }),
                 SalonMenuItem(label: nomMoteur(autre), icon: "arrow.triangle.swap", tint: .gray, action: { var b = a; b.moteur = autre; suite(b) }),   // l'autre moteur, par son nom
             ], hero: "cpu", step: i + 1, steps: n, back: prec)
+        case "mode":
+            // l'étape « maj » se règle sur ce choix : obligatoire à la version que le mod demande, facultative en local, absente si le mod veut le jeu de base
+            func avecMaj(_ b: Assistant, _ oui: Bool) -> Assistant {
+                var c = b; c.etapes.removeAll { $0 == "maj" }
+                if oui, c.base?.pathExtension.lowercased() != "nup", let k = c.etapes.firstIndex(of: "mode") { c.etapes.insert("maj", at: k + 1) }
+                return c
+            }
+            let local: () -> Void = { var b = avecMaj(a, true); b.enLigne = nil; b.modModule = nil; b.local = true; suite(b) }
+            let ici: () -> Void = { self.assistant(a, i, retour: retour) }
+            guard let m = Atelier.modEnLigne(a.base) else {
+                menu = SalonMenu(title: "Comment veux-tu jouer ?", subtitle: nom, items: [
+                    SalonMenuItem(label: "En local", icon: "house.fill", tint: .green, action: local),
+                    SalonMenuItem(label: "En ligne", detail: "Aucun mod en ligne connu pour ce jeu", icon: "network", tint: .gray, action: {
+                        self.menu = SalonMenu(title: "Jouer en ligne", subtitle: nom, items: [
+                            SalonMenuItem(label: "Suggérer un mod en ligne", detail: "Ouvre une demande sur GitHub, à compléter", icon: "paperplane.fill", tint: .blue, action: { Atelier.suggererModEnLigne(nom) }),
+                            SalonMenuItem(label: "Jouer en local", icon: "house.fill", tint: .green, action: local),
+                        ], hero: "network", text: "Home ne connaît pas encore de mod en ligne pour ce jeu.\nSi tu en connais un, propose-le : il est essayé avant d'être ajouté.", back: ici) }),
+                ], hero: "person.2.fill", step: i + 1, steps: n, back: prec)
+                return
+            }
+            let enLigne: () -> Void = {
+                guard self.adresseEnLigne(m) else { return }
+                var b = avecMaj(a, m.maj != nil); b.enLigne = m; b.local = false
+                if m.maj == nil { b.updates = [] }
+                b.modModule = b.moteur == "mng" ? Atelier.modEnLigneModule(m).path : nil
+                suite(b) }
+            menu = SalonMenu(title: "Comment veux-tu jouer ?", subtitle: nom, items: [
+                SalonMenuItem(label: "En local", icon: "house.fill", tint: .green, action: local),
+                SalonMenuItem(label: "En ligne", detail: "\(m.nom), de \(m.auteur)", icon: "network", tint: .blue, action: {
+                    let pret = Atelier.modEnLignePret(m)
+                    var items: [SalonMenuItem] = []
+                    if pret { items.append(SalonMenuItem(label: "Continuer", detail: "Le mod est déjà sur ce Mac", icon: "arrow.right.circle.fill", tint: .green, action: enLigne)) }
+                    items.append(SalonMenuItem(label: pret ? "Choisir un autre fichier…" : "Choisir le fichier du mod…", detail: "Le .zip de \(m.auteur), ou son dossier", icon: "doc.zipper", action: {
+                        guard let u = self.choisir("\(m.nom) : le .zip du mod, ou son dossier", plusieurs: false, dossiers: true)?.first else { return }
+                        if Atelier.installerModEnLigne(m, depuis: u) { log("Mod en ligne \(m.nom) rangé dans \(Atelier.modEnLigneDossier(m).path)"); enLigne() }
+                        else { self.toast = "Ce fichier n'est pas \(m.nom) : il manque exefs/\(m.fichier)" } }))
+                    items.append(SalonMenuItem(label: "Jouer en local", icon: "house.fill", tint: .gray, action: local))
+                    self.menu = SalonMenu(title: "Jouer en ligne", subtitle: nom, items: items, hero: "network",
+                                          text: "\(m.nom) est un mod de \(m.auteur). Home ne le fournit pas : prends-le chez son auteur (\(m.source)), puis donne-le ici une seule fois.\n" + (m.maj.map { "Il demande la mise à jour \($0) du jeu." } ?? "Il demande le jeu de base, sans mise à jour."), back: ici) }),
+            ], hero: "person.2.fill", step: i + 1, steps: n, back: prec)
         case "maj":
+            let exigee = a.enLigne.flatMap { $0.maj }   // en ligne : la version que le mod demande, obligatoire
             var items = [SalonMenuItem(label: a.updates.isEmpty ? "Choisir la mise à jour…" : noms(a.updates), detail: a.updates.isEmpty ? "Un fichier .nsp" : "Choisir d'autres fichiers", icon: "doc.badge.plus", action: {
                 self.proposer("Quelle mise à jour ?", sousTitre: nom, icone: "arrow.down.circle.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["upd", "update", "maj", "patch"], exclus: [a.base].compactMap { $0 } + a.dlc) },
                               finder: { self.choisir("Mise à jour de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
                               back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.updates = u; suite(b) } })]
             if !a.updates.isEmpty { items.append(SalonMenuItem(label: "Continuer", icon: "arrow.right.circle.fill", tint: .green, action: { suite(a) })) }
-            else if a.sortie == nil { items.append(SalonMenuItem(label: "Pas de mise à jour", icon: "arrow.right.circle", tint: .gray, action: { suite(a) })) }
-            menu = SalonMenu(title: "La mise à jour", subtitle: nom, items: items, hero: "arrow.down.circle.fill",
+            else if a.sortie == nil, exigee == nil { items.append(SalonMenuItem(label: "Pas de mise à jour", icon: "arrow.right.circle", tint: .gray, action: { suite(a) })) }
+            if let m = a.enLigne, exigee != nil {   // sans cette mise à jour, pas de jeu en ligne : on repasse en local, où elle est facultative
+                items.append(SalonMenuItem(label: "Jouer en local à la place", detail: "Sans \(m.nom) : la mise à jour devient facultative", icon: "house.fill", tint: .gray, action: {
+                    var b = a; b.enLigne = nil; b.modModule = nil; b.local = true; self.assistant(b, i, retour: retour) }))
+            }
+            menu = SalonMenu(title: exigee.map { "La mise à jour \($0)" } ?? "La mise à jour", subtitle: nom, items: items, hero: "arrow.down.circle.fill",
+                             text: exigee.map { "\(a.enLigne?.nom ?? "Le mod en ligne") ne marche qu'avec la mise à jour \($0) du jeu : donne ce fichier-là." },
                              step: i + 1, steps: n, back: prec)
         case "dlc":
             var items = [SalonMenuItem(label: a.dlc.isEmpty ? "Choisir les DLC…" : noms(a.dlc), detail: a.dlc.isEmpty ? "Un ou plusieurs fichiers .nsp" : "Choisir d'autres fichiers", icon: "puzzlepiece.extension.fill", action: {
@@ -4984,6 +5111,7 @@ extension Library {
             if a.etapes.contains("dlc") || !a.dlc.isEmpty { items.append(SalonMenuItem(label: a.dlc.isEmpty ? "Aucun" : noms(a.dlc), detail: "DLC", icon: "puzzlepiece.extension.fill", info: true, action: {})) }
             if !a.mods.isEmpty { items.append(SalonMenuItem(label: "\(a.mods.count) mod\(a.mods.count > 1 ? "s" : "") de code", detail: "Mods", icon: "puzzlepiece.fill", info: true, action: {})) }
             items.append(SalonMenuItem(label: a.moteur == "mng" ? "MacNativeGames" : "nxnative", detail: "Moteur", icon: "cpu", tint: .purple, info: true, action: {}))
+            if a.etapes.contains("mode") { items.append(SalonMenuItem(label: a.enLigne.map { "En ligne · \($0.nom)" } ?? "En local", detail: "Mode", icon: a.enLigne == nil ? "house.fill" : "network", info: true, action: {})) }
             items.append(SalonMenuItem(label: "Construire", icon: "hammer.fill", section: " ", tint: .green, action: { self.menu = nil; self.lancerConstruction(a) }))
             menu = SalonMenu(title: "Prêt à construire", subtitle: nom, items: items, hero: "hammer.fill",
                              step: i + 1, steps: n, back: prec)
@@ -5405,7 +5533,7 @@ extension Library {
         menu = SalonMenu(title: "Ajouter un jeu", subtitle: "Que veux-tu ajouter ?", items: [
             SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {
                 if !Atelier.nxnativePret && !Atelier.mngPret { self.openPreparation(back: ici); return }   // aucun moteur : d'abord préparer ce Mac
-                self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "maj", "dlc", "recap"]), 0, retour: ici) }),
+                self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "mode", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
             SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
             SalonMenuItem(label: "App Mac", icon: "logo:mac", tint: .gray, action: { self.addGame(back: ici) }),

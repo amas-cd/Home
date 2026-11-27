@@ -243,6 +243,12 @@ une nouvelle version, dans un dossier à part : le clone en service ne bouge que
   - Home lit l'adresse dans `serveurs/totk-adresse.txt`. Il la donne au jeu avec `TOTK_SWKBD_FIRST`, qui répond seulement au premier clavier : le chat du mod marche normalement.
   - Home ne démarre plus de serveur local quand l'adresse n'est pas locale.
   - La liste des joueurs vient du journal du serveur, lu par SSH toutes les 5 s (`journalctl -u totk`) avec `serveurs/totk-cle.pem`.
+- **Dans l'assistant « Ajouter un jeu »** (étape `mode`, après le moteur) : « Comment veux-tu jouer ? ». « En ligne » n'existe que pour
+  les jeux de `Atelier.modsEnLigne` (une ligne par jeu, ajoutée après un essai réel). Home demande une fois le .zip du mod pris chez son
+  auteur et le range dans `<Home>/moteur/exefs-mods/<title id>/` ; la mise à jour que le mod exige devient obligatoire (sinon « Jouer en
+  local à la place »). En local, la mise à jour est facultative et `DM_EXEFS_MODS_AUTO=0` empêche nxnative d'appliquer le mod rangé.
+  Un mod en ligne n'est jamais mis dans le dépôt ni dans l'app sans l'accord écrit de son auteur. Jeu sans mod connu : « Suggérer un
+  mod en ligne » ouvre une demande GitHub pré-remplie.
 - **Super Mario Odyssey Online** (CraftyBoss / Sanae6, pas Kirbymimi) : serveur local `smoo-server.sh`, port 1027, via Tailscale.
 
 ## Où tu tournes : deux cas
