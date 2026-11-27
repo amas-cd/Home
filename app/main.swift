@@ -469,6 +469,7 @@ final class Library: ObservableObject {
     /// L'installation des composants occupe tout l'écran, comme la mise en route d'une console : pas de bibliothèque avant la fin.
     /// Si elle échoue, on peut réessayer ou continuer sans (le menu Mode d'utilisation la relance).
     @Published var installation = false
+    var bienvenueFige = false   // le choix est fait : l'écran attend la suite, il ne réagit plus
     var installationRelance: (() -> Void)? = nil
     var installationQuittee = Date.distantPast   // le même appui ne doit pas aussi agir sur la bibliothèque qui réapparaît
     func installationReessayer() { guard installation, tache?.erreur != nil, let r = installationRelance else { return }; Sounds.shared.play("valider"); tache = nil; r() }
@@ -2565,7 +2566,10 @@ struct BienvenueView: View {
                 .foregroundStyle(.white).opacity(0.26).padding(.trailing, 44).padding(.bottom, 30).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 .contentShape(Rectangle()).onTapGesture { lib.bienvenueIgnorer() }
         }
-        .ignoresSafeArea().onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { paru = true } }
+        // sous l'animation de lancement dès le départ (on ne voit jamais la bibliothèque entre les deux) ; les cartes arrivent quand elle commence à s'effacer
+        .ignoresSafeArea().onAppear { if !lib.ouverture || lib.ouverturePart { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { paru = true } } }
+        .onChange(of: lib.ouverturePart) { _, part in if part { paru = true } }
+        .onChange(of: lib.ouverture) { _, o in if !o { paru = true } }
     }
 }
 /// L'écran de démarrage : les couches ci-dessus, un appui pour le passer, et la sortie au bout de 2,15 s
@@ -3301,19 +3305,61 @@ struct SaisieView: View {
         .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { champ = true } }
     }
 }
-/// L'installation des composants, en plein écran : ce qui s'installe, où on en est, et rien d'autre. La pastille habituelle, en grand.
+/// L'installation des composants, en plein écran, comme la mise en route d'une console : les lueurs de l'écran de démarrage, un grand
+/// anneau qui se remplit avec le pourcentage au centre, l'étape en cours et le temps restant. Rien d'autre n'est accessible.
 struct InstallationView: View {
     @ObservedObject var lib: Library; let t: Tache
+    @State private var paru = false
+    @State private var souffle = false
     var body: some View {
-        ZStack {
-            Color(red: 0.02, green: 0.02, blue: 0.05).ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
-            VStack(spacing: 26) {
-                Text(t.erreur != nil ? "INSTALLATION INTERROMPUE" : t.fini ? "C'EST PRÊT" : "INSTALLATION").font(.system(size: 54, weight: .black).width(.expanded)).tracking(2)
-                Text(t.erreur != nil ? "Vérifie la connexion à Internet, puis réessaie." : "Home installe ce qu'il faut pour tes jeux. Tu pourras jouer dès que c'est fini : laisse le Mac allumé.")
-                    .font(.system(size: 23, weight: .medium)).opacity(0.75).multilineTextAlignment(.center).frame(maxWidth: 900)
-                TacheView(lib: lib, t: t).scaleEffect(1.5).padding(.vertical, 44)
-                if t.erreur != nil { HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") } }
-            }.foregroundStyle(.white)
+        TimelineView(.periodic(from: .now, by: 1)) { tl in
+            let echec = t.erreur != nil, fini = t.fini && !echec
+            let fr = fini ? 1 : min(0.995, max(0, TacheView.fraction(t, tl.date) ?? 0))
+            ZStack {
+                Color(red: 0.02, green: 0.02, blue: 0.05)
+                GeometryReader { g in   // trois lueurs qui dérivent lentement : l'écran vit pendant l'attente
+                    ZStack {
+                        Circle().fill(Library.violet[0]).frame(width: 640, height: 640).blur(radius: 170).opacity(0.50).offset(x: -g.size.width * 0.24, y: souffle ? -70 : 50)
+                        Circle().fill(Library.bleu[0]).frame(width: 600, height: 600).blur(radius: 170).opacity(0.42).offset(x: g.size.width * 0.26, y: souffle ? 80 : -40)
+                        Circle().fill(echec ? Color.orange : Library.orange[0]).frame(width: 520, height: 520).blur(radius: 170).opacity(echec ? 0.45 : 0.30).offset(x: souffle ? 60 : -60, y: g.size.height * 0.34)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                VStack(spacing: 0) {
+                    Text(echec ? "INSTALLATION INTERROMPUE" : fini ? "C'EST PRÊT" : "INSTALLATION").font(.system(size: 50, weight: .black).width(.expanded)).tracking(paru ? 8 : 30).lineLimit(1).minimumScaleFactor(0.6)
+                        .id(echec ? 2 : fini ? 1 : 0).transition(.opacity)
+                    Text(lib.modeResume.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(3).opacity(0.6).padding(.top, 14)
+                    ZStack {
+                        // un anneau qui s'élargit et s'efface, sans fin : le signe que ça travaille
+                        if !echec && !fini { Circle().stroke(.white.opacity(0.35), lineWidth: 2).scaleEffect(souffle ? 1.34 : 1).opacity(souffle ? 0 : 0.7) }
+                        Circle().stroke(.white.opacity(0.10), lineWidth: 16)
+                        Circle().trim(from: 0, to: max(0.012, fr))
+                            .stroke(echec ? AngularGradient(colors: [.orange, .red, .orange], center: .center) : AngularGradient(colors: [Library.violet[0], Library.bleu[0], Library.orange[0], Library.violet[0]], center: .center),
+                                    style: StrokeStyle(lineWidth: 16, lineCap: .round))
+                            .rotationEffect(.degrees(-90)).shadow(color: (echec ? Color.orange : Library.violet[0]).opacity(0.7), radius: 22).animation(.easeInOut(duration: 0.9), value: fr)
+                        if echec { Image(systemName: "exclamationmark").font(.system(size: 96, weight: .black)) }
+                        else if fini { Image(systemName: "checkmark").font(.system(size: 96, weight: .black)).transition(.scale(scale: 0.6).combined(with: .opacity)) }
+                        else {
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text("\(Int(fr * 100))").font(.system(size: 104, weight: .black).width(.expanded)).monospacedDigit().contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: Int(fr * 100))
+                                Text("%").font(.system(size: 34, weight: .black).width(.expanded)).opacity(0.6)
+                            }
+                        }
+                    }.frame(width: 330, height: 330).padding(.top, 64).padding(.bottom, 56).scaleEffect(paru ? 1 : 0.8).opacity(paru ? 1 : 0)
+                    Text(echec ? (t.erreur ?? "Échec") : fini ? "Tout est installé" : t.etape).font(.system(size: 28, weight: .semibold, design: .rounded)).lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: 1000)
+                        .id(echec ? "échec" : t.etape).transition(.opacity)
+                    Text(echec ? "Vérifie la connexion à Internet, puis réessaie." : fini ? " " : TacheView.restant(t, tl.date)).font(.system(size: 19, weight: .medium)).opacity(0.6).padding(.top, 10)
+                    Group {
+                        if echec { HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Réessayer"); Pilule(k: lib.hints.back, t: "Continuer sans") } }
+                        else { Text("Laisse le Mac allumé : ta bibliothèque s'ouvre dès que c'est fini.").font(.system(size: 17, weight: .medium)).opacity(0.45) }
+                    }.padding(.top, 46).frame(height: 90, alignment: .top)
+                }.foregroundStyle(.white).opacity(paru ? 1 : 0)
+                .animation(.easeInOut(duration: 0.4), value: t.etape).animation(.easeInOut(duration: 0.5), value: echec).animation(.easeInOut(duration: 0.5), value: fini)
+            }
+        }
+        .ignoresSafeArea().contentShape(Rectangle()).onTapGesture { }
+        .onAppear {
+            withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.9)) { paru = true }
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: false)) { souffle = true }
         }
     }
 }
@@ -3980,7 +4026,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // l'ouverture : le logo et le jingle, sauf si le réglage la coupe ; l'écran du premier lancement attend qu'elle soit passée
         let ouvre = lib.config.ouverture ?? true
         if ouvre { lib.ouverture = true; Sounds.shared.play("lancer") }
-        if lib.config.mode == nil { DispatchQueue.main.asyncAfter(deadline: .now() + (ouvre ? 3.2 : 1.2)) { if self.lib.menu == nil, self.lib.running == nil { withAnimation(.easeInOut(duration: 0.5)) { self.lib.bienvenue = true } } } }   // premier lancement : choisir le mode d'utilisation
+        if lib.config.mode == nil { lib.bienvenue = true }   // premier lancement : choisir le mode d'utilisation
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem); let sub = NSMenu()
         sub.addItem(withTitle: "Recharger la liste", action: #selector(reload), keyEquivalent: "r")
         sub.addItem(withTitle: "HUD en jeu", action: #selector(toggleHUD), keyEquivalent: "h")
@@ -4099,6 +4145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Date().timeIntervalSince(demarrage) < 1.5 { return }   // les appuis parasites du démarrage ne lancent rien, et ne coupent pas l'écran de démarrage
         if lib.ouverture { lib.passerOuverture(); return }   // n'importe quelle touche ou bouton passe l'ouverture
         if lib.bienvenue {   // l'accueil : gauche / droite pour choisir, valider pour commencer ; « Ignorer » est sur Options seulement
+            if lib.bienvenueFige { return }
             switch k { case "left": lib.bienvenueBouger(-1); case "right": lib.bienvenueBouger(1); case "ok": lib.bienvenueValider(); case "options": lib.bienvenueIgnorer(); default: break }
             return
         }
@@ -5368,7 +5415,9 @@ extension Library {
     static let modesAccueil = ["tout", "nintendo", "pc"]
     func bienvenueBouger(_ d: Int) { let n = max(0, min(2, bienvenueIndex + d)); if n != bienvenueIndex { bienvenueIndex = n; Sounds.shared.play("deplacer") } }
     func bienvenueValider() {
-        Sounds.shared.play("valider"); withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false }
+        // la bienvenue reste affichée jusqu'à ce que l'écran suivant soit là (les clés à choisir, ou l'installation) : on ne voit jamais la bibliothèque entre les deux
+        guard !bienvenueFige else { return }
+        Sounds.shared.play("valider"); bienvenueFige = true
         // la suite du premier lancement, dans l'ordre où les choses servent : les clés de la console (sans elles aucun jeu Switch ne se
         // construit), puis l'installation des composants, puis seulement les comptes Epic et Steam (qui demandent ces composants)
         let mode = Library.modesAccueil[bienvenueIndex]
@@ -5382,7 +5431,7 @@ extension Library {
     func accueilCles(puis: @escaping () -> Void, cherche: Bool = false) {
         if !cherche, config.cles == nil {   // Home regarde d'abord seul : si les clés sont sur ce Mac, il n'y a rien à montrer
             menu = SalonMenu(title: "Clés de la console", items: [SalonMenuItem(label: "Recherche…", icon: "magnifyingglass", info: true, action: {})], hero: "key.fill")
-            chercherCles { if self.config.cles != nil { self.menu = nil; puis() } else { self.accueilCles(puis: puis, cherche: true) } }; return
+            chercherCles { if self.config.cles != nil { self.menu = nil; puis() } else { self.fermerBienvenue(); self.accueilCles(puis: puis, cherche: true) } }; return
         }
         let ici: () -> Void = { self.accueilCles(puis: puis, cherche: true) }
         menu = SalonMenu(title: "Clés de la console", items: [
@@ -5406,6 +5455,7 @@ extension Library {
             SalonMenuItem(label: "Plus tard", detail: "Menu → Comptes", icon: "arrow.right.circle.fill", tint: .gray, action: { self.menu = nil }),
         ], hero: "person.crop.circle.fill")
     }
+    func fermerBienvenue() { bienvenueFige = false; if bienvenue { withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false } } }
     func bienvenueIgnorer() { config.mode = "tout"; config.moteurs = "tout"; saveConfig(); Sounds.shared.play("retour"); withAnimation(.easeInOut(duration: 0.45)) { bienvenue = false } }
     func openModeUtilisation(premier: Bool = false) {
         if menu == nil { Sounds.shared.play("ouvrir") }
@@ -5442,11 +5492,11 @@ extension Library {
             let e = self.modePC ? (PCHome.json(PCHome.run(["etat"])) as? [String: Any] ?? [:]) : [:]
             let pcPret = !self.modePC || (e["voile"] as? String != nil && e["legendary"] as? Bool == true)
             DispatchQueue.main.async {
-                if nintendoPret && pcPret { self.toast = "Mode d'utilisation : \(self.modeResume) — tout est déjà installé"; ensuite?(); return }
+                if nintendoPret && pcPret { self.fermerBienvenue(); self.toast = "Mode d'utilisation : \(self.modeResume) — tout est déjà installé"; ensuite?(); return }
                 self.apresTache = ensuite
                 self.installationRelance = { self.appliquerMode(mode: mode, moteurs: moteurs, ensuite: ensuite) }
-                if self.lancer("preparer-moteurs.command", env: self.modePC ? ["HOME_AUSSI_PC": "1"] : [:], titre: "Installation pour : \(self.modeResume)") { withAnimation(.easeInOut(duration: 0.35)) { self.installation = true } }
-                else { self.apresTache = nil }
+                if self.lancer("preparer-moteurs.command", env: self.modePC ? ["HOME_AUSSI_PC": "1"] : [:], titre: "Installation pour : \(self.modeResume)") { withAnimation(.easeInOut(duration: 0.35)) { self.installation = true }; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.bienvenueFige = false; self.bienvenue = false } }   // l'installation recouvre la bienvenue, qui s'en va dessous
+                else { self.apresTache = nil; self.fermerBienvenue() }
             }
         }
     }
