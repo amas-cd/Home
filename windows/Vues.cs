@@ -239,7 +239,6 @@ static class U
     public static Border Ilot(params Control[] c) => new() { Background = Noir(0.42), BorderBrush = Blanc(0.14), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(22), Height = 44, Padding = new Thickness(16, 0), Child = Ligne(8, c) };
     public static async void Distante(Image img, string url, int largeur, Action? chargee = null) { if (await Images.Distante(url, largeur) is { } b) { img.Source = b; chargee?.Invoke(); } }
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Bitmap, Bitmap> flous = new();
-    /// Une image floue sans rien calculer à l'écran : l'image réduite à quelques points, que l'affichage étire en la lissant
     /// Une image floue sans rien calculer à l'écran : un vrai flou, fait une seule fois par Skia sur l'image réduite, puis gardé.
     /// (Étirer une image de quelques points, comme avant, donnait de gros pixels.) `cote` : la force, 20 = très flou.
     public static Bitmap Flou(Bitmap b, int cote = 20)
@@ -255,9 +254,11 @@ static class U
         {
             var k = Math.Min(1.0, (double)largeur / Math.Max(1, Math.Max(b.PixelSize.Width, b.PixelSize.Height)));
             int l = Math.Max(2, (int)(b.PixelSize.Width * k)), h = Math.Max(2, (int)(b.PixelSize.Height * k));
-            using var petite = b.CreateScaledBitmap(new PixelSize(l, h), BitmapInterpolationMode.HighQuality);
-            using var tampon = new MemoryStream(); petite.Save(tampon); tampon.Position = 0;
-            using var source = SkiaSharp.SKBitmap.Decode(tampon); if (source == null) return null;
+            // C'est Skia qui réduit : CreateScaledBitmap refuse une photo de l'écran (« Invalid source bitmap type »), et le flou
+            // n'était alors jamais fait : on voyait la photo réduite étirée, en gros pixels.
+            using var tampon = new MemoryStream(); b.Save(tampon); tampon.Position = 0;
+            using var entiere = SkiaSharp.SKBitmap.Decode(tampon); if (entiere == null) return null;
+            using var source = entiere.Width == l && entiere.Height == h ? entiere.Copy() : entiere.Resize(new SkiaSharp.SKImageInfo(l, h), SkiaSharp.SKFilterQuality.High); if (source == null) return null;
             using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(l, h, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul));
             // les bords se prolongent (Clamp) : sans ça le flou s'assombrit en approchant du cadre
             using var peinture = new SkiaSharp.SKPaint { IsDither = true, ImageFilter = SkiaSharp.SKImageFilter.CreateBlur(sigma, sigma, SkiaSharp.SKShaderTileMode.Clamp) };
@@ -778,8 +779,8 @@ public sealed class Ecran : Panel
         bienvenue?.Viser(lib.BienvenueIndex);
     }
 
-    /// La bibliothèque derrière un menu est floue. Pas de flou calculé (il serait refait à chaque image tant que le menu bouge) : une
-    /// photo de la bibliothèque réduite au dixième, étirée sur tout l'écran, qui arrive en fondu. Dessous, la bibliothèque ne se dessine plus.
+    /// La bibliothèque derrière un menu est floue. Pas de flou en direct (il serait refait à chaque image tant que le menu bouge) : une
+    /// photo de la bibliothèque à mi-taille, floutée une fois par Skia, qui arrive en fondu. Dessous, la bibliothèque ne se dessine plus.
     void Voiler(bool oui)
     {
         if (oui == voilee) return;
@@ -787,10 +788,10 @@ public sealed class Ecran : Panel
         if (!oui) { sousVoile = false; Scene(); voile.Opacity = 0; return; }
         if (Bounds.Width > 0 && Bounds.Height > 0)
         {
-            const int largeur = 480; var k = largeur / Bounds.Width;
+            const int largeur = 960; var k = largeur / Bounds.Width;
             var hauteur = Math.Max(1, (int)(Bounds.Height * k)); var photo = new RenderTargetBitmap(new PixelSize(largeur, hauteur));
             using (var dessin = photo.CreateDrawingContext()) dessin.FillRectangle(new VisualBrush { Visual = scene, Stretch = Stretch.Fill }, new Rect(0, 0, largeur, hauteur));
-            var ancienne = voile.Source as IDisposable; voile.Source = U.Flouter(photo, largeur, 7f) is { } floue ? floue : photo; ancienne?.Dispose();
+            var ancienne = voile.Source as IDisposable; voile.Source = U.Flouter(photo, largeur, 9f) is { } floue ? floue : photo; ancienne?.Dispose();
         }
         voile.Opacity = 1;
         Mouvement.Dans(0.4, () => { if (voilee) { sousVoile = true; Scene(); } });
