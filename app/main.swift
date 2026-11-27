@@ -79,7 +79,7 @@ struct PadHints {
 }
 struct SalonMenuItem { let label: String; var detail: String? = nil; let icon: String; var section: String? = nil; var destructive = false; var tint: Color? = nil; var info = false; var image: URL? = nil; let action: () -> Void }
 /// Un menu : titre, illustration (jaquette du jeu ou grand symbole), texte d'explication, étape d'un assistant, et où revenir avec B
-struct SalonMenu { let title: String; var subtitle: String? = nil; let items: [SalonMenuItem]; var hero: String? = nil; var art: NSImage? = nil; var text: String? = nil; var step: Int? = nil; var steps: Int? = nil; var back: (() -> Void)? = nil; var roue = false; var rafraichir: (() -> Void)? = nil; var heroURL: URL? = nil; var grid = false }
+struct SalonMenu { let title: String; var subtitle: String? = nil; let items: [SalonMenuItem]; var hero: String? = nil; var art: NSImage? = nil; var text: String? = nil; var alerte: String? = nil; var step: Int? = nil; var steps: Int? = nil; var back: (() -> Void)? = nil; var roue = false; var rafraichir: (() -> Void)? = nil; var heroURL: URL? = nil; var grid = false }
 /// La couleur de la pastille d'un choix, d'après son symbole
 func menuTint(_ icon: String, tint: Color? = nil, destructive: Bool = false) -> Color {
     if let tint { return tint }
@@ -94,7 +94,10 @@ func menuTint(_ icon: String, tint: Color? = nil, destructive: Bool = false) -> 
 enum Slot: String, CaseIterable { case cover = "Jaquette", background = "Fond", logo = "Logo" }
 
 let appSupport = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-let salonRoot = appSupport.appendingPathComponent("Salon")
+/// HOME_REGLAGES=<dossier> : pour un essai, Home lit et écrit ses réglages là au lieu d'Application Support/Salon (avec un dossiers.json
+/// d'essai dedans, rien de l'installation en service n'est touché). HOME_CHERCHER=<dossier> : la recherche de fichiers ne regarde que là.
+let salonRoot = ProcessInfo.processInfo.environment["HOME_REGLAGES"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil } ?? appSupport.appendingPathComponent("Salon")
+let dossierEssai = ProcessInfo.processInfo.environment["HOME_CHERCHER"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil }
 let nxlib = salonRoot.appendingPathComponent("nx-library")   // les illustrations reprises de NX Library (désinstallé) : artwork-picks/, artwork/
 /// Les dossiers de Home : ~/Library/Application Support/Home (moteur, constructions, journaux…) et /Applications/Jeux (les apps des jeux), ou ceux que donne
 /// Application Support/Salon/dossiers.json ({"home": "...", "jeux": "..."}) sur un Mac où ces emplacements ne conviennent pas.
@@ -454,6 +457,15 @@ final class Library: ObservableObject {
     @Published var pickerLoading = false
     @Published var pickerNote: String? = nil
     @Published var pickCharges: Set<String> = []   // les images du sélecteur déjà chargées : seules celles-là se montrent (et se parcourent)
+    /// Une saisie de texte dans Home lui-même (l'adresse d'un serveur) : pas de fenêtre de macOS par-dessus l'interface
+    struct Saisie { let titre: String; var aide: String? = nil; var exemple: String = ""; let valider: (String) -> Void }
+    @Published var saisie: Saisie? = nil
+    @Published var saisieTexte = ""
+    func demander(_ titre: String, aide: String? = nil, exemple: String = "", texte: String = "", valider: @escaping (String) -> Void) {
+        saisieTexte = texte; Sounds.shared.play("ouvrir"); withAnimation(.easeOut(duration: 0.2)) { saisie = Saisie(titre: titre, aide: aide, exemple: exemple, valider: valider) }
+    }
+    func saisieValider() { guard let s = saisie else { return }; let t = saisieTexte.trimmingCharacters(in: .whitespacesAndNewlines); Sounds.shared.play("valider"); withAnimation(.easeOut(duration: 0.2)) { saisie = nil }; s.valider(t) }
+    func saisieAnnuler() { guard saisie != nil else { return }; Sounds.shared.play("retour"); withAnimation(.easeOut(duration: 0.2)) { saisie = nil } }
     @Published var pickerSaisie = false            // la barre de recherche du sélecteur a le clavier (sinon c'est la rangée d'images)
     /// Une image du sélecteur vient de finir de charger : elle apparaît ; si rien de visible n'était visé, c'est elle
     var pickBouge = false   // on a déjà déplacé le curseur du sélecteur : il ne bouge plus tout seul
@@ -1158,8 +1170,7 @@ final class Library: ObservableObject {
         menu = SalonMenu(title: "Construction", items: [
             SalonMenuItem(label: "Clés de la console", detail: config.cles ?? "Ton fichier prod.keys", icon: "key.fill", tint: .yellow, action: {
                 self.proposer("Quelles clés ?", icone: "key.fill", chercher: {
-                    let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".switch/prod.keys")   // l'emplacement habituel, dans un dossier caché
-                    return (FileManager.default.fileExists(atPath: cache.path) ? [cache] : []) + Library.fichiersCandidats(ext: [], noms: ["prod.keys"])
+                    return Library.clesCandidates()
                 }, finder: {
                     let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
                     p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
@@ -2791,6 +2802,7 @@ struct MenuView: View {
                 Text(menu.title.uppercased()).font(.system(size: 38, weight: .black).width(.expanded)).tracking(1)
                 if let suite { Text(suite.uppercased()).font(.system(size: 19, weight: .black).width(.expanded)).tracking(1.5).opacity(0.55).lineLimit(1).padding(.leading, 8).padding(.top, 12).id(suite).transition(.opacity) }
             }
+            if let al = menu.alerte { Text(al).font(.system(size: 24, weight: .bold)).foregroundStyle(Color.orange).lineLimit(2) }
         }
     }
     /// La roue : le choix visé en grand, les autres de plus en plus petits et effacés autour ; tout glisse quand on bouge
@@ -2858,6 +2870,8 @@ struct MenuView: View {
             if let st = menu.subtitle { Text(st.uppercased()).font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.6).lineLimit(1) }
             Text(menu.title.uppercased()).font(.system(size: rangee ? 44 : 40, weight: .black).width(.expanded)).tracking(1).lineLimit(1).minimumScaleFactor(0.6).padding(.top, 4)
         }
+        // ce qu'il ne faut pas rater sur cet écran (« Il faut la version 1.2.1 du jeu ») : en gros, sous le titre
+        if let al = menu.alerte { Text(al).font(.system(size: 26, weight: .bold)).foregroundStyle(Color.orange).lineLimit(2).padding(.top, 10) }
     }
     private var aides: some View {
         HStack(spacing: 12) { Pilule(k: lib.hints.ok, t: "Choisir"); if menu.rafraichir != nil { Pilule(k: lib.hints.tri, t: "Actualiser") }; Pilule(k: lib.hints.back, t: menu.back == nil ? "Fermer" : "Retour") }
@@ -3258,6 +3272,28 @@ struct AddTile: View {
         .animation(coule, value: selected)
     }
 }
+/// La saisie de texte de Home : un titre, une ligne d'aide, un champ. Entrée valide, Échap annule.
+struct SaisieView: View {
+    @ObservedObject var lib: Library
+    @FocusState private var champ: Bool
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.72).ignoresSafeArea().onTapGesture { lib.saisieAnnuler() }
+            VStack(alignment: .leading, spacing: 18) {
+                Text((lib.saisie?.titre ?? "").uppercased()).font(.system(size: 40, weight: .black).width(.expanded)).tracking(1)
+                if let a = lib.saisie?.aide { Text(a).font(.system(size: 21, weight: .medium)).opacity(0.75).fixedSize(horizontal: false, vertical: true) }
+                TextField("", text: $lib.saisieTexte, prompt: Text(lib.saisie?.exemple ?? "").foregroundColor(.white.opacity(0.4)))
+                    .textFieldStyle(.plain).font(.system(size: 30, weight: .semibold, design: .rounded)).focused($champ)
+                    .onSubmit { lib.saisieValider() }.onExitCommand { lib.saisieAnnuler() }
+                    .padding(.horizontal, 26).padding(.vertical, 18)
+                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.black.opacity(0.6)))
+                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.95), lineWidth: 3))
+                HStack(spacing: 12) { Pilule(k: Key(text: "Entrée"), t: "Valider"); Pilule(k: Key(text: "Échap"), t: "Annuler") }.padding(.top, 6)
+            }.frame(width: 900, alignment: .leading).foregroundStyle(.white)
+        }
+        .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { champ = true } }
+    }
+}
 struct PickerView: View {
     @ObservedObject var lib: Library
     @State private var recherche = ""
@@ -3400,12 +3436,21 @@ struct Screen: View {
                 Spacer()
                 if let g {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text((g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "Steam" : g.appPC?.hasPrefix("exe:") == true ? "Windows" : "Epic Games") : g.category).uppercased())
-                            .font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.8)
+                        // d'où vient le jeu : la pastille de sa console ou de sa boutique (les repères de Symbole), puis son nom en petites capitales
+                        HStack(spacing: 10) {
+                            let repere = g.id.hasPrefix("construction:") ? "hammer.fill" : g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "logo:steam" : g.appPC?.hasPrefix("exe:") == true ? "logo:windows" : "logo:epic")
+                                : g.category.hasPrefix("Switch") ? "logo:switch" : g.category == "Mac" ? "logo:mac" : ""
+                            if !repere.isEmpty {
+                                Symbole(nom: repere, taille: repere.hasPrefix("logo:") ? 12 : 13).fontWeight(.bold).foregroundStyle(.white).frame(width: 28, height: 28)
+                                    .background(Circle().fill(Symbole.degrade(repere))).clipShape(Circle())
+                            }
+                            Text((g.id.hasPrefix("construction:") ? "En construction" : g.viaHome ? (g.appPC?.hasPrefix("steam:") == true ? "Steam" : g.appPC?.hasPrefix("exe:") == true ? "Windows" : "Epic Games") : g.category).uppercased())
+                                .font(.system(size: 15, weight: .heavy, design: .rounded)).tracking(2).opacity(0.8)
+                        }
                         if let l = a?.logo { Image(nsImage: l).resizable().scaledToFit().frame(maxWidth: 560, maxHeight: 180, alignment: .leading).shadow(radius: 12) }
                         else { Text(g.name.uppercased()).font(.system(size: 52, weight: .black).width(.expanded)).tracking(1).lineLimit(1).minimumScaleFactor(0.5).shadow(radius: 12) }
                         HStack(spacing: 16) {
-                            HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running != nil ? "En cours…" : lib.enFond(g) ? "Reprendre" : "Jouer").font(.system(size: 20, weight: .semibold, design: .rounded)) }
+                            HStack(spacing: 10) { if let sym = lib.hints.ok.symbol { Image(systemName: sym.replacingOccurrences(of: ".circle", with: ".circle.fill")).font(.system(size: 22)) } else { Text(lib.hints.ok.text).font(.system(size: 15, weight: .bold)).padding(.horizontal, 6).overlay(Capsule().stroke(.black.opacity(0.6), lineWidth: 1.5)) }; Text(lib.running != nil ? "En cours…" : lib.enFond(g) ? "Reprendre" : g.id.hasPrefix("construction:") ? "Construction" : "Jouer").font(.system(size: 20, weight: .semibold, design: .rounded)) }
                                 .foregroundStyle(.black).padding(.horizontal, 34).padding(.vertical, 14).background(Capsule().fill(.white.opacity(lib.running == nil ? 1 : 0.5)))
                                 .shadow(color: .white.opacity(pulse ? 0.45 : 0.1), radius: pulse ? 22 : 8).scaleEffect(pulse ? 1.02 : 1.0)
                                 .onAppear { withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true } }
@@ -3447,6 +3492,7 @@ struct Screen: View {
             .blur(radius: veiled ? 16 : 0).scaleEffect(veiled ? 0.985 : 1).animation(.easeInOut(duration: 0.35), value: veiled)
             if let m = lib.menu { Color.black.opacity(0.18).ignoresSafeArea().onTapGesture { lib.closeAllMenus() }; MenuView(lib: lib, menu: m).id(m.title + (m.subtitle ?? "")) }
             if lib.picker != nil { PickerView(lib: lib) }
+            if lib.saisie != nil { SaisieView(lib: lib).transition(.opacity).zIndex(17) }
             if lib.bienvenue { BienvenueView(lib: lib).transition(.opacity).zIndex(18) }
             if lib.ouverture { OuvertureView(lib: lib).zIndex(20) }
             if let t = lib.tache {
@@ -4032,6 +4078,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch k { case "left": lib.bienvenueBouger(-1); case "right": lib.bienvenueBouger(1); case "ok": lib.bienvenueValider(); case "options": lib.bienvenueIgnorer(); default: break }
             return
         }
+        if lib.saisie != nil { if k == "back" { lib.saisieAnnuler() } else if k == "ok" { lib.saisieValider() }; return }   // la manette : valider ou annuler ; le texte se tape au clavier
         if let p = lib.picker {
             _ = p
             if lib.pickerSaisie { if k == "up" || k == "back" { lib.pickerSaisie = false; Sounds.shared.play("deplacer") }; return }
@@ -4300,14 +4347,65 @@ enum Atelier {
     /// Les jeux que MacNativeGames sait construire : Tears of the Kingdom et Breath of the Wild (title ID)
     static let jeuxMNG = ["0100F2C0115B6000": "Zelda: Tears of the Kingdom", "01007EF00011E000": "Zelda: Breath of the Wild"]
     /// Les title ID qu'un NSP nomme dans sa table de fichiers (tickets, certificats : <title id><génération>.tik), sinon rien
-    static func titresNSP(_ u: URL) -> [String] {
-        guard let f = try? FileHandle(forReadingFrom: u) else { return [] }
+    /// La table des noms d'un NSP (en-tête PFS0), en majuscules ; nil si le fichier n'en est pas un
+    static func tableNSP(_ u: URL) -> String? {
+        guard let f = try? FileHandle(forReadingFrom: u) else { return nil }
         defer { try? f.close() }
-        guard let h = try? f.read(upToCount: 16), h.count == 16, h.prefix(4) == Data("PFS0".utf8) else { return [] }
+        guard let h = try? f.read(upToCount: 16), h.count == 16, h.prefix(4) == Data("PFS0".utf8) else { return nil }
         func u32(_ d: Data, _ o: Int) -> Int { Int(d[d.startIndex + o]) | Int(d[d.startIndex + o + 1]) << 8 | Int(d[d.startIndex + o + 2]) << 16 | Int(d[d.startIndex + o + 3]) << 24 }
         let n = u32(h, 4), taille = u32(h, 8)
-        guard n > 0, n < 4096, taille < 1 << 20, let reste = try? f.read(upToCount: n * 24 + taille), reste.count == n * 24 + taille else { return [] }
-        let noms = String(decoding: reste.suffix(taille), as: UTF8.self).uppercased()
+        guard n > 0, n < 4096, taille > 0, taille < 1 << 20, let reste = try? f.read(upToCount: n * 24 + taille), reste.count == n * 24 + taille else { return nil }
+        return String(decoding: reste.suffix(taille), as: UTF8.self).uppercased()
+    }
+    /// Ce qu'est un fichier de jeu, et de quel jeu. Le numéro de titre dit tout : il finit par 000 pour un jeu, 800 pour sa mise à jour,
+    /// autre chose pour un DLC. On le lit dans le nom du ticket d'un NSP, sinon entre crochets dans le nom du fichier ([0100…]) ; à
+    /// défaut, les mots du nom (« update », « patch », « maj », « dlc », [v65536]). Les mêmes règles que Home pour Windows (Trouvailles.Lire).
+    enum Sorte { case base, maj, dlc, inconnu }
+    nonisolated(unsafe) static var sortesLues: [String: (Sorte, String?)] = [:]
+    static let verrouSortes = NSLock()
+    static func lire(_ u: URL) -> (sorte: Sorte, titre: String?) {
+        verrouSortes.lock(); let deja = sortesLues[u.path]; verrouSortes.unlock()
+        if let deja { return deja }
+        var id: String? = nil; let nom = u.lastPathComponent, ext = u.pathExtension.lowercased()
+        if ext == "nsp" || ext == "nsz", let t = tableNSP(u), let r = t.range(of: #"0[0-9A-F]{15}(?=[0-9A-F]{16}\.TIK)"#, options: .regularExpression) { id = String(t[r]) }
+        if id == nil, let r = nom.range(of: #"(?<=\[)0[0-9A-Fa-f]{15}(?=\])"#, options: .regularExpression) { id = nom[r].uppercased() }
+        var sorte = Sorte.inconnu
+        if let id { sorte = id.hasSuffix("000") ? .base : id.hasSuffix("800") ? .maj : .dlc }
+        else {
+            let n = nom.lowercased()
+            let version = n.range(of: #"(?<=\[v)\d+(?=\])"#, options: .regularExpression).map { String(n[$0]) }
+            // « maj » et « upd » en mots entiers : « Majora » n'est pas une mise à jour
+            let motMaj = n.contains("update") || n.contains("patch") || n.contains("mise a jour") || n.range(of: #"(?<![a-z])(maj|upd)(?![a-z])"#, options: .regularExpression) != nil
+            if n.contains("dlc") { sorte = .dlc }
+            else if motMaj || (version.map { !$0.allSatisfy { $0 == "0" } } ?? false) { sorte = .maj }
+            else if ["xci", "xcz", "nup"].contains(ext) || version != nil || u.hasDirectoryPath { sorte = .base }
+        }
+        verrouSortes.lock(); sortesLues[u.path] = (sorte, id); verrouSortes.unlock()
+        return (sorte, id)
+    }
+    /// Le numéro du jeu de base auquel un fichier se rattache (lui-même, sa mise à jour ou un de ses DLC)
+    static func baseDe(_ u: URL) -> String? {
+        let (sorte, id) = lire(u)
+        guard let id else { return sorte == .base ? modEnLigne(u)?.tid : nil }
+        if sorte != .dlc { return String(id.prefix(13)) + "000" }
+        guard let v = UInt64(id, radix: 16), v >= 0x1000 else { return nil }
+        let b = String((v & ~UInt64(0xFFF)) - 0x1000, radix: 16, uppercase: true)
+        return String(repeating: "0", count: max(0, 16 - b.count)) + b
+    }
+    static func memeJeu(_ f: URL, _ jeu: URL) -> Bool {
+        if let a = baseDe(jeu), let b = baseDe(f) { return a == b }
+        // pas de numéro des deux côtés : les mots du nom du jeu doivent se retrouver dans le nom de l'autre fichier
+        func mots(_ x: URL) -> [String] {
+            x.deletingPathExtension().lastPathComponent.replacingOccurrences(of: #"\[[^\]]*\]|\([^)]*\)"#, with: " ", options: .regularExpression).lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count >= 3 }
+        }
+        let a = mots(jeu), b = Set(mots(f))
+        return !a.isEmpty && a.joined().count >= 4 && a.allSatisfy { b.contains($0) }
+    }
+    static func majDe(_ jeu: URL, parmi: [URL]) -> URL? { parmi.first { $0 != jeu && lire($0).sorte == .maj && memeJeu($0, jeu) } }
+    static func dlcDe(_ jeu: URL, parmi: [URL]) -> [URL] { Array(parmi.filter { $0 != jeu && lire($0).sorte == .dlc && memeJeu($0, jeu) }.prefix(60)) }
+    static func titresNSP(_ u: URL) -> [String] {
+        guard let noms = tableNSP(u) else { return [] }
         var ids: [String] = []
         noms.enumerateSubstrings(in: noms.startIndex..., options: .byWords) { w, _, _, _ in if let w, w.count >= 16, w.hasPrefix("01") || w.hasPrefix("04") { ids.append(String(w.prefix(16))) } }
         return ids
@@ -4430,6 +4528,20 @@ enum Atelier {
             try fm.copyItem(at: source, to: cible)
         } catch { log("Mod en ligne \(m.nom) : \(error.localizedDescription)"); return false }
         return modEnLignePret(m)
+    }
+    /// Le mod en ligne d'un jeu, déjà sur ce Mac sans être rangé : un dossier exefs qui contient son module, ou un .zip dont la liste
+    /// de fichiers le contient (on ne lit que cette liste)
+    static func trouverModEnLigne(_ m: ModEnLigne) -> URL? {
+        if let f = Library.fichiersCandidats(ext: [], noms: [m.fichier], max: 20).first(where: { $0.deletingLastPathComponent().lastPathComponent.lowercased() == "exefs" }) {
+            return f.deletingLastPathComponent().deletingLastPathComponent()
+        }
+        for zip in Library.fichiersCandidats(ext: ["zip"], max: 300) {
+            let taille = (try? zip.resourceValues(forKeys: [.fileSizeKey]).fileSize).flatMap { $0 } ?? 0
+            if taille > 400 << 20 { continue }
+            let liste = Commande.run("/usr/bin/unzip", ["-Z1", zip.path], timeout: 10).lowercased()
+            if liste.split(separator: "\n").contains(where: { $0.hasSuffix("exefs/" + m.fichier.lowercased()) }) { return zip }
+        }
+        return nil
     }
     /// Un jeu sans mod en ligne connu : la personne le propose dans une demande GitHub pré-remplie, qu'elle complète et envoie elle-même
     static func suggererModEnLigne(_ jeu: String) {
@@ -4763,11 +4875,13 @@ extension Library {
             DispatchQueue.main.asyncAfter(deadline: .now() + 8) { if self.tache?.log == t.log { withAnimation(.easeInOut(duration: 0.6)) { self.tache = nil } } }
         } else {
             let lignes = ((try? String(contentsOf: t.log, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            let motif = lignes.last { $0.contains("ÉCHEC") || $0.contains("ERROR") || $0.contains("Error") || $0.contains("introuvable") || $0.contains("[RED]") } ?? lignes.last ?? "Erreur"
+            // la raison en clair, quand le script la connaît (« Pourquoi : … ») ; sinon la dernière erreur, pas la ligne « ÉCHEC » générale et son chemin de journal
+            let pourquoi = lignes.last { $0.hasPrefix("Pourquoi : ") }.map { String($0.dropFirst(11)) }
+            let motif = lignes.last { ($0.contains("ÉCHEC") && !$0.contains("(journal : ")) || $0.contains("ERROR") || $0.contains("Error") || $0.contains("introuvable") || $0.contains("[RED]") } ?? lignes.last ?? "Erreur"
             var court = motif.trimmingCharacters(in: .whitespaces)
             if court.hasPrefix("{"), let d = court.data(using: .utf8), let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any], let m = j["msg"] as? String { court = m }
             apresTache = nil
-            t.erreur = "Échec : " + String(court.replacingOccurrences(of: "[RED] ", with: "").prefix(70))
+            t.erreur = pourquoi.map { String($0.prefix(150)) } ?? "Échec : " + String(court.replacingOccurrences(of: "[RED] ", with: "").prefix(70))
             tache = t; Sounds.shared.play("retour")
             log("Tâche échouée (\(code)) : \(t.titre) — \(t.log.path)")
             if t.titre.hasPrefix("Construction") { DispatchQueue.main.asyncAfter(deadline: .now() + 4) { self.toast = "La construction a laissé un dossier de travail : Menu → Avancé → Construction → Libérer de la place" } }
@@ -4796,6 +4910,7 @@ extension Library {
         var base: URL? = nil; var updates: [URL] = []; var dlc: [URL] = []
         var travail: String? = nil; var sortie: URL? = nil; var titre: String? = nil
         var mods: [String] = []; var modModule: String? = nil; var icone: String? = nil
+        var majCherchee = false; var dlcCherches = false; var majConfirmee = false   // ce que Home a déjà cherché seul ; la mise à jour exigée, confirmée par le joueur
         var enLigne: Atelier.ModEnLigne? = nil; var local = false   // le mode choisi : avec le mod en ligne du jeu, ou en local (le mod rangé sur ce Mac n'est alors pas appliqué)
     }
     /// L'icône d'une app nxnative sans icône (construite sans données de contrôle) : la jaquette
@@ -4850,10 +4965,11 @@ extension Library {
     /// Les fichiers de ce Mac qui peuvent convenir (par extension, ou par nom exact) : Téléchargements, Bureau, Documents et les disques
     /// branchés, sur trois niveaux de dossiers. Les plus récents d'abord ; ceux dont le nom contient un mot de `priorite` passent devant.
     nonisolated(unsafe) static var dossiersRefuses: [String] = []   // les dossiers que la dernière recherche n'a pas pu lire
-    nonisolated static func fichiersCandidats(ext: [String], noms: [String] = [], priorite: [String] = [], exclus: [URL] = []) -> [URL] {
+    nonisolated static func fichiersCandidats(ext: [String], noms: [String] = [], priorite: [String] = [], exclus: [URL] = [], max: Int = 40) -> [URL] {
         let fm = FileManager.default, maison = fm.homeDirectoryForCurrentUser
         var racines = ["Downloads", "Desktop", "Documents"].map { maison.appendingPathComponent($0) }
         racines += (fm.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeIsRootFileSystemKey], options: [.skipHiddenVolumes]) ?? []).filter { (try? $0.resourceValues(forKeys: [.volumeIsRootFileSystemKey]).volumeIsRootFileSystem) == false && $0.path.hasPrefix("/Volumes/") }
+        if let dossierEssai { racines = [dossierEssai] }   // un essai : seulement ce dossier
         let e = Set(ext.map { $0.lowercased() }), n = Set(noms.map { $0.lowercased() }), hors = Set(exclus.map { $0.standardizedFileURL.path })
         var trouves: [(URL, Date)] = []; var vus = 0
         for r in racines {
@@ -4869,7 +4985,7 @@ extension Library {
         let dejaVus = Set(trouves.map { $0.0.standardizedFileURL.path })
         let filtre = (e.map { "kMDItemFSName == \"*.\($0)\"c" } + n.map { "kMDItemFSName == \"\($0)\"c" }).joined(separator: " || ")
         var refuses: [String] = []
-        if !filtre.isEmpty {
+        if !filtre.isEmpty, dossierEssai == nil {
             for l in Commande.run("/usr/bin/mdfind", [filtre], timeout: 8).split(separator: "\n") {
                 let u = URL(fileURLWithPath: String(l)); let p = u.standardizedFileURL.path
                 guard l.hasPrefix("/"), !dejaVus.contains(p), !hors.contains(p), !p.contains("/Library/"), !p.contains("/.Trash/"), !p.contains(".app/"), fm.isReadableFile(atPath: p) else { continue }
@@ -4881,7 +4997,35 @@ extension Library {
         Library.dossiersRefuses = refuses
         log("Recherche de fichiers (\((ext + noms).joined(separator: ", "))) : \(trouves.count) trouvé(s)" + (refuses.isEmpty ? "" : " ; macOS refuse à Home : " + refuses.joined(separator: ", ")))
         func devant(_ u: URL) -> Bool { let t = u.lastPathComponent.lowercased(); return priorite.contains { t.contains($0) } }
-        return trouves.sorted { a, b in devant(a.0) != devant(b.0) ? devant(a.0) : a.1 > b.1 }.prefix(40).map { $0.0 }
+        return trouves.sorted { a, b in devant(a.0) != devant(b.0) ? devant(a.0) : a.1 > b.1 }.prefix(max).map { $0.0 }
+    }
+    /// Tous les fichiers de jeu trouvés par la dernière recherche (jeux, mises à jour, DLC) : la mise à jour et les DLC du jeu choisi en sont tirés
+    nonisolated(unsafe) static var trouvailles: [URL] = []
+    /// « Quel jeu ? » : seulement les jeux, pas leurs mises à jour ni leurs DLC (un fichier que Home ne sait pas classer reste proposé)
+    nonisolated static func jeuxCandidats() -> [URL] {
+        let tous = fichiersCandidats(ext: ["nsp", "xci", "nup", "nsz", "xcz"], max: 400); trouvailles = tous
+        return Array(tous.filter { let k = Atelier.lire($0).sorte; return k == .base || k == .inconnu }.prefix(40))
+    }
+    /// prod.keys : sa place habituelle (~/.switch), sinon le fichier trouvé dans les dossiers regardés
+    nonisolated static func clesCandidates() -> [URL] {
+        let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".switch/prod.keys")
+        return (dossierEssai == nil && FileManager.default.fileExists(atPath: cache.path) ? [cache] : []) + fichiersCandidats(ext: [], noms: ["prod.keys"])
+    }
+    /// Les clés sont prises dès qu'elles sont trouvées, et Home dit où : le joueur n'a rien à montrer. Home retient leur place, sans les copier ni les lire.
+    func chercherCles(puis: @escaping () -> Void = {}) {
+        if let c = config.cles, FileManager.default.fileExists(atPath: c) { puis(); return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let u = Library.clesCandidates().first
+            DispatchQueue.main.async {
+                if let u, self.config.cles == nil || !FileManager.default.fileExists(atPath: self.config.cles ?? "") {
+                    self.config.cles = u.path; self.saveConfig()
+                    let d = u.deletingLastPathComponent().lastPathComponent
+                    self.toast = "Clés trouvées dans \(["Downloads": "Téléchargements", "Desktop": "Bureau"][d] ?? d) : Home s'en servira"
+                    log("Clés de la console trouvées : \(u.path)")
+                }
+                puis()
+            }
+        }
     }
     /// Choisir un fichier sans passer par le Finder : Home cherche ce qui convient et le propose ; « Chercher ailleurs… » ouvre le Finder.
     /// S'il ne trouve rien, le Finder s'ouvre tout de suite.
@@ -4970,8 +5114,12 @@ extension Library {
                 SalonMenuItem(label: "Voir l'avancement", icon: "chart.bar.fill", tint: .blue, action: { self.openTacheMenu() }),
             ], hero: "hammer.fill")
         }
+        // pourquoi elle s'est arrêtée : la ligne « Pourquoi : » que le script écrit quand il le sait, sinon la dernière erreur du journal
+        let fin = (try? String(contentsOf: URL(fileURLWithPath: c.log), encoding: .utf8))?.suffix(6000).components(separatedBy: "\n") ?? []
+        let raison = fin.last { $0.hasPrefix("Pourquoi : ") }.map { String($0.dropFirst(11)) } ?? fin.last { $0.hasPrefix("ERROR") || $0.hasPrefix("error:") || $0.contains("introuvable") }.map { String($0.prefix(160)) }
         return SalonMenu(title: c.titre, subtitle: "Construction arrêtée", items: [
             SalonMenuItem(label: "Reprendre", detail: "La construction repart de là où elle peut", icon: "play.fill", tint: .green, action: { self.reprendreChantier(c) }),
+            SalonMenuItem(label: "Voir le journal", detail: "Ce que la construction a écrit", icon: "doc.text.fill", tint: .gray, action: { NSWorkspace.shared.open(URL(fileURLWithPath: c.log)) }),
             SalonMenuItem(label: "Abandonner", detail: "Son dossier de travail va à la Corbeille", icon: "trash.fill", destructive: true, action: {
                 // le dossier de travail porte le nom du jeu : on ne jette que celui qui lui correspond sans doute possible
                 let racine = Atelier.home.appendingPathComponent("constructions"), fm = FileManager.default
@@ -4980,7 +5128,7 @@ extension Library {
                 if dossiers.count == 1 { try? fm.trashItem(at: dossiers[0], resultingItemURL: nil) }
                 Library.noterChantiers(Library.chantiers().filter { $0.id != c.id }); self.menu = nil; self.load()
                 self.toast = dossiers.count == 1 ? "Construction abandonnée : son dossier est à la Corbeille" : "Construction abandonnée (dossier de travail à retirer dans Avancé → Construction → Libérer de la place)" }),
-        ], hero: "hammer.fill")
+        ], hero: "hammer.fill", alerte: raison)
     }
     func lancerConstruction(_ a: Assistant) {
         var args = ["--moteur", a.moteur]
@@ -5005,18 +5153,14 @@ extension Library {
             Library.noterChantiers(Library.chantiers().filter { $0.id != cid } + [Chantier(id: cid, titre: nom, args: args, log: t.log.path, debut: Date(), local: a.local ? true : nil)]); load()
         }
     }
-    /// TOTK Online a besoin de l'adresse du serveur : demandée une fois si serveurs/totk-adresse.txt manque (elle ne va jamais dans le dépôt)
-    func adresseEnLigne(_ m: Atelier.ModEnLigne) -> Bool {
+    /// TOTK Online a besoin de l'adresse du serveur : demandée une fois, dans Home, si serveurs/totk-adresse.txt manque (elle ne va jamais dans le dépôt)
+    func adresseEnLigne(_ m: Atelier.ModEnLigne, puis: @escaping () -> Void) {
         let f = Atelier.home.appendingPathComponent("serveurs/totk-adresse.txt")
-        guard m.tid == "0100F2C0115B6000", !FileManager.default.fileExists(atPath: f.path) else { return true }
-        let a = NSAlert(); a.messageText = "Adresse du serveur \(m.nom)"
-        a.informativeText = "Celle que t'a donnée la personne qui tient le serveur, par exemple 203.0.113.10:10014. Laisse vide pour un serveur sur ce Mac."
-        let t = NSTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24)); a.accessoryView = t; a.window.initialFirstResponder = t
-        a.addButton(withTitle: "Continuer"); a.addButton(withTitle: "Annuler")
-        guard a.runModal() == .alertFirstButtonReturn else { return false }
-        let s = t.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !s.isEmpty { try? FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true); try? s.write(to: f, atomically: true, encoding: .utf8) }
-        return true
+        guard m.tid == "0100F2C0115B6000", !FileManager.default.fileExists(atPath: f.path) else { puis(); return }
+        demander("Adresse du serveur", aide: "Celle que t'a donnée la personne qui tient le serveur \(m.nom). Laisse vide pour un serveur sur ce Mac.", exemple: "adresse:port") { s in
+            if !s.isEmpty { try? FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true); try? s.write(to: f, atomically: true, encoding: .utf8); self.toast = "Adresse enregistrée" }
+            puis()
+        }
     }
     /// Une étape de l'assistant : une grande illustration, une explication, un ou deux choix
     func assistant(_ a: Assistant, _ i: Int, retour: @escaping () -> Void) {
@@ -5029,19 +5173,19 @@ extension Library {
         switch a.etapes[i] {
         case "base":
             if a.base == nil {   // pas encore de jeu : Home montre tout de suite ceux qu'il trouve sur ce Mac (le Finder reste le dernier choix de la liste)
-                proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.fichiersCandidats(ext: ["nsp", "xci", "nup", "nsz", "xcz"]) },
-                         finder: { self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, .nsz, .xcz, ou le dossier du jeu", plusieurs: false, dossiers: true) },
+                proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.jeuxCandidats() },
+                         finder: { self.choisir("Le fichier du jeu\(a.titre.map { " \($0)" } ?? ""), extrait de ta console, ou son dossier", plusieurs: false, dossiers: true) },
                          back: prec) { u in
-                    var b = a; b.base = u[0]
+                    var b = a; b.base = u[0]; b.updates = []; b.dlc = []; b.majCherchee = false; b.dlcCherches = false; b.majConfirmee = false   // un autre jeu : sa mise à jour et ses DLC sont à rechercher
                     if u[0].pathExtension.lowercased() == "nup" { b.etapes = b.etapes.filter { $0 != "maj" && $0 != "dlc" }; b.updates = []; b.dlc = [] }   // un .nup Switch 2 contient déjà sa mise à jour
                     suite(b) }
                 return
             }
-            var items = [SalonMenuItem(label: a.base?.lastPathComponent ?? "Choisir le jeu…", detail: a.base == nil ? ".nsp, .xci, .nup, ou le dossier d'un jeu extrait" : "Choisir un autre fichier", icon: "folder.fill.badge.plus", action: {
-                self.proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.fichiersCandidats(ext: ["nsp", "xci", "nup", "nsz", "xcz"]) },
-                              finder: { self.choisir("Le jeu de base\(a.titre.map { " de \($0)" } ?? "") : .nsp, .xci, .nup, .nsz, .xcz, ou le dossier du jeu", plusieurs: false, dossiers: true) },
+            var items = [SalonMenuItem(label: a.base?.lastPathComponent ?? "Choisir le jeu…", detail: a.base == nil ? "Le fichier du jeu, extrait de ta console" : "Choisir un autre fichier", icon: "folder.fill.badge.plus", action: {
+                self.proposer("Quel jeu ?", sousTitre: a.titre, icone: "gamecontroller.fill", chercher: { Library.jeuxCandidats() },
+                              finder: { self.choisir("Le fichier du jeu\(a.titre.map { " \($0)" } ?? ""), extrait de ta console, ou son dossier", plusieurs: false, dossiers: true) },
                               back: { self.assistant(a, i, retour: retour) }) { u in
-                    var b = a; b.base = u[0]
+                    var b = a; b.base = u[0]; b.updates = []; b.dlc = []; b.majCherchee = false; b.dlcCherches = false; b.majConfirmee = false   // un autre jeu : sa mise à jour et ses DLC sont à rechercher
                     if u[0].pathExtension.lowercased() == "nup" { b.etapes = b.etapes.filter { $0 != "maj" && $0 != "dlc" }; b.updates = []; b.dlc = [] }   // un .nup Switch 2 contient déjà sa mise à jour
                     suite(b) } })]
             if a.base != nil { items.append(SalonMenuItem(label: "Continuer", icon: "arrow.right.circle.fill", tint: .green, action: { suite(a) })) }
@@ -5076,46 +5220,91 @@ extension Library {
                 return
             }
             let enLigne: () -> Void = {
-                guard self.adresseEnLigne(m) else { return }
-                var b = avecMaj(a, m.maj != nil); b.enLigne = m; b.local = false
-                if m.maj == nil { b.updates = [] }
-                b.modModule = b.moteur == "mng" ? Atelier.modEnLigneModule(m).path : nil
-                suite(b) }
+                self.adresseEnLigne(m) {
+                    var b = avecMaj(a, m.maj != nil); b.enLigne = m; b.local = false
+                    if m.maj == nil { b.updates = [] }
+                    b.modModule = b.moteur == "mng" ? Atelier.modEnLigneModule(m).path : nil
+                    suite(b) } }
             menu = SalonMenu(title: "Comment veux-tu jouer ?", subtitle: nom, items: [
                 SalonMenuItem(label: "En local", icon: "house.fill", tint: .green, action: local),
                 SalonMenuItem(label: "En ligne", detail: "\(m.nom), de \(m.auteur)", icon: "network", tint: .blue, action: {
-                    let pret = Atelier.modEnLignePret(m)
-                    var items: [SalonMenuItem] = []
-                    if pret { items.append(SalonMenuItem(label: "Continuer", detail: "Le mod est déjà sur ce Mac", icon: "arrow.right.circle.fill", tint: .green, action: enLigne)) }
-                    items.append(SalonMenuItem(label: pret ? "Choisir un autre fichier…" : "Choisir le fichier du mod…", detail: "Le .zip de \(m.auteur), ou son dossier", icon: "doc.zipper", action: {
-                        guard let u = self.choisir("\(m.nom) : le .zip du mod, ou son dossier", plusieurs: false, dossiers: true)?.first else { return }
-                        if Atelier.installerModEnLigne(m, depuis: u) { log("Mod en ligne \(m.nom) rangé dans \(Atelier.modEnLigneDossier(m).path)"); enLigne() }
-                        else { self.toast = "Ce fichier n'est pas \(m.nom) : il manque exefs/\(m.fichier)" } }))
-                    items.append(SalonMenuItem(label: "Jouer en local", icon: "house.fill", tint: .gray, action: local))
-                    self.menu = SalonMenu(title: "Jouer en ligne", subtitle: nom, items: items, hero: "network",
-                                          text: "\(m.nom) est un mod de \(m.auteur). Home ne le fournit pas : prends-le chez son auteur (\(m.source)), puis donne-le ici une seule fois.\n" + (m.maj.map { "Il demande la mise à jour \($0) du jeu." } ?? "Il demande le jeu de base, sans mise à jour."), back: ici) }),
+                    func ouvrir() {
+                        let pret = Atelier.modEnLignePret(m)
+                        var items: [SalonMenuItem] = []
+                        if pret { items.append(SalonMenuItem(label: "Continuer", detail: "Le mod est déjà sur ce Mac", icon: "arrow.right.circle.fill", tint: .green, action: enLigne)) }
+                        items.append(SalonMenuItem(label: pret ? "Choisir un autre fichier…" : "Choisir le fichier du mod…", detail: "Le fichier du mod de \(m.auteur), ou son dossier", icon: "doc.zipper", action: {
+                            guard let u = self.choisir("\(m.nom) : le fichier du mod, ou son dossier", plusieurs: false, dossiers: true)?.first else { return }
+                            if Atelier.installerModEnLigne(m, depuis: u) { log("Mod en ligne \(m.nom) rangé dans \(Atelier.modEnLigneDossier(m).path)"); enLigne() }
+                            else { self.toast = "Ce fichier n'est pas \(m.nom) : il manque exefs/\(m.fichier)" } }))
+                        items.append(SalonMenuItem(label: "Jouer en local", icon: "house.fill", tint: .gray, action: local))
+                        self.menu = SalonMenu(title: "Jouer en ligne", subtitle: nom, items: items, hero: "network",
+                                              text: "\(m.nom) est un mod de \(m.auteur). Home ne le fournit pas : prends-le chez son auteur (\(m.source)), puis donne-le ici une seule fois.\n" + (m.maj.map { "Il demande la mise à jour \($0) du jeu." } ?? "Il demande le jeu de base, sans mise à jour."),
+                                              alerte: m.maj.map { "Il faut la version \($0) du jeu" }, back: ici)
+                    }
+                    if Atelier.modEnLignePret(m) { ouvrir(); return }
+                    // pas encore rangé : Home regarde s'il est déjà sur ce Mac (un dossier exefs avec son module, ou un .zip qui le contient) et le range seul
+                    self.menu = SalonMenu(title: "Jouer en ligne", subtitle: nom, items: [SalonMenuItem(label: "Recherche…", icon: "magnifyingglass", info: true, action: {})], hero: "network", back: ici)
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let trouve = Atelier.trouverModEnLigne(m)
+                        let range = trouve.map { Atelier.installerModEnLigne(m, depuis: $0) } ?? false
+                        DispatchQueue.main.async {
+                            guard self.menu?.title == "Jouer en ligne", self.menu?.items.first?.label == "Recherche…" else { return }   // on est parti entre-temps
+                            if range, let trouve {
+                                let d = trouve.deletingLastPathComponent().lastPathComponent
+                                self.toast = "\(m.nom) trouvé dans \(["Downloads": "Téléchargements", "Desktop": "Bureau"][d] ?? d) : rangé dans Home"
+                                log("Mod en ligne \(m.nom) trouvé (\(trouve.path)) et rangé")
+                            }
+                            ouvrir()
+                        }
+                    } }),
             ], hero: "person.2.fill", step: i + 1, steps: n, back: prec)
         case "maj":
+            // la mise à jour du jeu choisi, si elle est déjà sur ce Mac, est proposée d'office
+            if !a.majCherchee { var b = a; b.majCherchee = true
+                if b.updates.isEmpty, let jeu = b.base, let t = Atelier.majDe(jeu, parmi: Library.trouvailles) { b.updates = [t]; b.majConfirmee = false }
+                assistant(b, i, retour: retour); return }
             let exigee = a.enLigne.flatMap { $0.maj }   // en ligne : la version que le mod demande, obligatoire
-            var items = [SalonMenuItem(label: a.updates.isEmpty ? "Choisir la mise à jour…" : noms(a.updates), detail: a.updates.isEmpty ? "Un fichier .nsp" : "Choisir d'autres fichiers", icon: "doc.badge.plus", action: {
-                self.proposer("Quelle mise à jour ?", sousTitre: nom, icone: "arrow.down.circle.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["upd", "update", "maj", "patch"], exclus: [a.base].compactMap { $0 } + a.dlc) },
-                              finder: { self.choisir("Mise à jour de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
-                              back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.updates = u; suite(b) } })]
-            if !a.updates.isEmpty { items.append(SalonMenuItem(label: "Continuer", icon: "arrow.right.circle.fill", tint: .green, action: { suite(a) })) }
-            else if a.sortie == nil, exigee == nil { items.append(SalonMenuItem(label: "Pas de mise à jour", icon: "arrow.right.circle", tint: .gray, action: { suite(a) })) }
+            let ici: () -> Void = { self.assistant(a, i, retour: retour) }
+            let apres: () -> Void = {
+                guard let v = exigee, !a.majConfirmee, let mod = a.enLigne else { suite(a); return }
+                // en ligne : une autre version que celle du mod donne un jeu qui ne se connecte pas, après une heure de construction. On redemande.
+                self.menu = SalonMenu(title: "Es-tu sûr ?", subtitle: noms(a.updates), items: [
+                    SalonMenuItem(label: "Oui, c'est la \(v)", icon: "checkmark.circle.fill", tint: .green, action: { var b = a; b.majConfirmee = true; suite(b) }),
+                    SalonMenuItem(label: "Choisir un autre fichier", icon: "arrow.uturn.backward.circle.fill", tint: .gray, action: ici),
+                ], hero: "exclamationmark.triangle.fill", text: "Home ne peut pas le vérifier. Avec une autre version, \(mod.nom) ne marchera pas, et il faudra tout reconstruire.",
+                   alerte: "Ce fichier doit être la mise à jour \(v)", back: ici)
+            }
+            var items: [SalonMenuItem] = []
+            if !a.updates.isEmpty { items.append(SalonMenuItem(label: "Continuer", detail: noms(a.updates), icon: "arrow.right.circle.fill", tint: .green, action: apres)) }
+            items.append(SalonMenuItem(label: a.updates.isEmpty ? "Choisir la mise à jour…" : "Choisir un autre fichier…", detail: "Le fichier de la mise à jour", icon: "doc.badge.plus", action: {
+                self.proposer("Quelle mise à jour ?", sousTitre: nom, icone: "arrow.down.circle.fill", plusieurs: exigee == nil, chercher: {
+                    let jeu = a.base   // les mises à jour seulement, celle de ce jeu d'abord
+                    let tous = Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["upd", "update", "maj", "patch"], exclus: [a.base].compactMap { $0 } + a.dlc, max: 400).filter { let k = Atelier.lire($0).sorte; return k == .maj || k == .inconnu }
+                    return Array((tous.filter { u in jeu.map { Atelier.memeJeu(u, $0) } ?? false } + tous.filter { u in !(jeu.map { Atelier.memeJeu(u, $0) } ?? false) }).prefix(40)) },
+                              finder: { self.choisir(exigee.map { "Le fichier de la mise à jour \($0) du jeu" } ?? "Le fichier de la mise à jour du jeu", plusieurs: exigee == nil, dossiers: false) },
+                              back: ici) { u in var b = a; b.updates = u; b.majConfirmee = false; self.assistant(b, i, retour: retour) } }))
+            if a.updates.isEmpty, a.sortie == nil, exigee == nil { items.append(SalonMenuItem(label: "Pas de mise à jour", icon: "arrow.right.circle", tint: .gray, action: { suite(a) })) }
+            else if !a.updates.isEmpty, a.sortie == nil, exigee == nil { items.append(SalonMenuItem(label: "Pas de mise à jour", detail: "Construire le jeu sans elle", icon: "xmark.circle", tint: .gray, action: { var b = a; b.updates = []; suite(b) })) }
             if let m = a.enLigne, exigee != nil {   // sans cette mise à jour, pas de jeu en ligne : on repasse en local, où elle est facultative
                 items.append(SalonMenuItem(label: "Jouer en local à la place", detail: "Sans \(m.nom) : la mise à jour devient facultative", icon: "house.fill", tint: .gray, action: {
-                    var b = a; b.enLigne = nil; b.modModule = nil; b.local = true; self.assistant(b, i, retour: retour) }))
+                    var b = a; b.enLigne = nil; b.modModule = nil; b.local = true; self.toast = "En local, sans \(m.nom)"; self.assistant(b, i, retour: retour) }))
             }
             menu = SalonMenu(title: exigee.map { "La mise à jour \($0)" } ?? "La mise à jour", subtitle: nom, items: items, hero: "arrow.down.circle.fill",
-                             text: exigee.map { "\(a.enLigne?.nom ?? "Le mod en ligne") ne marche qu'avec la mise à jour \($0) du jeu : donne ce fichier-là." },
-                             step: i + 1, steps: n, back: prec)
+                             text: exigee.map { "\(a.enLigne?.nom ?? "Le mod en ligne") ne marche qu'avec la mise à jour \($0) : donne ce fichier-là, pas une autre version." } ?? "Si tu as la mise à jour du jeu, donne-la : elle est construite avec lui. Ce n'est pas obligatoire.",
+                             alerte: exigee.map { "Il faut la version \($0) du jeu" }, step: i + 1, steps: n, back: prec)
         case "dlc":
-            var items = [SalonMenuItem(label: a.dlc.isEmpty ? "Choisir les DLC…" : noms(a.dlc), detail: a.dlc.isEmpty ? "Un ou plusieurs fichiers .nsp" : "Choisir d'autres fichiers", icon: "puzzlepiece.extension.fill", action: {
-                self.proposer("Quels DLC ?", sousTitre: nom, icone: "puzzlepiece.extension.fill", plusieurs: true, chercher: { Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["dlc"], exclus: [a.base].compactMap { $0 } + a.updates) },
-                              finder: { self.choisir("DLC de \(nom) (.nsp)", plusieurs: true, dossiers: false) },
-                              back: { self.assistant(a, i, retour: retour) }) { u in var b = a; b.dlc = u; suite(b) } })]
-            items.append(SalonMenuItem(label: a.dlc.isEmpty ? "Pas de DLC" : "Continuer", icon: "arrow.right.circle\(a.dlc.isEmpty ? "" : ".fill")", tint: a.dlc.isEmpty ? .gray : .green, action: { suite(a) }))
+            // les DLC de ce jeu déjà sur ce Mac sont ajoutés d'office ; « Tout retirer » les enlève
+            if !a.dlcCherches { var b = a; b.dlcCherches = true
+                if let jeu = b.base { for d in Atelier.dlcDe(jeu, parmi: Library.trouvailles) where !b.dlc.contains(d) && !b.updates.contains(d) { b.dlc.append(d) } }
+                assistant(b, i, retour: retour); return }
+            var items = [SalonMenuItem(label: a.dlc.isEmpty ? "Choisir les DLC…" : "Ajouter un autre DLC…", detail: a.dlc.isEmpty ? "Le fichier d'un DLC, ou plusieurs" : noms(a.dlc), icon: "puzzlepiece.extension.fill", action: {
+                self.proposer("Quels DLC ?", sousTitre: nom, icone: "puzzlepiece.extension.fill", plusieurs: true, chercher: {
+                    Array(Library.fichiersCandidats(ext: ["nsp", "nsz"], priorite: ["dlc"], exclus: [a.base].compactMap { $0 } + a.updates + a.dlc, max: 400).filter { let k = Atelier.lire($0).sorte; return k == .dlc || k == .inconnu }.prefix(40)) },
+                              finder: { self.choisir("Le fichier d'un DLC du jeu", plusieurs: true, dossiers: false) },
+                              back: { self.assistant(a, i, retour: retour) }) { u in var b = a; for d in u where !b.dlc.contains(d) { b.dlc.append(d) }; self.assistant(b, i, retour: retour) } })]
+            let continuer = SalonMenuItem(label: a.dlc.isEmpty ? "Pas de DLC" : "Continuer", detail: a.dlc.isEmpty ? nil : noms(a.dlc), icon: "arrow.right.circle\(a.dlc.isEmpty ? "" : ".fill")", tint: a.dlc.isEmpty ? .gray : .green, action: { suite(a) })
+            if a.dlc.isEmpty { items.append(continuer) } else { items.insert(continuer, at: 0) }   // des DLC trouvés seuls : valider continue
+            if !a.dlc.isEmpty { items.append(SalonMenuItem(label: "Tout retirer", icon: "xmark.circle", tint: .gray, action: { var b = a; b.dlc = []; self.assistant(b, i, retour: retour) })) }
             menu = SalonMenu(title: "Les contenus additionnels", subtitle: nom, items: items, hero: "puzzlepiece.extension.fill", step: i + 1, steps: n, back: prec)
         default:
             var items: [SalonMenuItem] = []
@@ -5159,13 +5348,16 @@ extension Library {
     }
     /// Premier lancement, jeux Switch : le fichier prod.keys de la console. Home le cherche lui-même ; « Plus tard » passe l'étape
     /// (il sera redemandé à la première construction, et se règle dans Avancé → Construction).
-    func accueilCles(puis: @escaping () -> Void) {
-        let ici: () -> Void = { self.accueilCles(puis: puis) }
+    func accueilCles(puis: @escaping () -> Void, cherche: Bool = false) {
+        if !cherche, config.cles == nil {   // Home regarde d'abord seul : si les clés sont sur ce Mac, il n'y a rien à montrer
+            menu = SalonMenu(title: "Clés de la console", items: [SalonMenuItem(label: "Recherche…", icon: "magnifyingglass", info: true, action: {})], hero: "key.fill")
+            chercherCles { if self.config.cles != nil { self.menu = nil; puis() } else { self.accueilCles(puis: puis, cherche: true) } }; return
+        }
+        let ici: () -> Void = { self.accueilCles(puis: puis, cherche: true) }
         menu = SalonMenu(title: "Clés de la console", items: [
-            SalonMenuItem(label: config.cles == nil ? "Choisir prod.keys" : "prod.keys : choisi", detail: "Le fichier de clés extrait de ta propre console", icon: "key.fill", tint: .yellow, action: {
+            SalonMenuItem(label: config.cles == nil ? "Choisir prod.keys" : "prod.keys : trouvé", detail: config.cles.map { "Dans " + URL(fileURLWithPath: $0).deletingLastPathComponent().lastPathComponent + " · choisir un autre fichier" } ?? "Le fichier de clés extrait de ta propre console", icon: "key.fill", tint: .yellow, action: {
                 self.proposer("Quelles clés ?", icone: "key.fill", chercher: {
-                    let cache = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".switch/prod.keys")
-                    return (FileManager.default.fileExists(atPath: cache.path) ? [cache] : []) + Library.fichiersCandidats(ext: [], noms: ["prod.keys"])
+                    return Library.clesCandidates()
                 }, finder: {
                     let p = NSOpenPanel(); p.canChooseFiles = true; p.canChooseDirectories = false; p.message = "Le fichier prod.keys de ta console"
                     p.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
@@ -5546,7 +5738,7 @@ extension Library {
         menu = SalonMenu(title: "Ajouter un jeu", subtitle: "Que veux-tu ajouter ?", items: [
             SalonMenuItem(label: "Switch", icon: "logo:switch", tint: .red, action: {
                 if !Atelier.nxnativePret && !Atelier.mngPret { self.openPreparation(back: ici); return }   // aucun moteur : d'abord préparer ce Mac
-                self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "mode", "maj", "dlc", "recap"]), 0, retour: ici) }),
+                self.chercherCles(); self.assistant(Assistant(moteur: "nxnative", etapes: ["base", "moteur", "mode", "maj", "dlc", "recap"]), 0, retour: ici) }),
             SalonMenuItem(label: "Epic Games", icon: "logo:epic", tint: .purple, action: { self.ouvrirBibliotheque("epic", back: ici) }),
             SalonMenuItem(label: "Steam", icon: "logo:steam", tint: .blue, action: { self.ouvrirBibliotheque("steam", back: ici) }),
             SalonMenuItem(label: "App Mac", icon: "logo:mac", tint: .gray, action: { self.addGame(back: ici) }),

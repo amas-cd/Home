@@ -102,7 +102,10 @@ if [ "$MOTEUR" = mng ]; then
   echo; echo "== MacNativeGames (20 à 40 min, ne pas interrompre)"
   ( cd "$MNG" && "${DISCRET[@]}" "$PY" build_app.py "${ARGS[@]}" ) || true
   # réussite : « done in » (TOTK, BotW…), ou « Built <app>; native gameplay validation… » et l'app présente (Ocarina, games/oot/build.py)
-  { grep -q "done in" "$LOG" || { grep -q "^Built .*\.app; native gameplay validation" "$LOG" && [ -d "$TMPAPP" ]; }; } || { echo; echo "ÉCHEC — dis-le à Claude (journal : $LOG)"; rm -rf "$TMPAPP"; fin 1; }
+  { grep -q "done in" "$LOG" || { grep -q "^Built .*\.app; native gameplay validation" "$LOG" && [ -d "$TMPAPP" ]; }; } || { echo
+    # la raison, en clair, quand on la connaît : Home l'affiche sur la tuile du chantier
+    grep -q "do not include system shared fonts" "$LOG" && echo "Pourquoi : Il faut le dump de la cartouche du jeu. Ce fichier-ci n'a pas les polices système de la console, dont MacNativeGames a besoin."
+    echo "ÉCHEC — dis-le à Claude (journal : $LOG)"; rm -rf "$TMPAPP"; fin 1; }
 else
   PY="$MOT/.venv/bin/python3"; TOOLS=""
   [ -x "$PY" ] || { PY=""; for c in "/Applications/NX Library.app" "/Applications/NXLibrary.app"; do

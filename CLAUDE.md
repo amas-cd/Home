@@ -270,6 +270,11 @@ une nouvelle version, dans un dossier à part : le clone en service ne bouge que
   les jeux de `Atelier.modsEnLigne` (une ligne par jeu, ajoutée après un essai réel). Home demande une fois le .zip du mod pris chez son
   auteur et le range dans `<Home>/moteur/exefs-mods/<title id>/` ; la mise à jour que le mod exige devient obligatoire (sinon « Jouer en
   local à la place »). En local, la mise à jour est facultative et `DM_EXEFS_MODS_AUTO=0` empêche nxnative d'appliquer le mod rangé.
+  Home trouve seul ce qui est déjà sur le Mac : `Atelier.lire` classe un fichier par son numéro de titre (…000 jeu, …800 mise à jour,
+  autre DLC), « Quel jeu ? » ne liste que les jeux, la mise à jour et les DLC du jeu choisi sont proposés d'office, les clés et le mod
+  en ligne sont pris dès qu'ils sont trouvés. La mise à jour exigée passe par « Es-tu sûr ? ». L'adresse du serveur se tape dans Home
+  (`Library.demander`, `SaisieView`), pas dans une fenêtre de macOS. Un script qui connaît la raison d'un échec écrit une ligne
+  « Pourquoi : … » : Home l'affiche dans la pastille et sur la tuile du chantier.
   Un mod en ligne n'est jamais mis dans le dépôt ni dans l'app sans l'accord écrit de son auteur. Jeu sans mod connu : « Suggérer un
   mod en ligne » ouvre une demande GitHub pré-remplie.
 - **Super Mario Odyssey Online** (CraftyBoss / Sanae6, pas Kirbymimi) : serveur local `smoo-server.sh`, port 1027, via Tailscale.
@@ -302,6 +307,10 @@ Anas t'utilise surtout depuis l'**onglet Code** de l'app Claude. Regarde d'abord
   `bash scripts/installer-local.sh`. Ajoute `--sans-compiler` si seuls des scripts ont changé. Depuis le cloud, donne-lui plutôt
   la commande à coller dans son Terminal : `cd ~/Home && git pull && bash scripts/installer-local.sh`. Ou, s'il ne veut pas de
   clone, il installe la release : `Home-macSilicon.dmg` de la page Releases.
+- **Essayer Home sans toucher à l'installation en service** : `HOME_REGLAGES=<dossier>` (Home lit et écrit ses réglages là au lieu
+  d'`Application Support/Salon` ; un `dossiers.json` d'essai dedans déplace aussi le dossier de Home et celui des jeux) et
+  `HOME_CHERCHER=<dossier>` (la recherche de fichiers ne regarde que là, ni Téléchargements ni `~/.switch`). On lance la copie compilée
+  par `HOME_BUILD_ONLY`, après avoir fermé le Home installé. De faux fichiers de jeu suffisent : un en-tête PFS0 avec un nom de ticket.
 - **Compatibilité** : la cible est macOS 14 ; GitHub compile avec Xcode 26 / Swift 6.3. Le Mac d'Anas a un SDK plus récent :
   une API de macOS 27 compile chez lui mais casse la release. Vérifie le résultat du workflow après chaque push.
 - **Signature** : avec le certificat « Home Dev » (créé par Anas dans son trousseau ; l'ancien nom « Salon Dev » marche aussi), Home garde
