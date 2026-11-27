@@ -171,6 +171,13 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   Windows : la manette n'est pas retirée au jeu pendant que le menu est ouvert, et rien ne passe devant un plein écran exclusif.
   La liste des joueurs ne vient pas du SSH (la clé ne se partage pas) : le serveur la publie lui-même avec `serveur/totk-etat.py`,
   sur le port juste après celui du jeu (`JoueursEnLigne`). Scénarios `rapide`, `rapidevolume`, `rapidejoueurs`. Jamais essayé sur un PC.
+- **Caméra à la souris** (`MenusSwitch.Souris`, options d'un jeu Switch) : `mouse_look`, `mouse_look_sensitivity`, `mouse_look_invert_y`,
+  `mouse_look_left` / `_right` / `_middle` dans `[Controllers]` du .ini du jeu. ScarletNX officiel ne sait pas le faire : c'est un
+  petit changement à nous (un commit, branche `home` d'un fork GPL de ScarletNX, calcul dans `mouse_look.c` avec son test), compilé
+  pour Windows par le workflow `home-windows.yml` du fork, qui publie l'archive et son SHA-256. `SCARLETNX-REF` peut nommer ce dépôt
+  (`depot=`) ; s'il ne répond pas, Home retombe sur l'officiel, sans la souris. Le clavier de ScarletNX suit déjà la position des
+  touches (ZQSD sur AZERTY = WASD). Sur Mac, les mêmes réglages (sensibilité, axe inversé) sont dans Réglages du jeu
+  (`TOTK_MOUSE_SENSITIVITY`, `TOTK_MOUSE_INVERT_Y`). Jamais essayé avec un vrai jeu.
 - **Pas sur Windows** : SMO Online, GameBanana, capture, la barre de volume du haut, choix des images dans Home (un fichier à la place).
 - **Premier lancement**, dans l'ordre du Mac, chaque étape à valider : `BienvenueVue` (recopie de `BienvenueView` : trois cartes
   Tout / Nintendo / PC, « Commencer », « Ignorer » discret) ; « Clés de la console » (`MenusSwitch.AccueilCles` : « Recherche… », puis

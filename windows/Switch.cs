@@ -53,19 +53,25 @@ public static class Moteur
         var zip = Dossiers.Fichier("telechargements", Archive);
         void Avance(long lu, long total) { t.Fraction = total > 0 ? 0.9 * lu / total : null; t.Etape = $"Téléchargement du moteur… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); Dispatcher.UIThread.Post(signaler); }
         string? recue = null;
+        // D'où il vient : le dépôt noté dans SCARLETNX-REF (`depot=`, le ScarletNX de Home, avec la caméra à la souris), sinon l'officiel.
+        // Si la version figée n'y est plus, la dernière de ce dépôt ; s'il ne répond pas du tout, la dernière officielle (sans la souris).
+        var depot = reference.GetValueOrDefault("depot", Depot);
         if (!derniere && tag != "")
         {
-            try { recue = await Reseau.Telecharger($"https://github.com/{Depot}/releases/download/{tag}/{Archive}", zip, Avance); }
+            try { recue = await Reseau.Telecharger($"https://github.com/{depot}/releases/download/{tag}/{Archive}", zip, Avance); }
             catch (Exception e) { Journal.Ecrire($"ScarletNX {tag} n'est plus publié ({e.Message}) : on prend la dernière version"); }
         }
         if (recue == null)
         {
-            using var d = await Reseau.Json($"https://api.github.com/repos/{Depot}/releases/latest") ?? throw new InvalidOperationException("la liste des versions de ScarletNX n'a pas pu être lue");
+            var d = await Reseau.Json($"https://api.github.com/repos/{depot}/releases/latest");
+            if (d == null && depot != Depot) { Journal.Ecrire($"{depot} ne répond pas : ScarletNX officiel, sans la caméra à la souris"); depot = Depot; d = await Reseau.Json($"https://api.github.com/repos/{depot}/releases/latest"); }
+            if (d == null) throw new InvalidOperationException("la liste des versions de ScarletNX n'a pas pu être lue");
+            using var _ = d;
             tag = d.RootElement.GetProperty("tag_name").GetString() ?? "";
             var fichier = d.RootElement.GetProperty("assets").EnumerateArray().FirstOrDefault(a => a.GetProperty("name").GetString() == Archive);
             if (fichier.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("la dernière version de ScarletNX n'a pas de build pour ce PC");
             var url = fichier.GetProperty("browser_download_url").GetString() ?? "";
-            if (!url.StartsWith($"https://github.com/{Depot}/releases/download/", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("adresse de téléchargement inattendue");
+            if (!url.StartsWith($"https://github.com/{depot}/releases/download/", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("adresse de téléchargement inattendue");
             empreinte = fichier.TryGetProperty("digest", out var dg) && dg.GetString() is { } x && x.StartsWith("sha256:") ? x[7..] : null;
             recue = await Reseau.Telecharger(url, zip, Avance);
         }
@@ -972,6 +978,42 @@ public static class MenusSwitch
     }
 
     // MARK: Réseau — le réglage network= du jeu. Un mod en ligne en a besoin ; ça ne suffit pas à dire qu'il marche.
+    // MARK: Souris — la caméra à la souris (mouse_look de ScarletNX, section [Controllers] du .ini du jeu)
+    /// Le moteur installé sait-il le faire ? Seul le ScarletNX de Home (versions « home-… ») a la caméra à la souris pour l'instant.
+    public static bool MoteurAvecSouris => Moteur.Version?.StartsWith("home-") == true;
+    static readonly string[] boutons = ["Aucun", "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "+", "−", "Stick gauche (clic)", "Stick droit (clic)"];
+    static int Reglage(Jeu j, string cle, int defaut) => int.TryParse(Ini.Lire(Construction.Reglages(j.Dossier), "Controllers", cle), out var v) ? v : defaut;
+    static void Regler(Bibliotheque lib, Jeu j, string cle, int v)
+    {
+        try { Ini.Ecrire(Construction.Reglages(j.Dossier), "Controllers", cle, v.ToString()); }
+        catch (Exception e) { Journal.Ecrire(cle + "= : " + e.Message); lib.Dire("Le réglage n'a pas pu être écrit"); }
+    }
+    public static void Souris(Bibliotheque lib, Jeu j)
+    {
+        bool active = Reglage(j, "mouse_look", 0) == 1, inverse = Reglage(j, "mouse_look_invert_y", 0) == 1; var sens = Math.Clamp(Reglage(j, "mouse_look_sensitivity", 50), 1, 100);
+        var m = new Menu
+        {
+            Titre = "Souris", SousTitre = j.Nom, Symbole = "gamecontroller", Roue = true, Retour = lib.OuvrirOptions,
+            Alerte = MoteurAvecSouris || Moteur.Version == null ? null : "Il faut mettre le moteur à jour : Menu → Composants → ScarletNX",
+            Texte = "La souris tourne la caméra, en plus de la manette. En jeu, Ctrl + G rend la souris, et la reprend.",
+        };
+        m.Elements.Add(new("Caméra à la souris : " + (active ? "oui" : "non"), "gamecontroller", () => { Regler(lib, j, "mouse_look", active ? 0 : 1); Souris(lib, j); }, "Le pointeur est caché et gardé dans la fenêtre du jeu") { Teinte = active ? Icones.Vert : Icones.Gris });
+        m.Elements.Add(new("Sensibilité : " + sens, "slider.horizontal.3", () => lib.Demander("Sensibilité de la souris", "De 1 à 100", v => { if (int.TryParse(v, out var n)) Regler(lib, j, "mouse_look_sensitivity", Math.Clamp(n, 1, 100)); else lib.Dire("Un nombre de 1 à 100"); Souris(lib, j); }, texte: sens.ToString()), "De 1 à 100 · 50 par défaut"));
+        m.Elements.Add(new("Axe vertical : " + (inverse ? "inversé" : "normal"), "arrow.up.arrow.down", () => { Regler(lib, j, "mouse_look_invert_y", inverse ? 0 : 1); Souris(lib, j); }, "Inversé : souris vers le haut, caméra vers le bas"));
+        foreach (var (nom, cle, defaut, role) in new[] { ("Clic gauche", "mouse_look_left", 4, "Attaque"), ("Clic droit", "mouse_look_right", 8, "Arc : maintenu, puis clic gauche pour tirer"), ("Clic du milieu", "mouse_look_middle", 7, "Cibler") })
+        {
+            var v = Math.Clamp(Reglage(j, cle, defaut), 0, 12);
+            m.Elements.Add(new($"{nom} : {boutons[v]}", "hand.tap", () => BoutonSouris(lib, j, nom, cle, v), v == defaut ? role + " (Zelda)" : "Modifié") { Section = nom == "Clic gauche" ? "Boutons" : null });
+        }
+        m.Elements.Add(new("Remettre les boutons de Zelda", "arrow.uturn.backward", () => { Regler(lib, j, "mouse_look_left", 4); Regler(lib, j, "mouse_look_right", 8); Regler(lib, j, "mouse_look_middle", 7); Souris(lib, j); }, "Gauche Y, droit ZR, milieu ZL") { Teinte = Icones.Gris });
+        lib.Ouvrir(m);
+    }
+    static void BoutonSouris(Bibliotheque lib, Jeu j, string nom, string cle, int actuel)
+    {
+        var m = new Menu { Titre = nom, SousTitre = "Quel bouton du jeu ?", Symbole = "hand.tap", Roue = true, Retour = () => Souris(lib, j) };
+        for (var i = 0; i < boutons.Length; i++) { var n = i; m.Elements.Add(new(boutons[i], i == actuel ? "checkmark" : "circle", () => { Regler(lib, j, cle, n); Souris(lib, j); }) { Teinte = i == actuel ? Icones.Vert : null }); }
+        lib.Ouvrir(m);
+    }
     public static bool Internet(Jeu j) => Ini.Lire(Construction.Reglages(j.Dossier), "Network", "network") == "1";
     public static void BasculerInternet(Bibliotheque lib, Jeu j)
     {

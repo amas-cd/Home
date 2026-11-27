@@ -427,6 +427,7 @@ public sealed partial class Bibliotheque
             // dit ce que c'est, pas « Jouer en ligne » : aucun mod en ligne n'a encore été essayé avec un vrai jeu
             m.Elements.Add(new("Internet : " + (MenusSwitch.Internet(j) ? "activé" : "coupé"), "globe", () => MenusSwitch.BasculerInternet(this, j), "La connexion du PC pour ce jeu. Un mod en ligne en a besoin"));
         }
+        if (j.Origine == Origine.Switch) m.Elements.Add(new("Souris", "hand.tap", () => MenusSwitch.Souris(this, j), "La caméra à la souris, la sensibilité, les boutons"));
         m.Elements.Add(new("Apparence", "paintbrush", () => OuvrirApparence(j), "Jaquette, fond, logo et nom"));
         m.Elements.Add(new("Catégorie", "tag", () => OuvrirCategorie(j), j.Categorie));
         if (Directory.Exists(j.Dossier)) m.Elements.Add(new("Ouvrir le dossier du jeu", "folder", () => Systeme.Ouvrir(j.Dossier), j.Dossier));

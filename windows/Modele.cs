@@ -125,7 +125,7 @@ public static class Icones
 {
     static readonly (string sf, string fluent)[] table =
     [
-        ("play", "Play"), ("photo", "Image"), ("paint", "PaintBrush"), ("textformat", "TextFont"), ("tag", "Tag"), ("house", "Home"), ("stop", "Stop"), ("chart.bar", "DataBarVertical"), ("arrow.uturn.backward", "ArrowUndo"), ("person.2", "People"), ("xmark.circle", "DismissCircle"), ("puzzle", "PuzzlePiece"),
+        ("play", "Play"), ("photo", "Image"), ("paint", "PaintBrush"), ("textformat", "TextFont"), ("tag", "Tag"), ("house", "Home"), ("hand.tap", "CursorClick"), ("slider.horizontal.3", "Options"), ("arrow.up.arrow.down", "ArrowSort"), ("circle", "Circle"), ("stop", "Stop"), ("chart.bar", "DataBarVertical"), ("arrow.uturn.backward", "ArrowUndo"), ("person.2", "People"), ("xmark.circle", "DismissCircle"), ("puzzle", "PuzzlePiece"),
         ("square.and.arrow.down", "ArrowDownload"), ("arrow.down.circle", "ArrowCircleDown"), ("arrow.down", "ArrowDown"), ("arrow.clockwise", "ArrowClockwise"), ("arrow.up", "ArrowUp"), ("arrow.left", "ArrowLeft"), ("arrow", "ArrowRight"),
         ("hammer", "WrenchScrewdriver"), ("folder", "Folder"), ("gamecontroller", "Games"), ("globe", "Globe"), ("magnifying", "Search"),
         ("shippingbox", "Box"), ("pencil", "Edit"), ("ellipsis", "MoreHorizontal"), ("checkmark", "Checkmark"), ("doc.on.clipboard", "ClipboardPaste"), ("doc", "Document"),

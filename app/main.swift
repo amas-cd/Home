@@ -833,6 +833,16 @@ final class Library: ObservableObject {
             let rt = r["TOTK_RT"] == "0"
             items.append(SalonMenuItem(label: "Processeur : \(rt ? "géré par macOS" : "temps réel (d'origine)")", detail: rt ? "Le jeu n'annonce plus son temps de travail : macOS ne le garde plus à basse fréquence dans les scènes chargées" : "Le jeu annonce son temps de travail à macOS (peut le coincer à basse fréquence dehors)", icon: "cpu", action: {
                 var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]; m["TOTK_RT"] = rt ? nil : "0"; all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) }))
+            // la souris : MacNativeGames lit ces deux réglages au lancement (le mode souris lui-même s'allume dans le jeu, touche 1).
+            // Les mêmes que dans Home pour Windows (Souris), où c'est ScarletNX qui les lit dans le .ini du jeu.
+            let sens = r["TOTK_MOUSE_SENSITIVITY"], inverse = r["TOTK_MOUSE_INVERT_Y"] == "1"
+            items.append(SalonMenuItem(label: "Souris, sensibilité : \(sens ?? "celle du jeu")", detail: "De 1 à 100 · vide : celle réglée dans le jeu (50 au départ)", icon: "computermouse.fill", action: {
+                self.demander("Sensibilité de la souris", aide: "De 1 à 100. Laisse vide pour garder celle réglée dans le jeu.", exemple: "50", texte: sens ?? "") { t in
+                    var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]
+                    if t.isEmpty { m["TOTK_MOUSE_SENSITIVITY"] = nil } else if let n = Int(t) { m["TOTK_MOUSE_SENSITIVITY"] = String(min(max(n, 1), 100)) } else { self.toast = "Un nombre de 1 à 100" }
+                    all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) } }))
+            items.append(SalonMenuItem(label: "Souris, axe vertical : \(inverse ? "inversé" : "normal")", detail: "Inversé : souris vers le haut, caméra vers le bas", icon: "arrow.up.arrow.down", action: {
+                var all = self.config.reglages ?? [:]; var m = all[g.id] ?? [:]; m["TOTK_MOUSE_INVERT_Y"] = inverse ? nil : "1"; all[g.id] = m; self.config.reglages = all; self.saveConfig(); self.openReglages(g) }))
             items.append(SalonMenuItem(label: "Réglages dans le jeu", detail: Atelier.estOot(g) ? "Touche 1 pendant la partie ; ceux d'ici comptent au prochain lancement" : "Touche 1 pendant la partie", icon: "keyboard", tint: .gray, info: true, action: {}))
             if Atelier.totkEnLigne(g) {
                 items.append(SalonMenuItem(label: "Moniteur du jeu en ligne", icon: "waveform.path.ecg", tint: .teal, action: { self.menu = nil; Atelier.terminal("totk-moniteur.command") }))
