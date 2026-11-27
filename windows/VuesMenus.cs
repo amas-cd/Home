@@ -51,15 +51,25 @@ sealed class VueMenu : Panel
     Control Fil(out TextBlock suite)
     {
         suite = U.Titre("", 19, 1.5, 0.55); suite.Margin = new Thickness(8, 12, 0, 0); suite.MaxWidth = 760;
-        return U.Ligne(12, U.Titre(Menu.Titre, 38, 1, place: 900), suite);
+        var ligne = U.Ligne(12, U.Titre(Menu.Titre, 38, 1, place: 900), suite);
+        return Points() is { } p ? U.Colonne(10, p, ligne) : ligne;
     }
 
+    /// Les points d'étape d'un assistant : un trait pour l'étape en cours, un point pour les autres
+    Control? Points()
+    {
+        if (Menu.Etapes <= 0) return null;
+        var l = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Left };
+        for (var k = 1; k <= Menu.Etapes; k++) l.Children.Add(new Border { Width = k == Menu.Etape ? 34 : 10, Height = 10, CornerRadius = new CornerRadius(5), Background = U.Blanc(k == Menu.Etape ? 0.95 : 0.25) });
+        return l;
+    }
     // MARK: La rangée de pastilles
     void Rangee()
     {
         var m = Menu; var n = m.Elements.Count; const double Grand = 96, Petit = 76, Espace = 14;
         Children.Add(new Border { IsHitTestVisible = false, Background = U.Degrade(0.5, 0.25, 0.5, 1, (Colors.Transparent, 0), (U.NoirA(0.55), 0.5), (U.NoirA(0.88), 1)) });   // l'ombre qui porte le texte
         var colonne = new StackPanel { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(96, 0, 96, 44) };
+        if (Points() is { } points) { points.Margin = new Thickness(0, 0, 0, 16); colonne.Children.Add(points); }
         if (m.Logo != null) colonne.Children.Add(new Image { Source = m.Logo, MaxWidth = 480, MaxHeight = 150, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left });
         else
         {

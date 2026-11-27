@@ -159,11 +159,14 @@ public sealed class Bibliotheque
     public void Ouvrir(Menu m)
     {
         if (Menu == null) Son("ouvrir");
+        if (Pas is { } pas && m.Etapes == 0) { m.Etape = pas.etape; m.Etapes = pas.sur; }
         Menu = m; IndexMenu = Math.Max(0, m.Elements.FindIndex(e => !e.Info));
         if (!m.Grille && derniers.TryGetValue(m.Titre, out var d) && d < m.Elements.Count && !m.Elements[d].Info) IndexMenu = d;
         Signaler();
     }
-    public void FermerMenus() { Menu = null; Signaler(); }
+    /// L'étape de l'assistant en cours (« Ajouter un jeu Switch ») : les menus ouverts d'ici là portent ses points
+    public (int etape, int sur)? Pas;
+    public void FermerMenus() { Menu = null; Pas = null; Signaler(); }
     /// Vise un choix sans le valider (manette, clic sur un choix de la roue, souris qui passe sur une pastille)
     public void ViserMenu(int i, bool son = false)
     {
@@ -492,6 +495,7 @@ public sealed class Bibliotheque
     }
     public void OuvrirAjout()
     {
+        Pas = null;
         int steam = Jeux.Count(j => j.Origine == Origine.Steam), epic = Jeux.Count(j => j.Origine == Origine.Epic);
         var m = new Menu { Titre = "Ajouter un jeu", Symbole = "plus" };
         if (ModeNintendo) m.Elements.Add(new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir du fichier de ton jeu et de tes clés") { Teinte = Icones.Rouge });

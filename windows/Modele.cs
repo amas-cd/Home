@@ -55,6 +55,8 @@ public sealed class Menu
     public string? Symbole; public Bitmap? Logo; public string? ImageURL; public string? Texte; public Action? Retour; public bool Grille;
     /// Une phrase qu'il ne faut pas rater (la version du jeu qu'un mod en ligne exige) : écrite en gros, en orange, au-dessus du texte
     public string? Alerte;
+    /// Dans un assistant : l'étape où on en est et leur nombre, montrés par des points au-dessus du titre
+    public int Etape, Etapes;
     /// Une liste de fichiers se lit mieux en roue, même courte : en pastilles, on ne verrait qu'un nom à la fois
     public bool Roue;
     /// Comme sur Mac : un menu court (7 choix au plus, tous actionnables, sans image) est une rangée de pastilles ; les autres, une roue

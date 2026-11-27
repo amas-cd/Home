@@ -513,6 +513,7 @@ public static class Trouvailles
         string Nu(string x) => System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(x), @"\[[^\]]*\]|\([^)]*\)", " ");
         return Titres.Correspond(Nu(f), Nu(dump)) && Nu(dump).Trim().Length >= 4;
     }
+    public static List<string> MajsDe(string dump) => Tout().Where(f => f != dump && EstDump(f) && Lire(f).sorte == Sorte.Maj && MemeJeu(f, dump)).Take(30).ToList();
     public static string? MajDe(string dump) => Tout().FirstOrDefault(f => f != dump && EstDump(f) && Lire(f).sorte == Sorte.Maj && MemeJeu(f, dump));
     public static List<string> DlcDe(string dump) => Tout().Where(f => f != dump && EstDump(f) && Lire(f).sorte == Sorte.Dlc && MemeJeu(f, dump)).Take(60).ToList();
 
@@ -563,14 +564,15 @@ public static class MenusSwitch
     /// Home cherche lui-même les jeux déjà sur le PC (comme `proposer` sur Mac) : on choisit dans la liste, ou un autre fichier
     public static async void Ajouter(Bibliotheque lib)
     {
+        Pas(lib, null, "jeu");
         lib.Ouvrir(new Menu { Titre = "Quel jeu ?", Symbole = "magnifyingglass", Texte = "Recherche des jeux sur ce PC…" });
         var jeux = await Task.Run(() => Trouvailles.Tout(frais: true).Where(f => Trouvailles.EstDump(f) && Trouvailles.Lire(f).sorte is Trouvailles.Sorte.Base or Trouvailles.Sorte.Inconnu).Take(40).ToList());
         if (lib.Menu?.Titre != "Quel jeu ?") return;   // il a fermé le menu pendant la recherche
         async void Autre() { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier du jeu, extrait de ta console", ["*.xci", "*.nsp"]) is { } f) Choisi(lib, f); }
         if (jeux.Count == 0) { lib.FermerMenus(); Autre(); return; }
         var m = new Menu { Titre = "Quel jeu ?", SousTitre = jeux.Count == 1 ? "1 jeu trouvé sur ce PC" : $"{jeux.Count} jeux trouvés sur ce PC", Symbole = "gamecontroller", Roue = true };
-        foreach (var f in jeux) m.Elements.Add(new(Path.GetFileName(f), "gamecontroller", () => Choisi(lib, f), Trouvailles.Lieu(f)));
-        m.Elements.Add(new("Choisir un autre fichier…", "folder", Autre, "Un fichier du jeu rangé ailleurs") { Section = " " });
+        foreach (var f in jeux) m.Elements.Add(new(Path.GetFileNameWithoutExtension(f), "gamecontroller", () => Choisi(lib, f), Trouvailles.Lieu(f)));
+        m.Elements.Add(new("Chercher ailleurs…", "folder", Autre, "Avec l'Explorateur") { Section = " ", Teinte = Icones.Gris });
         lib.Ouvrir(m);
     }
     /// Le jeu est choisi : les clés. Home les installe seul s'il les trouve (à leur place habituelle, ou dans les dossiers qu'il regarde).
@@ -698,8 +700,43 @@ public static class MenusSwitch
         + Uri.EscapeDataString($"Jeu : {jeu}\nNom du mod :\nAuteur :\nPage de l'auteur où le trouver :\nVersion du jeu demandée par le mod :\nDéjà essayé sur (Mac, Windows, Switch, émulateur) :\n"));
 
     // MARK: « Comment veux-tu jouer ? », juste après le jeu
+    /// Les étapes de l'assistant pour ce jeu, dans l'ordre : le jeu, le mode, (en ligne : le mod, le serveur), la mise à jour, les DLC, le récapitulatif
+    static void Pas(Bibliotheque lib, Demande? d, string quoi)
+    {
+        var e = new List<string> { "jeu", "mode" };
+        if (d?.EnLigne != null) { e.Add("mod"); e.Add("serveur"); }
+        if (d?.EnLigne is not { Maj: null }) e.Add("maj");
+        e.Add("dlc"); e.Add("recap");
+        lib.Pas = (Math.Max(1, e.IndexOf(quoi) + 1), e.Count);
+    }
+    /// Choisir des fichiers sans passer par l'Explorateur (`proposer` sur Mac) : la liste de ce que Home a trouvé, plusieurs d'un coup
+    /// si on veut ; « Chercher ailleurs… » ouvre le sélecteur. Rien de trouvé : le sélecteur s'ouvre tout de suite.
+    static async void Proposer(Bibliotheque lib, string titre, string? sousTitre, string icone, bool plusieurs, List<string> trouves, List<string> choisis, string question, Action retour, Action<List<string>> puis)
+    {
+        async Task Ailleurs() { if (lib.ChoisirFichier != null && await lib.ChoisirFichier(question, ["*.nsp", "*.xci"]) is { } f) puis(plusieurs ? choisis.Append(f).Distinct().ToList() : [f]); else retour(); }
+        if (trouves.Count == 0) { await Ailleurs(); return; }
+        void Montrer()
+        {
+            var m = new Menu { Titre = titre, SousTitre = sousTitre, Symbole = icone, Roue = true, Retour = retour };
+            if (plusieurs && choisis.Count > 0) m.Elements.Add(new("Continuer", "arrow.right", () => puis(choisis), choisis.Count + (choisis.Count > 1 ? " choisis" : " choisi")) { Teinte = Icones.Vert });
+            foreach (var f in trouves)
+            {
+                var pris = choisis.Contains(f);
+                m.Elements.Add(new(Path.GetFileNameWithoutExtension(f), pris ? "checkmark" : icone, () =>
+                {
+                    if (!plusieurs) { puis([f]); return; }
+                    if (pris) choisis.Remove(f); else choisis.Add(f);
+                    Montrer();
+                }, Trouvailles.Lieu(f)) { Teinte = pris ? Icones.Vert : null });
+            }
+            m.Elements.Add(new("Chercher ailleurs…", "folder", async () => await Ailleurs(), "Avec l'Explorateur") { Teinte = Icones.Gris });
+            lib.Ouvrir(m);
+        }
+        Montrer();
+    }
     public static void Mode(Bibliotheque lib, Demande d)
     {
+        Pas(lib, d, "mode");
         void Local() { d.EnLigne = null; d.Serveur = null; Maj(lib, d); }
         var ici = () => Mode(lib, d);
         if (ModPour(d.Dump) is not { } m)
@@ -728,6 +765,7 @@ public static class MenusSwitch
     }
     public static void EnLigne(Bibliotheque lib, Demande d, ModEnLigne m)
     {
+        Pas(lib, d, "mod");
         void Suite() { d.EnLigne = m; if (m.Maj == null) d.Maj = null; Serveur(lib, d); }
         void Donner(string? source) { if (source == null) return; if (RangerMod(m, source)) Suite(); else lib.Dire($"Ce fichier n'est pas {m.Nom} : il manque exefs/{m.Fichier}"); }
         if (!ModPret(m) && Trouvailles.Mod(m) is { } trouve && RangerMod(m, trouve)) lib.Dire($"{m.Nom} trouvé dans {Trouvailles.Lieu(trouve, taille: false)} : rangé dans Home");
@@ -747,6 +785,7 @@ public static class MenusSwitch
     /// L'adresse du serveur : Home la répondra quand le jeu ouvrira son clavier. Sans adresse, on la tape dans le jeu (et le chat du mod marche).
     static void Serveur(Bibliotheque lib, Demande d)
     {
+        Pas(lib, d, "serveur");
         void Suite() { if (d.EnLigne?.Maj != null) Maj(lib, d); else Dlc(lib, d); }
         lib.Ouvrir(new Menu
         {
@@ -763,6 +802,7 @@ public static class MenusSwitch
     // MARK: La mise à jour : facultative en local ; en ligne, celle que le mod demande, et rien d'autre
     public static void Maj(Bibliotheque lib, Demande d)
     {
+        Pas(lib, d, "maj");
         var exigee = d.EnLigne?.Maj;
         // la mise à jour de ce jeu, si elle est déjà sur le PC : proposée d'office (en ligne, elle passe quand même par « Es-tu sûr ? »)
         if (!d.MajCherchee) { d.MajCherchee = true; if (d.Maj == null && Trouvailles.MajDe(d.Dump) is { } t) { d.Maj = t; d.MajConfirmee = false; } }
@@ -786,11 +826,10 @@ public static class MenusSwitch
             });
         }
         if (d.Maj != null) m.Elements.Add(new("Continuer", "arrow.right", Suite, Path.GetFileName(d.Maj) + " · " + Trouvailles.Lieu(d.Maj)) { Teinte = Icones.Vert });
-        m.Elements.Add(new(d.Maj == null ? "Choisir la mise à jour…" : "Choisir un autre fichier…", "arrow.down.circle", async () =>
-        {
-            if (lib.ChoisirFichier != null && await lib.ChoisirFichier(exigee != null ? $"Le fichier de la mise à jour {exigee} du jeu" : "Le fichier de la mise à jour du jeu", ["*.nsp", "*.xci"]) is { } f && f != d.Dump) { d.Maj = f; d.MajConfirmee = false; }
-            Maj(lib, d);
-        }, "Le fichier de la mise à jour"));
+        // la liste des mises à jour de ce jeu trouvées sur le PC ; « Chercher ailleurs… » ouvre le sélecteur
+        m.Elements.Add(new(d.Maj == null ? "Choisir la mise à jour…" : "Choisir un autre fichier…", "arrow.down.circle", () =>
+            Proposer(lib, "Quelle mise à jour ?", NomDe(d), "arrow.down.circle", false, Trouvailles.MajsDe(d.Dump), new(), exigee != null ? $"Le fichier de la mise à jour {exigee} du jeu" : "Le fichier de la mise à jour du jeu",
+                () => Maj(lib, d), f => { if (f[0] != d.Dump) { d.Maj = f[0]; d.MajConfirmee = false; } Maj(lib, d); }), "Le fichier de la mise à jour"));
         if (exigee == null) m.Elements.Add(new("Pas de mise à jour", "arrow.right", () => { d.Maj = null; Dlc(lib, d); }) { Teinte = Icones.Gris });
         // sans cette mise à jour, pas de jeu en ligne : on repasse en local, où elle est facultative
         if (exigee != null) m.Elements.Add(new("Jouer en local à la place", "gamecontroller", () => { var mod = d.EnLigne!.Nom; d.EnLigne = null; d.Serveur = null; Maj(lib, d); lib.Dire("En local, sans " + mod); }, $"Sans {d.EnLigne!.Nom} : la mise à jour devient facultative") { Teinte = Icones.Gris });
@@ -798,20 +837,24 @@ public static class MenusSwitch
     }
     static void Dlc(Bibliotheque lib, Demande d)
     {
+        Pas(lib, d, "dlc");
         // les DLC de ce jeu déjà sur le PC sont ajoutés d'office ; « Tout retirer » les enlève
         if (!d.DlcCherches) { d.DlcCherches = true; foreach (var f in Trouvailles.DlcDe(d.Dump)) if (!d.Dlc.Contains(f)) d.Dlc.Add(f); }
         var m = new Menu { Titre = "Les contenus additionnels", SousTitre = NomDe(d), Symbole = "puzzlepiece", Retour = () => { if (d.EnLigne is { Maj: null }) Serveur(lib, d); else Maj(lib, d); } };
-        m.Elements.Add(new(d.Dlc.Count == 0 ? "Choisir les DLC…" : "Ajouter un autre DLC…", "puzzlepiece", async () =>
-        {
-            if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier d'un DLC du jeu", ["*.nsp", "*.xci"]) is { } f && f != d.Dump && f != d.Maj && !d.Dlc.Contains(f)) d.Dlc.Add(f);
-            Dlc(lib, d);
-        }, d.Dlc.Count == 0 ? "Un fichier à la fois" : string.Join(", ", d.Dlc.Select(Path.GetFileName))));
-        m.Elements.Add(new(d.Dlc.Count == 0 ? "Pas de DLC" : "Continuer", "arrow.right", () => Recap(lib, d)) { Teinte = d.Dlc.Count == 0 ? Icones.Gris : Icones.Vert });
+        // des DLC déjà trouvés : « Continuer » est le premier choix
+        if (d.Dlc.Count > 0) m.Elements.Add(new("Continuer", "arrow.right", () => Recap(lib, d), d.Dlc.Count == 1 ? "1 DLC" : d.Dlc.Count + " DLC") { Teinte = Icones.Vert });
+        // la liste des DLC de ce jeu trouvés sur le PC, plusieurs d'un coup ; « Chercher ailleurs… » ouvre le sélecteur
+        m.Elements.Add(new(d.Dlc.Count == 0 ? "Choisir les DLC…" : "Changer les DLC…", "puzzlepiece", () =>
+            Proposer(lib, "Quels DLC ?", NomDe(d), "puzzlepiece", true, Trouvailles.DlcDe(d.Dump).Union(d.Dlc).ToList(), d.Dlc.ToList(), "Le fichier d'un DLC du jeu",
+                () => Dlc(lib, d), f => { d.Dlc = f.Where(x => x != d.Dump && x != d.Maj).Distinct().ToList(); Dlc(lib, d); }),
+            d.Dlc.Count == 0 ? "Ceux que Home a trouvés, ou un autre fichier" : string.Join(", ", d.Dlc.Select(Path.GetFileNameWithoutExtension))));
+        if (d.Dlc.Count == 0) m.Elements.Add(new("Pas de DLC", "arrow.right", () => Recap(lib, d)) { Teinte = Icones.Gris });
         if (d.Dlc.Count > 0) m.Elements.Add(new("Tout retirer", "xmark", () => { d.Dlc.Clear(); Dlc(lib, d); }) { Teinte = Icones.Gris });
         lib.Ouvrir(m);
     }
     public static void Recap(Bibliotheque lib, Demande d)
     {
+        Pas(lib, d, "recap");
         var m = new Menu { Titre = "Prêt à construire", SousTitre = NomDe(d), Symbole = "hammer", Retour = () => Dlc(lib, d),
             Texte = "Home recompile le jeu en programme Windows et le copie dans son dossier : ensuite il se suffit à lui-même. Compte de quelques minutes à plus d'une heure, et la taille du jeu en place libre. " + Regle };
         m.Elements.Add(new() { Libelle = Path.GetFileName(d.Dump), Detail = "Le jeu", Icone = "gamecontroller", Info = true });
