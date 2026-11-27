@@ -214,6 +214,7 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
 | `VuesMenus.cs` | `VueMenu` : les trois formes de `MenuView` (rangée de pastilles, roue, grille d'affiches). `Menu.Genre` choisit la forme, comme sur Mac |
 | `ANIMATIONS.md` | La fiche des animations de l'app Mac (courbes, durées, distances) : la référence de `Vues.cs` et `VuesMenus.cs` |
 | `EnJeu.cs` | Le menu en jeu : `SonJeu` (volume du jeu), `JoueursEnLigne`, la partie de `Bibliotheque` qui le conduit, `VueRapide`, `FenetreRapide` |
+| `Discord.cs` | La présence Discord, comme `Discord` sur Mac : tube nommé `discord-ipc-0…9`, même identifiant d'application, « Dans le menu » ou le jeu en cours ; l'adresse d'une jaquette est gardée dans `couverture.url`. `HOME_DISCORD=1` l'active aussi en démonstration |
 | `Manette.cs` | `Manette` (XInput), `Sons` (les .wav de `app/sons`), `Systeme` (processus d'un dossier, Corbeille) |
 | `MiseAJour.cs` | Mise à jour de Home depuis les releases de amas-cd/Home |
 | `Programme.cs` | `Fenetre` : plein écran, échelle depuis 1920 de large, clavier, scénarios de test |

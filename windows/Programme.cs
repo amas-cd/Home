@@ -64,7 +64,7 @@ sealed class Fenetre : Window
             if (OperatingSystem.IsWindows()) _ = new FenetreRapide(lib, this);   // le menu en jeu : une fenêtre à part, devant le jeu
             if (Icones.Inconnues().ToList() is { Count: > 0 } inconnues) Journal.Ecrire("icônes inconnues : " + string.Join(", ", inconnues));
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null && lib.Config.Ouverture) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
-            lib.Recharger();
+            lib.Recharger(); lib.MajDiscord();
             Scenario();
             // le tout premier lancement : « Bienvenue », que veux-tu faire avec Home ? (pas pendant une capture ni en démonstration)
             if (lib.Config.Mode == null && !Bibliotheque.Demo && Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) { lib.Bienvenue = true; lib.Signaler(); }

@@ -310,7 +310,7 @@ public static class Images
                         sources.Add(await SteamGridDB.Image(j, quoi));
                     }
                 }
-                foreach (var src in sources) if (!string.IsNullOrEmpty(src) && await Telecharger(src, f)) break;
+                foreach (var src in sources) if (!string.IsNullOrEmpty(src) && await Telecharger(src, f)) { if (quoi == "couverture") Discord.NoterSource(src, f); break; }   // l'adresse sert à Discord
                 // un jeu Switch que les boutiques ne connaissent pas garde l'icône de son propre dump, que ScarletNX a posée dans son dossier
                 if (quoi == "couverture" && j.Origine == Origine.Switch && !File.Exists(f) && Path.Combine(Construction.Data(j.Dossier), "icon.jpg") is var icone && File.Exists(icone)) { try { File.Copy(icone, f, true); } catch { } }
             }

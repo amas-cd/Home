@@ -301,13 +301,13 @@ public sealed partial class Bibliotheque
             Lance = j.Origine is Origine.Switch or Origine.App ? p : null;
             EnCours = j; EnCoursDepuis = DateTime.Now;
             if (!Stats.TryGetValue(j.Id, out var s)) Stats[j.Id] = s = new Stat();
-            s.DernierePartie = DateTime.Now; Json.Ecrire(FichierStats, Stats); Signaler();
+            s.DernierePartie = DateTime.Now; Json.Ecrire(FichierStats, Stats); Signaler(); MajDiscord();
             var vu = await Task.Run(() => Attendre(j, p, dossier, () => RemettreVolume(j)));
             if (vu) { s.Minutes += (int)Math.Round((DateTime.Now - EnCoursDepuis).TotalMinutes); Json.Ecrire(FichierStats, Stats); }
             Journal.Ecrire($"fin : {j.Nom}, {(DateTime.Now - EnCoursDepuis).TotalMinutes:0} min{(vu ? "" : " (le jeu n'a pas été vu en train de tourner)")}");
         }
         catch (Exception e) { Journal.Ecrire($"lancement de {j.Nom} : {e.Message}"); Dire("Impossible de lancer " + j.Nom); }
-        EnCours = null; Lance = null; FermerRapide();
+        EnCours = null; Lance = null; FermerRapide(); MajDiscord();
         var i = Visibles.FindIndex(x => x.Id == j.Id); if (i >= 0) Selection = i;
         Devant?.Invoke(); Son("ouvrir"); Signaler();
     }
@@ -492,7 +492,7 @@ public sealed partial class Bibliotheque
     async Task ChoisirImage(Jeu j, string quoi)
     {
         if (ChoisirFichier == null || await ChoisirFichier("Choisir une image", ["*.png", "*.jpg", "*.jpeg", "*.webp"]) is not { } f) return;
-        try { File.Copy(f, Images.Fichier(j, quoi), true); ChargerArt(j); Dire("Image changée"); }
+        try { File.Copy(f, Images.Fichier(j, quoi), true); if (quoi == "couverture") Discord.NoterSource(null, Images.Fichier(j, quoi)); ChargerArt(j); Dire("Image changée"); }
         catch (Exception e) { Journal.Ecrire("image : " + e.Message); Dire("Cette image n'a pas pu être copiée"); }
     }
     /// Oublie les images téléchargées de ce jeu et les redemande à leurs sources
@@ -516,6 +516,7 @@ public sealed partial class Bibliotheque
         m.Elements.Add(new("Écran de démarrage : " + (Config.Ouverture ? "oui" : "non"), "sparkles", () => { Config.Ouverture = !Config.Ouverture; Enregistrer(); OuvrirPlus(); }, "Le logo et le jingle au lancement de Home"));
         m.Elements.Add(new("Animations réduites : " + (Config.AnimationsReduites ? "oui" : "non"), "sparkles", () => { Config.AnimationsReduites = !Config.AnimationsReduites; Mouvement.Reduit = Config.AnimationsReduites; Enregistrer(); Reconstruire?.Invoke(); OuvrirPlus(); },
             "Des fondus courts à la place des mouvements"));
+        m.Elements.Add(new("Discord : " + (Config.Discord ? "oui" : "non"), "person.2", () => { Config.Discord = !Config.Discord; Enregistrer(); MajDiscord(); OuvrirPlus(); }, "Tes amis voient « Dans le menu », ou le jeu en cours et sa jaquette") { Teinte = Icones.Violet });
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
         m.Elements.Add(new("Composants", "sparkles", () => OuvrirMode(), Config.Mode switch { "nintendo" => "Jeux Nintendo", "pc" => "Jeux PC", _ => "Jeux Nintendo et jeux PC" }));

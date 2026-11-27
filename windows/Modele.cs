@@ -40,6 +40,7 @@ public sealed class Config
     public List<string> Categories { get; set; } = new();                    // les catégories à soi, en plus de celles de base
     public Dictionary<string, string> CategoriesJeux { get; set; } = new();  // le jeu → la catégorie où on l'a rangé
     public Dictionary<string, double> Volumes { get; set; } = new();        // le volume réglé pour chaque jeu dans le menu en jeu (0 à 1)
+    public bool Discord { get; set; } = true;                 // la présence Discord : « Dans le menu », ou le jeu en cours
     public bool Ouverture { get; set; } = true;               // l'écran de démarrage (logo et jingle) au lancement de Home
     public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
 }
