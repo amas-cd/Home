@@ -32,7 +32,7 @@ Ouvre la dernière [release](https://github.com/amas-cd/Home/releases/latest).
 **Windows (64 bits)**
 1. Télécharge `Home-win64-setup.exe` et lance-le. Il installe Home pour ton compte seulement, sans droits d'administrateur.
 2. Home propose ensuite ses mises à jour tout seul, depuis les releases de ce dépôt.
-3. Pour un jeu Switch : « Ajouter un jeu → Switch », donne ton dump (.xci ou .nsp) et ton `prod.keys`. Home télécharge ScarletNX,
+3. Pour un jeu Switch : « Ajouter un jeu → Switch », Home cherche lui-même le fichier de ton jeu, sa mise à jour et ton `prod.keys` sur le PC (sinon tu les lui montres). Il télécharge ScarletNX,
    construit le jeu et crée sa tuile. Il faut une carte graphique avec Vulkan 1.3. Home ne fournit ni jeu ni clé.
 
 Chaque fichier est accompagné de son `.sha256` pour vérifier le téléchargement.

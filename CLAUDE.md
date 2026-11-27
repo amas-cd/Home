@@ -149,6 +149,11 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     ligne des deux côtés pour ajouter un jeu. Le jeu est reconnu par ses numéros de titre (.nsp) ou le nom du fichier. Le mod donné
     est vérifié (`exefs/<module>`) et rangé dans `%LOCALAPPDATA%\Home\mods-en-ligne\`. Un jeu hors table : « Suggérer un mod en
     ligne » (demande GitHub pré-remplie). Ces mods ont été essayés sur Mac, aucun sur Windows : l'écran le dit.
+  - Home cherche seul ce qu'il faut (`Trouvailles`, comme `fichiersCandidats` sur Mac : Téléchargements, Bureau, Documents, racine
+    des autres disques) : la liste des jeux, `prod.keys` et `title.keys` (installés d'office, aussi depuis `%USERPROFILE%\.switch`),
+    la mise à jour et les DLC du jeu choisi, le .zip ou le dossier du mod en ligne. Un dump est reconnu par son numéro de titre
+    (ticket du .nsp, ou `[0100…]` dans le nom) : …000 = jeu, …800 = mise à jour, autre = DLC. `HOME_CHERCHER=<dossier>` limite la
+    recherche à un dossier d'essai (scénarios `ajouter`, `essaimaj`).
   - À la fin de la construction, Home pose le mod, recompile avec lui, met `network=1` et garde l'adresse du serveur, si on l'a
     donnée, dans `recompiled/<id>/serveur.txt` (sur le PC seulement), qu'il passe à chaque lancement (`--swkbd-text=`).
     Un mod en ligne et l'adresse d'un serveur ne sont jamais dans le dépôt ni dans l'installeur sans l'accord écrit de l'auteur.

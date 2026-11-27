@@ -387,6 +387,140 @@ public static class Construction
     }
 }
 
+/// Ce que Home trouve seul sur le PC pour construire un jeu : les dumps, les clés, le mod en ligne. Il regarde Téléchargements, Bureau,
+/// Documents (trois niveaux) et la racine des autres disques (deux niveaux), comme `fichiersCandidats` sur Mac. Il ne lit que les noms
+/// des fichiers, l'en-tête des .nsp et la liste des fichiers d'un .zip : rien n'est envoyé nulle part.
+public static class Trouvailles
+{
+    public enum Sorte { Base, Maj, Dlc, Inconnu }
+    static List<string> fichiers = new(), exefs = new(); static DateTime quand = DateTime.MinValue; static readonly object verrou = new();
+    static readonly Dictionary<string, (Sorte, string?)> lus = new();
+    static readonly string[] Extensions = [".nsp", ".xci", ".zip", ".keys"];
+
+    /// Tous les fichiers utiles trouvés (gardés deux minutes : l'assistant y revient à chaque étape)
+    public static List<string> Tout(bool frais = false)
+    {
+        lock (verrou)
+        {
+            if (!frais && (DateTime.Now - quand).TotalMinutes < 2) return fichiers;
+            var f = new List<string>(); var e = new List<string>(); var vus = 0;
+            void Parcourir(string dossier, int niveau)
+            {
+                if (niveau < 0 || vus > 30000) return;   // un dossier énorme ne bloque pas la recherche
+                try
+                {
+                    foreach (var x in Directory.EnumerateFiles(dossier)) { vus++; if (Extensions.Contains(Path.GetExtension(x).ToLowerInvariant())) f.Add(x); }
+                    foreach (var x in Directory.EnumerateDirectories(dossier))
+                    {
+                        var n = Path.GetFileName(x); vus++;
+                        if (n.StartsWith('.') || n.StartsWith('$') || (File.GetAttributes(x) & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) != 0) continue;
+                        if (n.Equals("exefs", StringComparison.OrdinalIgnoreCase)) e.Add(x);
+                        Parcourir(x, niveau - 1);
+                    }
+                }
+                catch { }   // un dossier qu'on n'a pas le droit de lire
+            }
+            var maison = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            // HOME_CHERCHER=<dossier> : pour les essais, ne regarder que là
+            if (Environment.GetEnvironmentVariable("HOME_CHERCHER") is { Length: > 0 } essai) Parcourir(essai, 3);
+            else foreach (var d in new[] { Path.Combine(maison, "Downloads"), Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) }.Where(d => d != "" && Directory.Exists(d)).Distinct())
+                Parcourir(d, 3);
+            if (OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("HOME_CHERCHER") is not { Length: > 0 })
+                foreach (var disque in DriveInfo.GetDrives().Where(x => x.IsReady && x.DriveType is DriveType.Fixed or DriveType.Removable && !maison.StartsWith(x.Name, StringComparison.OrdinalIgnoreCase)))
+                    Parcourir(disque.Name, 2);
+            fichiers = f.Distinct().OrderByDescending(x => { try { return File.GetLastWriteTime(x); } catch { return DateTime.MinValue; } }).ToList(); exefs = e; quand = DateTime.Now;
+            return fichiers;
+        }
+    }
+    public static bool EstDump(string f) => Path.GetExtension(f).ToLowerInvariant() is ".nsp" or ".xci";
+    /// « Téléchargements · 14,2 Go » : où est le fichier, et sa taille
+    public static string Lieu(string f, bool taille = true)
+    {
+        var d = Path.GetFileName(Path.GetDirectoryName(f) ?? "") is { Length: > 0 } n ? n : Path.GetPathRoot(f) ?? "";
+        d = d switch { "Downloads" => "Téléchargements", "Desktop" => "Bureau", "Documents" => "Documents", _ => d };
+        if (!taille) return d;
+        try { var o = new FileInfo(f).Length; return d + " · " + (o >= 1L << 30 ? $"{o / (double)(1L << 30):0.0} Go" : $"{o / (1L << 20)} Mo"); } catch { return d; }
+    }
+
+    /// Ce qu'est un dump, et de quel jeu. Le numéro de titre dit tout : il finit par 000 pour un jeu, 800 pour sa mise à jour, autre
+    /// chose pour un DLC. On le lit dans le nom du ticket d'un .nsp, sinon entre crochets dans le nom du fichier ([0100…]) ; à défaut,
+    /// les mots du nom (« update », « dlc », « [v65536] »). Un .xci sans indice est pris pour un jeu.
+    public static (Sorte sorte, string? titre) Lire(string f)
+    {
+        lock (lus) if (lus.TryGetValue(f, out var deja)) return deja;
+        string? id = null; var nom = Path.GetFileName(f);
+        try
+        {
+            if (f.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase))
+            {
+                using var s = File.OpenRead(f); var h = new byte[16];
+                if (s.Read(h, 0, 16) == 16 && Encoding.ASCII.GetString(h, 0, 4) == "PFS0")
+                {
+                    int n = BitConverter.ToInt32(h, 4), t = BitConverter.ToInt32(h, 8);
+                    if (n > 0 && n < 4096 && t > 0 && t < 1 << 20)
+                    {
+                        var reste = new byte[n * 24 + t];
+                        if (s.Read(reste, 0, reste.Length) == reste.Length && System.Text.RegularExpressions.Regex.Match(Encoding.UTF8.GetString(reste, n * 24, t), @"(0[0-9A-Fa-f]{15})[0-9A-Fa-f]{16}\.tik", System.Text.RegularExpressions.RegexOptions.IgnoreCase) is { Success: true } tik) id = tik.Groups[1].Value.ToUpperInvariant();
+                    }
+                }
+            }
+        }
+        catch { }
+        if (id == null && System.Text.RegularExpressions.Regex.Match(nom, @"\[(0[0-9A-Fa-f]{15})\]") is { Success: true } crochet) id = crochet.Groups[1].Value.ToUpperInvariant();
+        Sorte sorte;
+        if (id != null) sorte = id.EndsWith("000") ? Sorte.Base : id.EndsWith("800") ? Sorte.Maj : Sorte.Dlc;
+        else
+        {
+            var n = nom.ToLowerInvariant(); var version = System.Text.RegularExpressions.Regex.Match(n, @"\[v(\d+)\]");
+            sorte = n.Contains("dlc") ? Sorte.Dlc : n.Contains("update") || n.Contains("upd") || n.Contains("patch") || n.Contains("mise a jour") || n.Contains("maj") || (version.Success && version.Groups[1].Value.TrimStart('0') != "") ? Sorte.Maj
+                : n.EndsWith(".xci") || (version.Success) ? Sorte.Base : Sorte.Inconnu;
+        }
+        lock (lus) lus[f] = (sorte, id);
+        return (sorte, id);
+    }
+    /// Le numéro du jeu de base auquel un dump se rattache (lui-même, sa mise à jour ou un de ses DLC)
+    static string? BaseDe(string f)
+    {
+        var (sorte, id) = Lire(f);
+        if (id == null) return sorte == Sorte.Base ? MenusSwitch.ModPour(f)?.Tid : null;
+        if (sorte != Sorte.Dlc) return id[..13] + "000";
+        return ulong.TryParse(id, System.Globalization.NumberStyles.HexNumber, null, out var v) ? (((v & ~0xFFFUL) - 0x1000)).ToString("X16") : null;
+    }
+    static bool MemeJeu(string f, string dump)
+    {
+        if (BaseDe(dump) is { } a && BaseDe(f) is { } b) return a == b;
+        // pas de numéro des deux côtés : les mots du nom du jeu doivent se retrouver dans le nom de l'autre fichier
+        string Nu(string x) => System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(x), @"\[[^\]]*\]|\([^)]*\)", " ");
+        return Titres.Correspond(Nu(f), Nu(dump)) && Nu(dump).Trim().Length >= 4;
+    }
+    public static string? MajDe(string dump) => Tout().FirstOrDefault(f => f != dump && EstDump(f) && Lire(f).sorte == Sorte.Maj && MemeJeu(f, dump));
+    public static List<string> DlcDe(string dump) => Tout().Where(f => f != dump && EstDump(f) && Lire(f).sorte == Sorte.Dlc && MemeJeu(f, dump)).Take(60).ToList();
+
+    /// Les clés : leur place habituelle (%USERPROFILE%\.switch, celle de ScarletNX et des émulateurs), sinon le fichier trouvé dans les dossiers regardés
+    public static string? Cles(string nom)
+    {
+        var habituel = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".switch", nom);
+        return Environment.GetEnvironmentVariable("HOME_CHERCHER") is not { Length: > 0 } && File.Exists(habituel) ? habituel : Tout().FirstOrDefault(f => Path.GetFileName(f).Equals(nom, StringComparison.OrdinalIgnoreCase));
+    }
+    /// Le mod en ligne d'un jeu, déjà sur le PC : un dossier exefs qui contient son module, ou un .zip qui le contient (on ne lit que sa liste de fichiers)
+    public static string? Mod(MenusSwitch.ModEnLigne m)
+    {
+        Tout();
+        if (exefs.FirstOrDefault(d => File.Exists(Path.Combine(d, m.Fichier))) is { } dossier) return Path.GetDirectoryName(dossier);
+        foreach (var zip in fichiers.Where(f => f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).Take(300))
+        {
+            try
+            {
+                if (new FileInfo(zip).Length > 400L << 20) continue;
+                using var a = ZipFile.OpenRead(zip);
+                if (a.Entries.Any(e => e.FullName.Replace('\\', '/').EndsWith("exefs/" + m.Fichier, StringComparison.OrdinalIgnoreCase))) return zip;
+            }
+            catch { }   // une archive abîmée ou protégée
+        }
+        return null;
+    }
+}
+
 /// Les écrans des jeux Switch : l'assistant de construction, le chantier, les mods, « Libérer de la place » (les mêmes mots que sur Mac)
 public static class MenusSwitch
 {
@@ -396,17 +530,31 @@ public static class MenusSwitch
     // jour, les DLC, puis « Prêt à construire ». La mise à jour dépend du mode : facultative en local, obligatoire à la version que
     // le mod demande en ligne, absente si le mod veut le jeu de base.
     /// Ce qui a été choisi dans l'assistant
-    public sealed class Demande { public string Dump = ""; public string? Maj; public List<string> Dlc = new(); public ModEnLigne? EnLigne; public string? Serveur; }
+    public sealed class Demande { public string Dump = ""; public string? Maj; public List<string> Dlc = new(); public ModEnLigne? EnLigne; public string? Serveur; public bool MajCherchee, MajConfirmee, DlcCherches; }
     static string NomDe(Demande d) => Path.GetFileNameWithoutExtension(d.Dump);
 
+    /// Home cherche lui-même les jeux déjà sur le PC (comme `proposer` sur Mac) : on choisit dans la liste, ou un autre fichier
     public static async void Ajouter(Bibliotheque lib)
     {
-        if (lib.ChoisirFichier == null || await lib.ChoisirFichier("Le jeu extrait de ta console (.xci ou .nsp)", ["*.xci", "*.nsp"]) is not { } dump) return;
+        lib.Ouvrir(new Menu { Titre = "Quel jeu ?", Symbole = "magnifyingglass", Texte = "Recherche des jeux sur ce PC…" });
+        var jeux = await Task.Run(() => Trouvailles.Tout(frais: true).Where(f => Trouvailles.EstDump(f) && Trouvailles.Lire(f).sorte is Trouvailles.Sorte.Base or Trouvailles.Sorte.Inconnu).Take(40).ToList());
+        if (lib.Menu?.Titre != "Quel jeu ?") return;   // il a fermé le menu pendant la recherche
+        async void Autre() { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier du jeu, extrait de ta console", ["*.xci", "*.nsp"]) is { } f) Choisi(lib, f); }
+        if (jeux.Count == 0) { lib.FermerMenus(); Autre(); return; }
+        var m = new Menu { Titre = "Quel jeu ?", SousTitre = jeux.Count == 1 ? "1 jeu trouvé sur ce PC" : $"{jeux.Count} jeux trouvés sur ce PC", Symbole = "gamecontroller", Roue = true };
+        foreach (var f in jeux) m.Elements.Add(new(Path.GetFileName(f), "gamecontroller", () => Choisi(lib, f), Trouvailles.Lieu(f)));
+        m.Elements.Add(new("Choisir un autre fichier…", "folder", Autre, "Un fichier du jeu rangé ailleurs") { Section = " " });
+        lib.Ouvrir(m);
+    }
+    /// Le jeu est choisi : les clés. Home les installe seul s'il les trouve (à leur place habituelle, ou dans les dossiers qu'il regarde).
+    static async void Choisi(Bibliotheque lib, string dump)
+    {
         if (!File.Exists(Construction.ClesProd))
         {
-            if (await lib.ChoisirFichier("Les clés de ta console (prod.keys)", ["prod.keys", "*.keys"]) is not { } cles) return;
-            if (!Installer(lib, cles, Construction.ClesProd)) return;
+            if (Trouvailles.Cles("prod.keys") is { } trouvees && Installer(lib, trouvees, Construction.ClesProd)) lib.Dire("Clés trouvées dans " + Trouvailles.Lieu(trouvees, taille: false) + " : installées dans Home");
+            else if (lib.ChoisirFichier == null || await lib.ChoisirFichier("Les clés de ta console (prod.keys)", ["prod.keys", "*.keys"]) is not { } cles || !Installer(lib, cles, Construction.ClesProd)) return;
         }
+        if (!File.Exists(Construction.ClesTitres) && Trouvailles.Cles("title.keys") is { } titres) Installer(lib, titres, Construction.ClesTitres);
         var d = new Demande { Dump = dump };
         if (dump.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase) && !File.Exists(Construction.ClesTitres)) ClesTitres(lib, d); else Mode(lib, d);
     }
@@ -418,8 +566,8 @@ public static class MenusSwitch
     }
     static void ClesTitres(Bibliotheque lib, Demande d) => lib.Ouvrir(new Menu
     {
-        Titre = "Clés du jeu", SousTitre = "Un fichier .nsp", Symbole = "key",
-        Texte = "Un jeu en .nsp peut demander un second fichier de clés, title.keys, tiré lui aussi de ta console. Sans lui, certains .nsp ne se lisent pas.",
+        Titre = "Clés du jeu", SousTitre = "Un second fichier de clés", Symbole = "key",
+        Texte = "Ce fichier de jeu peut demander un second fichier de clés, title.keys, tiré lui aussi de ta console. Sans lui, certains jeux ne se lisent pas.",
         Elements =
         {
             new("Choisir title.keys", "key", async () => { if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Les clés des jeux (title.keys)", ["title.keys", "*.keys"]) is { } f && Installer(lib, f, Construction.ClesTitres)) Mode(lib, d); }),
@@ -522,6 +670,7 @@ public static class MenusSwitch
     {
         void Suite() { d.EnLigne = m; if (m.Maj == null) d.Maj = null; Serveur(lib, d); }
         void Donner(string? source) { if (source == null) return; if (RangerMod(m, source)) Suite(); else lib.Dire($"Ce fichier n'est pas {m.Nom} : il manque exefs/{m.Fichier}"); }
+        if (!ModPret(m) && Trouvailles.Mod(m) is { } trouve && RangerMod(m, trouve)) lib.Dire($"{m.Nom} trouvé dans {Trouvailles.Lieu(trouve, taille: false)} : rangé dans Home");
         var pret = ModPret(m);
         var menu = new Menu
         {
@@ -555,6 +704,8 @@ public static class MenusSwitch
     public static void Maj(Bibliotheque lib, Demande d)
     {
         var exigee = d.EnLigne?.Maj;
+        // la mise à jour de ce jeu, si elle est déjà sur le PC : proposée d'office (en ligne, elle passe quand même par « Es-tu sûr ? »)
+        if (!d.MajCherchee) { d.MajCherchee = true; if (d.Maj == null && Trouvailles.MajDe(d.Dump) is { } t) { d.Maj = t; d.MajConfirmee = false; } }
         var m = new Menu
         {
             Titre = exigee != null ? "La mise à jour " + exigee : "La mise à jour", SousTitre = NomDe(d), Symbole = "arrow.down.circle",
@@ -562,33 +713,39 @@ public static class MenusSwitch
             Alerte = exigee != null ? $"Il faut la version {exigee} du jeu" : null,
             Texte = exigee != null ? $"{d.EnLigne!.Nom} ne marche qu'avec la mise à jour {exigee} : donne ce fichier-là, pas une autre version." : "Si tu as la mise à jour du jeu, donne-la : elle est construite avec lui. Ce n'est pas obligatoire.",
         };
-        m.Elements.Add(new(d.Maj == null ? "Choisir la mise à jour…" : Path.GetFileName(d.Maj), "arrow.down.circle", async () =>
+        void Suite()
         {
-            if (lib.ChoisirFichier == null || await lib.ChoisirFichier(exigee != null ? $"La mise à jour {exigee} du jeu (.nsp)" : "La mise à jour du jeu (.nsp)", ["*.nsp", "*.xci"]) is not { } f || f == d.Dump) { Maj(lib, d); return; }
-            if (exigee == null) { d.Maj = f; Maj(lib, d); return; }
+            if (exigee == null || d.MajConfirmee) { Dlc(lib, d); return; }
             // en ligne : une autre version que celle du mod donne un jeu qui ne se connecte pas, après une heure de construction. On redemande.
             lib.Ouvrir(new Menu
             {
-                Titre = "Es-tu sûr ?", SousTitre = Path.GetFileName(f), Symbole = "exclamationmark", Retour = () => Maj(lib, d),
+                Titre = "Es-tu sûr ?", SousTitre = Path.GetFileName(d.Maj), Symbole = "exclamationmark", Retour = () => Maj(lib, d),
                 Alerte = $"Ce fichier doit être la mise à jour {exigee}",
                 Texte = $"Home ne peut pas le vérifier. Avec une autre version, {d.EnLigne!.Nom} ne marchera pas, et il faudra tout reconstruire.",
-                Elements = { new($"Oui, c'est la {exigee}", "checkmark", () => { d.Maj = f; Maj(lib, d); }) { Teinte = Icones.Vert }, new("Choisir un autre fichier", "arrow.left", () => Maj(lib, d)) { Teinte = Icones.Gris } },
+                Elements = { new($"Oui, c'est la {exigee}", "checkmark", () => { d.MajConfirmee = true; Dlc(lib, d); }) { Teinte = Icones.Vert }, new("Choisir un autre fichier", "arrow.left", () => Maj(lib, d)) { Teinte = Icones.Gris } },
             });
-        }, d.Maj == null ? "Un fichier .nsp" : "Choisir un autre fichier"));
-        if (d.Maj != null) m.Elements.Add(new("Continuer", "arrow.right", () => Dlc(lib, d)) { Teinte = Icones.Vert });
-        else if (exigee == null) m.Elements.Add(new("Pas de mise à jour", "arrow.right", () => Dlc(lib, d)) { Teinte = Icones.Gris });
+        }
+        if (d.Maj != null) m.Elements.Add(new("Continuer", "arrow.right", Suite, Path.GetFileName(d.Maj) + " · " + Trouvailles.Lieu(d.Maj)) { Teinte = Icones.Vert });
+        m.Elements.Add(new(d.Maj == null ? "Choisir la mise à jour…" : "Choisir un autre fichier…", "arrow.down.circle", async () =>
+        {
+            if (lib.ChoisirFichier != null && await lib.ChoisirFichier(exigee != null ? $"Le fichier de la mise à jour {exigee} du jeu" : "Le fichier de la mise à jour du jeu", ["*.nsp", "*.xci"]) is { } f && f != d.Dump) { d.Maj = f; d.MajConfirmee = false; }
+            Maj(lib, d);
+        }, "Le fichier de la mise à jour"));
+        if (exigee == null) m.Elements.Add(new("Pas de mise à jour", "arrow.right", () => { d.Maj = null; Dlc(lib, d); }) { Teinte = Icones.Gris });
         // sans cette mise à jour, pas de jeu en ligne : on repasse en local, où elle est facultative
         if (exigee != null) m.Elements.Add(new("Jouer en local à la place", "gamecontroller", () => { var mod = d.EnLigne!.Nom; d.EnLigne = null; d.Serveur = null; Maj(lib, d); lib.Dire("En local, sans " + mod); }, $"Sans {d.EnLigne!.Nom} : la mise à jour devient facultative") { Teinte = Icones.Gris });
         lib.Ouvrir(m);
     }
     static void Dlc(Bibliotheque lib, Demande d)
     {
+        // les DLC de ce jeu déjà sur le PC sont ajoutés d'office ; « Tout retirer » les enlève
+        if (!d.DlcCherches) { d.DlcCherches = true; foreach (var f in Trouvailles.DlcDe(d.Dump)) if (!d.Dlc.Contains(f)) d.Dlc.Add(f); }
         var m = new Menu { Titre = "Les contenus additionnels", SousTitre = NomDe(d), Symbole = "puzzlepiece", Retour = () => { if (d.EnLigne is { Maj: null }) Serveur(lib, d); else Maj(lib, d); } };
         m.Elements.Add(new(d.Dlc.Count == 0 ? "Choisir les DLC…" : "Ajouter un autre DLC…", "puzzlepiece", async () =>
         {
-            if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Un DLC du jeu (.nsp)", ["*.nsp"]) is { } f && f != d.Dump && f != d.Maj && !d.Dlc.Contains(f)) d.Dlc.Add(f);
+            if (lib.ChoisirFichier != null && await lib.ChoisirFichier("Le fichier d'un DLC du jeu", ["*.nsp", "*.xci"]) is { } f && f != d.Dump && f != d.Maj && !d.Dlc.Contains(f)) d.Dlc.Add(f);
             Dlc(lib, d);
-        }, d.Dlc.Count == 0 ? "Un fichier .nsp à la fois" : string.Join(", ", d.Dlc.Select(Path.GetFileName))));
+        }, d.Dlc.Count == 0 ? "Un fichier à la fois" : string.Join(", ", d.Dlc.Select(Path.GetFileName))));
         m.Elements.Add(new(d.Dlc.Count == 0 ? "Pas de DLC" : "Continuer", "arrow.right", () => Recap(lib, d)) { Teinte = d.Dlc.Count == 0 ? Icones.Gris : Icones.Vert });
         if (d.Dlc.Count > 0) m.Elements.Add(new("Tout retirer", "xmark", () => { d.Dlc.Clear(); Dlc(lib, d); }) { Teinte = Icones.Gris });
         lib.Ouvrir(m);

@@ -348,7 +348,7 @@ public sealed class Bibliotheque
             Titre = "Ajouter un jeu", Symbole = "plus",
             Elements =
             {
-                new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir de ton dump et de tes clés") { Teinte = Icones.Rouge },
+                new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir du fichier de ton jeu et de tes clés") { Teinte = Icones.Rouge },
                 new("App ou jeu Windows", "desktopcomputer", () => _ = AjouterApp(), "Choisir un programme (.exe) ou un raccourci"),
                 new() { Libelle = "Steam et Epic Games", Detail = $"Leurs jeux installés apparaissent tout seuls : {steam} Steam, {epic} Epic Games", Icone = "pc", Info = true, Section = "Détectés automatiquement" },
             },

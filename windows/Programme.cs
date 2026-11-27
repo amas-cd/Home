@@ -106,6 +106,10 @@ sealed class Fenetre : Window
                 case "plus": lib.OuvrirPlus(); break;
                 case "ajout": lib.OuvrirAjout(); break;
                 case "ouverture": ecran.Ouvrir(fige: true); break;
+                case "ajouter": MenusSwitch.Ajouter(lib); break;
+                case "essaimaj": if (Environment.GetEnvironmentVariable("HOME_CHERCHER") is { } dossier && Trouvailles.Tout(true).FirstOrDefault(x => Trouvailles.EstDump(x) && Trouvailles.Lire(x).titre == MenusSwitch.ModsEnLigne[0].Tid) is { } jeu)
+                    { Journal.Ecrire("essai : " + string.Join(" | ", Trouvailles.Tout().Where(Trouvailles.EstDump).Select(x => Path.GetFileName(x) + " = " + Trouvailles.Lire(x).sorte + " " + Trouvailles.Lire(x).titre)) + " | clés : " + (Trouvailles.Cles("prod.keys") != null) + " | mod : " + Path.GetFileName(Trouvailles.Mod(MenusSwitch.ModsEnLigne[0]) ?? "aucun") + " | dlc : " + Trouvailles.DlcDe(jeu).Count);
+                      MenusSwitch.Maj(lib, new MenusSwitch.Demande { Dump = jeu, EnLigne = MenusSwitch.ModsEnLigne[0] }); } break;
                 case "mode": MenusSwitch.Mode(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci" }); break;
                 case "modeinconnu": MenusSwitch.Mode(lib, new MenusSwitch.Demande { Dump = "Un autre jeu.xci" }); break;
                 case "enligne": MenusSwitch.EnLigne(lib, new MenusSwitch.Demande { Dump = "Zelda TOTK.xci" }, MenusSwitch.ModsEnLigne[0]); break;
