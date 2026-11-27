@@ -174,8 +174,10 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
   qui l'anime), et on n'anime jamais une taille (seulement `RenderTransform` et l'opacité). « Animations réduites » : `Mouvement.Reduit`.
   Pour comparer : `HOME_APERCU=<dossier> Home.app/Contents/MacOS/Salon` écrit les menus, l'ouverture et l'avancement du Mac en PNG.
 - **Pas de flou ni d'ombre calculés en direct** (`BlurEffect`, `DropShadowEffect`) : Avalonia les refait à chaque image dès que quelque
-  chose bouge, et tout saccade. Un flou est une image réduite à quelques points puis étirée (`U.Flou`) ; derrière un menu, une photo
-  réduite de la bibliothèque (`Ecran.Voiler`). Le zoom lent du fond du Mac n'est pas repris pour la même raison.
+  chose bouge, et tout saccade. Un flou est fait **une seule fois** par Skia sur l'image réduite, puis gardé (`U.Flou`, `U.Flouter`) ;
+  derrière un menu, c'est une photo réduite de la bibliothèque, floutée de la même façon (`Ecran.Voiler`). Ne jamais « flouter » en
+  étirant une image de quelques points : ça donne de gros pixels. Une lueur (`U.Lueur`) est dessinée par Skia avec du tramage : un
+  dégradé d'Avalonia sur fond sombre fait des anneaux. Le zoom lent du fond du Mac n'est pas repris (il redessine tout l'écran).
   Seule exception : la rangée voisine, immobile au repos, a un vrai flou (jamais de `BlurEffect` de rayon 0 laissé en place).
 - **Écriture** : Mona Sans (GitHub, licence OFL), embarquée depuis `windows/polices/` ; sa version large très grasse remplace SF Pro
   Expanded Black, qu'Apple ne laisse pas redistribuer. **Icônes** : Fluent System Icons (Microsoft, MIT, paquet `FluentIcons.Avalonia`),

@@ -199,11 +199,28 @@ static class U
     public static Color Alpha(Color c, double a) => Color.FromArgb((byte)(255 * Math.Clamp(a, 0, 1)), c.R, c.G, c.B);
     public static Color NoirA(double a) => Alpha(Colors.Black, a);
     /// Une lueur : un disque de couleur qui s'efface vers son bord (à la place d'un grand flou, bien plus coûteux à dessiner)
-    public static Ellipse Lueur(Color c, double diametre, double force) => new()
+    static readonly Dictionary<(Color, int), Bitmap> lueurs = new();
+    /// Une lueur : un disque de couleur qui s'efface vers son bord. Dessinée une fois par Skia avec du tramage, puis gardée : un dégradé
+    /// d'Avalonia, sur un fond sombre, fait des anneaux visibles (256 niveaux seulement) au lieu d'un fondu lisse.
+    public static Image Lueur(Color c, double diametre, double force)
     {
-        Width = diametre, Height = diametre, IsHitTestVisible = false,
-        Fill = new RadialGradientBrush { GradientStops = { new GradientStop(Alpha(c, force), 0), new GradientStop(Alpha(c, force * 0.55), 0.35), new GradientStop(Alpha(c, 0), 1) } },
-    };
+        var cle = (Alpha(c, force), (int)diametre);
+        if (!lueurs.TryGetValue(cle, out var image))
+        {
+            var cote = Math.Clamp((int)(diametre / 2), 64, 720);   // à demi-taille : une lueur n'a aucun détail
+            using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(cote, cote, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul));
+            SkiaSharp.SKColor K(double a) => new(c.R, c.G, c.B, (byte)(255 * Math.Clamp(a, 0, 1)));
+            using var peinture = new SkiaSharp.SKPaint { IsDither = true, IsAntialias = true };
+            // un fondu en courbe douce (cinq paliers) plutôt qu'en ligne droite : pas de bord qu'on devine
+            peinture.Shader = SkiaSharp.SKShader.CreateRadialGradient(new SkiaSharp.SKPoint(cote / 2f, cote / 2f), cote / 2f,
+                [K(force), K(force * 0.78), K(force * 0.45), K(force * 0.16), K(0)], [0f, 0.25f, 0.5f, 0.75f, 1f], SkiaSharp.SKShaderTileMode.Clamp);
+            surface.Canvas.Clear(SkiaSharp.SKColors.Transparent); surface.Canvas.DrawRect(0, 0, cote, cote, peinture);
+            using var png = surface.Snapshot().Encode(SkiaSharp.SKEncodedImageFormat.Png, 100); using var flux = png.AsStream();
+            lueurs[cle] = image = new Bitmap(flux);
+        }
+        var vue = new Image { Source = image, Width = diametre, Height = diametre, Stretch = Stretch.Fill, IsHitTestVisible = false };
+        RenderOptions.SetBitmapInterpolationMode(vue, BitmapInterpolationMode.HighQuality); return vue;
+    }
     public static StackPanel Ligne(double espace, params Control[] c) { var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = espace }; s.Children.AddRange(c); return s; }
     public static StackPanel Colonne(double espace, params Control[] c) { var s = new StackPanel { Spacing = espace }; s.Children.AddRange(c); return s; }
     /// Une touche dans une pastille : lettre de la manette ou touche du clavier
@@ -223,12 +240,32 @@ static class U
     public static async void Distante(Image img, string url, int largeur, Action? chargee = null) { if (await Images.Distante(url, largeur) is { } b) { img.Source = b; chargee?.Invoke(); } }
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Bitmap, Bitmap> flous = new();
     /// Une image floue sans rien calculer à l'écran : l'image réduite à quelques points, que l'affichage étire en la lissant
+    /// Une image floue sans rien calculer à l'écran : un vrai flou, fait une seule fois par Skia sur l'image réduite, puis gardé.
+    /// (Étirer une image de quelques points, comme avant, donnait de gros pixels.) `cote` : la force, 20 = très flou.
     public static Bitmap Flou(Bitmap b, int cote = 20)
     {
         if (flous.TryGetValue(b, out var f)) return f;
-        var k = (double)cote / Math.Max(1, Math.Max(b.PixelSize.Width, b.PixelSize.Height));
-        f = b.CreateScaledBitmap(new PixelSize(Math.Max(2, (int)(b.PixelSize.Width * k)), Math.Max(2, (int)(b.PixelSize.Height * k))), BitmapInterpolationMode.HighQuality);
+        f = Flouter(b, 240, 240f / cote / 1.6f) ?? b;
         flous.Add(b, f); return f;
+    }
+    /// Réduit l'image à `largeur` points au plus, la floute (sigma en points de l'image réduite) et la rend. null si Skia n'y arrive pas.
+    public static Bitmap? Flouter(Bitmap b, int largeur, float sigma)
+    {
+        try
+        {
+            var k = Math.Min(1.0, (double)largeur / Math.Max(1, Math.Max(b.PixelSize.Width, b.PixelSize.Height)));
+            int l = Math.Max(2, (int)(b.PixelSize.Width * k)), h = Math.Max(2, (int)(b.PixelSize.Height * k));
+            using var petite = b.CreateScaledBitmap(new PixelSize(l, h), BitmapInterpolationMode.HighQuality);
+            using var tampon = new MemoryStream(); petite.Save(tampon); tampon.Position = 0;
+            using var source = SkiaSharp.SKBitmap.Decode(tampon); if (source == null) return null;
+            using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(l, h, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul));
+            // les bords se prolongent (Clamp) : sans ça le flou s'assombrit en approchant du cadre
+            using var peinture = new SkiaSharp.SKPaint { IsDither = true, ImageFilter = SkiaSharp.SKImageFilter.CreateBlur(sigma, sigma, SkiaSharp.SKShaderTileMode.Clamp) };
+            surface.Canvas.Clear(SkiaSharp.SKColors.Black); surface.Canvas.DrawBitmap(source, 0, 0, peinture);
+            using var png = surface.Snapshot().Encode(SkiaSharp.SKEncodedImageFormat.Png, 100); using var flux = png.AsStream();
+            return new Bitmap(flux);
+        }
+        catch (Exception e) { Journal.Ecrire("flou : " + e.Message); return null; }
     }
     public static Image ImageFloue(Bitmap? b) { var i = new Image { Source = b != null ? Flou(b) : null, Stretch = Stretch.UniformToFill }; RenderOptions.SetBitmapInterpolationMode(i, BitmapInterpolationMode.HighQuality); return i; }
 }
@@ -524,7 +561,7 @@ sealed class BienvenueVue : Panel
         ("Nintendo", "Switch et Switch 2", "logo:switch", [C(1.0, 0.70, 0.23), C(1.0, 0.42, 0.24)]),
         ("PC", "Epic Games, Steam, Windows", "logo:windows", [C(0.19, 0.78, 0.80), C(0.16, 0.38, 1.0)]),
     ];
-    readonly Panel[] vues = new Panel[3]; readonly Border[] bords = new Border[3], voiles = new Border[3], halos = new Border[3]; readonly Ellipse[] lueurs = new Ellipse[3];
+    readonly Panel[] vues = new Panel[3]; readonly Border[] bords = new Border[3], voiles = new Border[3], halos = new Border[3]; readonly Image[] lueurs = new Image[3];
     int vise = -1;
     public BienvenueVue(Bibliotheque lib)
     {
@@ -748,9 +785,10 @@ public sealed class Ecran : Panel
         if (!oui) { sousVoile = false; Scene(); voile.Opacity = 0; return; }
         if (Bounds.Width > 0 && Bounds.Height > 0)
         {
-            const int largeur = 192; var k = largeur / Bounds.Width;
+            const int largeur = 480; var k = largeur / Bounds.Width;
             var hauteur = Math.Max(1, (int)(Bounds.Height * k)); var photo = new RenderTargetBitmap(new PixelSize(largeur, hauteur));
-            using (var dessin = photo.CreateDrawingContext()) dessin.FillRectangle(new VisualBrush { Visual = scene, Stretch = Stretch.Fill }, new Rect(0, 0, largeur, hauteur)); var ancienne = voile.Source as IDisposable; voile.Source = photo; ancienne?.Dispose();
+            using (var dessin = photo.CreateDrawingContext()) dessin.FillRectangle(new VisualBrush { Visual = scene, Stretch = Stretch.Fill }, new Rect(0, 0, largeur, hauteur));
+            var ancienne = voile.Source as IDisposable; voile.Source = U.Flouter(photo, largeur, 7f) is { } floue ? floue : photo; ancienne?.Dispose();
         }
         voile.Opacity = 1;
         Mouvement.Dans(0.4, () => { if (voilee) { sousVoile = true; Scene(); } });
