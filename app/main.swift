@@ -3851,7 +3851,7 @@ struct PadSnap { var lx: Float = 0, ly: Float = 0, rx: Float = 0, ry: Float = 0;
 /// retient l'adresse d'où il a téléchargé chaque jaquette (fichier .url à côté), sinon il prend celle de la boutique du jeu.
 final class Discord {
     static let shared = Discord()
-    static let appID = ""   // l'identifiant de l'application Discord « Home » ; vide = pas de présence
+    static let appID = "1575950465898905620"   // l'identifiant de l'application Discord « Home » ; vide = pas de présence
     static let depuis = Date()
     static var voulu: Bool { UserDefaults.standard.object(forKey: "discord") as? Bool ?? true }
     private let file = DispatchQueue(label: "fr.anas.home.discord")
