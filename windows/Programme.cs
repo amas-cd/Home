@@ -65,6 +65,8 @@ sealed class Fenetre : Window
             if (Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) ecran.Ouvrir();   // l'écran de démarrage et son jingle, pendant que la bibliothèque se charge dessous
             lib.Recharger();
             Scenario();
+            // le tout premier lancement : « Bienvenue », que veux-tu faire avec Home ? (pas pendant une capture ni en démonstration)
+            if (lib.Config.Mode == null && !Bibliotheque.Demo && Environment.GetEnvironmentVariable("HOME_CAPTURE") == null) lib.OuvrirMode(premier: true);
             // Une fois par démarrage, sans rien installer : le menu propose la mise à jour, c'est le joueur qui la lance
             if (OperatingSystem.IsWindows() && await MiseAJour.Verifier()) lib.Dire($"Home {MiseAJour.Version} est disponible : Menu → Mettre à jour Home");
         };
@@ -106,6 +108,7 @@ sealed class Fenetre : Window
                 case "plus": lib.OuvrirPlus(); break;
                 case "ajout": lib.OuvrirAjout(); break;
                 case "ouverture": ecran.Ouvrir(fige: true); break;
+                case "bienvenue": lib.OuvrirMode(premier: true); break;
                 case "ajouter": MenusSwitch.Ajouter(lib); break;
                 case "essaimaj": if (Environment.GetEnvironmentVariable("HOME_CHERCHER") is { } dossier && Trouvailles.Tout(true).FirstOrDefault(x => Trouvailles.EstDump(x) && Trouvailles.Lire(x).titre == MenusSwitch.ModsEnLigne[0].Tid) is { } jeu)
                     { Journal.Ecrire("essai : " + string.Join(" | ", Trouvailles.Tout().Where(Trouvailles.EstDump).Select(x => Path.GetFileName(x) + " = " + Trouvailles.Lire(x).sorte + " " + Trouvailles.Lire(x).titre)) + " | clés : " + (Trouvailles.Cles("prod.keys") != null) + " | mod : " + Path.GetFileName(Trouvailles.Mod(MenusSwitch.ModsEnLigne[0]) ?? "aucun") + " | dlc : " + Trouvailles.DlcDe(jeu).Count);

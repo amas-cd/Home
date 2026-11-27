@@ -56,11 +56,15 @@ public sealed class Bibliotheque
     {
         Sons.Actifs = Config.Sons; Mouvement.Reduit = Config.AnimationsReduites;
         var jeux = new List<Jeu>();
-        jeux.AddRange(Steam.Jeux()); jeux.AddRange(Epic.Jeux()); jeux.AddRange(Construction.Jeux());
-        // un jeu en construction a déjà sa tuile : on voit où il en est, et on le reprend si c'est coupé
-        foreach (var c in Construction.Chantiers()) jeux.Add(new Jeu { Id = c.Id, Nom = c.Titre, Origine = Origine.Switch });
+        if (ModePC) { jeux.AddRange(Steam.Jeux()); jeux.AddRange(Epic.Jeux()); }
+        if (ModeNintendo)
+        {
+            jeux.AddRange(Construction.Jeux());
+            // un jeu en construction a déjà sa tuile : on voit où il en est, et on le reprend si c'est coupé
+            foreach (var c in Construction.Chantiers()) jeux.Add(new Jeu { Id = c.Id, Nom = c.Titre, Origine = Origine.Switch });
+        }
         if (Demo) jeux.AddRange(Exemples());
-        foreach (var e in Config.Jeux.Where(e => Demo || File.Exists(e.Chemin)))
+        foreach (var e in Config.Jeux.Where(e => ModePC && (Demo || File.Exists(e.Chemin))))
             jeux.Add(new Jeu { Id = "app:" + e.Chemin, Nom = e.Nom ?? Path.GetFileNameWithoutExtension(e.Chemin), Origine = Origine.App, Cible = e.Chemin, Dossier = Path.GetDirectoryName(e.Chemin) ?? "" });
         foreach (var j in jeux) if (Config.Noms.TryGetValue(j.Id, out var n)) j.Nom = n;
         var avant = selectionner ?? Courant?.Id; var categorie = Categories.ElementAtOrDefault(IndexCategorie);
@@ -211,6 +215,29 @@ public sealed class Bibliotheque
             else if (DateTime.Now - debut > TimeSpan.FromSeconds(120)) return false;   // jamais démarré (lancement annulé, mise à jour du launcher…)
         }
     }
+    // MARK: Mode d'utilisation : ce que Home sert à faire sur ce PC (jeux Nintendo, jeux PC, les deux), comme sur Mac
+    public bool ModeNintendo => Config.Mode != "pc";
+    public bool ModePC => Config.Mode != "nintendo";
+    /// Au premier lancement (« Bienvenue »), puis dans Menu → Composants. Sur Windows il n'y a qu'un moteur Nintendo (ScarletNX) : pas de
+    /// seconde étape comme sur Mac. Choisir Nintendo le télécharge tout de suite, pour que le premier jeu n'attende pas.
+    public void OuvrirMode(bool premier = false)
+    {
+        var mode = Config.Mode ?? "tout";
+        void Appliquer(string cle)
+        {
+            Config.Mode = cle; Enregistrer(); FermerMenus(); Recharger();
+            if (cle != "pc" && OperatingSystem.IsWindows() && Moteur.Exe == null) _ = Construction.PreparerMoteur(this);
+        }
+        ElementMenu Choix(string nom, string precision, string symbole, Avalonia.Media.Color teinte, string cle) =>
+            new(nom + (!premier && cle == mode ? " : actuel" : ""), symbole, () => Appliquer(cle), precision) { Teinte = teinte };
+        var m = new Menu { Titre = premier ? "Bienvenue" : "Composants", SousTitre = premier ? "Que veux-tu faire avec Home ?" : null, Symbole = "sparkles", Roue = true, Retour = premier ? () => Appliquer("tout") : OuvrirPlus };
+        m.Elements.Add(Choix("Tout", "Jeux Nintendo et jeux PC", "sparkles", Icones.Violet, "tout"));
+        m.Elements.Add(Choix("Nintendo", "Switch, à partir des fichiers de tes jeux", "gamecontroller", Icones.Orange, "nintendo"));
+        m.Elements.Add(Choix("PC", "Steam, Epic Games et tes jeux Windows", "desktopcomputer", Icones.Bleu, "pc"));
+        if (premier) m.Elements.Add(new("Plus tard", "clock", () => Appliquer("tout")) { Teinte = Icones.Gris });
+        Ouvrir(m);
+    }
+
     // MARK: Menus
     /// Les options d'un jeu : un menu court, en rangée de pastilles comme sur Mac. Les images et le nom sont dans « Apparence ».
     public void OuvrirOptions()
@@ -313,6 +340,7 @@ public sealed class Bibliotheque
             "Réduites : les mouvements deviennent un fondu très court"));
         m.Elements.Add(new("Clé SteamGridDB", "key", OuvrirCle, SteamGridDB.Cle != null ? "Enregistrée" : "Aucune : jaquettes carrées et images des jeux Epic et des apps"));
         if (MiseAJour.Version == null) m.Elements.Add(new("Chercher une mise à jour", "arrow.clockwise", async () => { if (await MiseAJour.Verifier()) OuvrirPlus(); else Dire("Home est à jour (" + Version + ")"); }, "Version " + Version) { Section = "Home" });
+        m.Elements.Add(new("Composants", "sparkles", () => OuvrirMode(), Config.Mode switch { "nintendo" => "Jeux Nintendo", "pc" => "Jeux PC", _ => "Jeux Nintendo et jeux PC" }));
         m.Elements.Add(new("Libérer de la place", "trash", () => MenusSwitch.LibererPlace(this), "Ce que les constructions ont laissé et qui ne sert plus") { Teinte = Icones.Orange });
         m.Elements.Add(new("Ouvrir le dossier de Home", "folder", () => Systeme.Ouvrir(Dossiers.Racine), "Réglages, images, jeux Switch, journal") { Section = MiseAJour.Version == null ? null : "Home" });
         m.Elements.Add(new("Quitter Home", "power", () => Quitter?.Invoke()) { Destructif = true });
@@ -343,16 +371,14 @@ public sealed class Bibliotheque
     public void OuvrirAjout()
     {
         int steam = Jeux.Count(j => j.Origine == Origine.Steam), epic = Jeux.Count(j => j.Origine == Origine.Epic);
-        Ouvrir(new Menu
+        var m = new Menu { Titre = "Ajouter un jeu", Symbole = "plus" };
+        if (ModeNintendo) m.Elements.Add(new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir du fichier de ton jeu et de tes clés") { Teinte = Icones.Rouge });
+        if (ModePC)
         {
-            Titre = "Ajouter un jeu", Symbole = "plus",
-            Elements =
-            {
-                new("Switch", "gamecontroller", () => MenusSwitch.Ajouter(this), "Construire un jeu à partir du fichier de ton jeu et de tes clés") { Teinte = Icones.Rouge },
-                new("App ou jeu Windows", "desktopcomputer", () => _ = AjouterApp(), "Choisir un programme (.exe) ou un raccourci"),
-                new() { Libelle = "Steam et Epic Games", Detail = $"Leurs jeux installés apparaissent tout seuls : {steam} Steam, {epic} Epic Games", Icone = "pc", Info = true, Section = "Détectés automatiquement" },
-            },
-        });
+            m.Elements.Add(new("App ou jeu Windows", "desktopcomputer", () => _ = AjouterApp(), "Choisir un programme (.exe) ou un raccourci"));
+            m.Elements.Add(new() { Libelle = "Steam et Epic Games", Detail = $"Leurs jeux installés apparaissent tout seuls : {steam} Steam, {epic} Epic Games", Icone = "pc", Info = true, Section = "Détectés automatiquement" });
+        }
+        Ouvrir(m);
     }
     async Task AjouterApp()
     {

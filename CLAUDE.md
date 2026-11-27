@@ -159,7 +159,9 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     Un mod en ligne et l'adresse d'un serveur ne sont jamais dans le dépôt ni dans l'installeur sans l'accord écrit de l'auteur.
   - Jamais de jeu, de dump ni de clé téléchargés, et Home ne dit pas où en trouver.
 - **Pas sur Windows** : TOTK / SMO Online, GameBanana, HUD en jeu, capture, volume (ni par jeu, ni la barre du
-  haut), choix des images dans Home (un fichier à la place), mode d'utilisation.
+  haut), choix des images dans Home (un fichier à la place).
+- **Mode d'utilisation** (`Config.Mode` : tout / nintendo / pc, `Bibliotheque.OuvrirMode`) : « Bienvenue » au premier lancement, puis
+  Menu → Composants, avec les mots du Mac. Nintendo télécharge ScarletNX tout de suite ; il n'y a pas d'étape « Moteurs » (un seul moteur).
 - **Désinstaller** : un jeu Switch part à la Corbeille. Pour un jeu Steam ou Epic, Home ne supprime rien lui-même : il ouvre la
   désinstallation de la boutique (`steam://uninstall/<appid>`, le lanceur Epic). Une app ajoutée à la main : « Retirer de Home » seulement.
 - **Graphisme** : l'app Mac fait foi. `windows/` la recopie vue par vue ; une vue reste en place et on change ses propriétés (c'est ce
@@ -199,7 +201,7 @@ dotnet build windows/Home.csproj
 HOME_DONNEES="$TMPDIR/home-win" HOME_DEMO=1 HOME_FENETRE=1 HOME_SCENARIO=options HOME_CAPTURE="$TMPDIR/home-win.png" dotnet windows/bin/Debug/net10.0/Home.dll
 ```
 `HOME_DEMO=1` remplit la bibliothèque avec des tuiles d'exemple (aucun jeu n'est là). `HOME_SCENARIO` enchaîne des écrans ou des touches
-(`options`, `plus`, `ajout`, `mode`, `modeinconnu`, `enligne`, `maj`, `sur`, `recap`, `mods`, `place`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
+(`options`, `plus`, `ajout`, `bienvenue`, `mode`, `modeinconnu`, `enligne`, `maj`, `sur`, `recap`, `mods`, `place`, `saisie`, `tache`, `ouverture`, `left`, `right`, `ok`…). `HOME_CAPTURE` enregistre l'image de
 la fenêtre puis quitte : lis le PNG. Cette image ne montre ni les flous ni un mouvement en cours : pour les voir, lance sans
 `HOME_CAPTURE` et photographie la fenêtre (`screencapture -l <numéro de fenêtre>`). Ce qui est propre à Windows (registre Steam, fichiers Epic, XInput, lancement, Corbeille,
 ScarletNX : aucun jeu ne tourne sur macOS) ne se teste pas sur Mac. Dans un compte rendu, sépare toujours « compilé », « vu à l'écran »

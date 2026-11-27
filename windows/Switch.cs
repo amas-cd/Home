@@ -363,6 +363,17 @@ public static class Construction
         Noter(Chantiers().Where(x => x.Id != c.Id).ToList()); lib.FermerMenus(); lib.Recharger(); lib.Dire("Construction abandonnée");
     }
 
+    /// Télécharge ScarletNX d'avance (au choix « Nintendo » du premier lancement), avec la pastille d'avancement
+    public static async Task PreparerMoteur(Bibliotheque lib)
+    {
+        if (lib.Tache is { Fini: false }) return;
+        var t = new Tache { Titre = "Composants Nintendo", Etape = "Téléchargement du moteur…" }; lib.Tache = t; lib.Signaler();
+        try { await Moteur.Preparer(t, lib.Signaler); t.Etape = "Prêt"; t.Fraction = 1; t.Fini = true; }
+        catch (Exception e) { t.Erreur = e.Message; t.Etape = "Échec : " + e.Message; t.Fini = true; Journal.Ecrire("moteur : " + e.Message); }
+        lib.Signaler();
+        _ = Task.Delay(6000).ContinueWith(_ => Dispatcher.UIThread.Post(() => { if (lib.Tache == t) { lib.Tache = null; lib.Signaler(); } }));
+    }
+
     /// Recompile le code d'un jeu déjà construit, sans son dump : nécessaire après un changement de mod de code (exefs)
     public static async Task Recompiler(Bibliotheque lib, Jeu j)
     {

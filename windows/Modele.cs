@@ -33,6 +33,8 @@ public sealed class Config
     public Dictionary<string, string> Noms { get; set; } = new();   // ids renommés
     public bool Sons { get; set; } = true;
     public bool Fenetre { get; set; }                         // en fenêtre plutôt qu'en plein écran
+    /// Ce que Home sert à faire sur ce PC, choisi au premier lancement (« Bienvenue ») : tout, nintendo ou pc. null = pas encore choisi.
+    public string? Mode { get; set; }
     public bool AnimationsReduites { get; set; }              // les mouvements de l'interface deviennent un fondu très court
 }
 
