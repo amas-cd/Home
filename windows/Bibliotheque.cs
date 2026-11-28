@@ -287,11 +287,15 @@ public sealed partial class Bibliotheque
             if (OperatingSystem.IsWindows())
             {
                 if (j.Origine == Origine.Switch)
-                {   // un jeu construit par ScarletNX se lance par le moteur (`--game`), qui recompile de lui-même si ses mods de code ont changé
+                {   // un jeu construit par ScarletNX se lance par le moteur, qui recompile de lui-même si ses mods de code ont changé
                     var psi = new ProcessStartInfo(Moteur.Exe ?? cible) { UseShellExecute = false, WorkingDirectory = dossier };
-                    foreach (var a in Moteur.Exe != null ? new[] { "--data", Moteur.Donnees, "--game", dossier, "-f" } : new[] { "-f" }) psi.ArgumentList.Add(a);
+                    // Le jeu est nommé par son dossier, comme ScarletNX le demande pour un jeu déjà construit (driver.c, prepared_game). La
+                    // forme « --game dossier », donnée jusqu'ici, était refusée (« expected a dump, -x or -r ») : aucun jeu ne démarrait.
+                    // --extract-container à chaque fois : sans lui, ScarletNX retire les fichiers extraits et relit le dump d'origine.
+                    foreach (var a in Moteur.Exe != null ? new[] { "--data", Moteur.Donnees, "--extract-container", "-f" } : new[] { "-f" }) psi.ArgumentList.Add(a);
                     // un mod en ligne demande l'adresse de son serveur au clavier : ScarletNX répond à sa place (swkbd_text, pour cette partie seulement)
                     if (Moteur.Exe != null && Construction.Serveur(dossier) is { Length: > 0 } serveur) psi.ArgumentList.Add("--swkbd-text=" + serveur);
+                    if (Moteur.Exe != null) psi.ArgumentList.Add(dossier.TrimEnd('\\', '/'));   // le jeu en dernier, après les options
                     p = Process.Start(psi);
                 }
                 else p = Process.Start(new ProcessStartInfo(cible) { UseShellExecute = true, WorkingDirectory = File.Exists(cible) ? Path.GetDirectoryName(cible)! : "" });

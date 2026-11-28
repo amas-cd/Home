@@ -142,7 +142,10 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     figée a disparu, Home prend la dernière et vérifie l'empreinte que GitHub publie. Mets `SCARLETNX-REF` à jour de temps en temps.
   - Tout est dans `%LOCALAPPDATA%\Home\scarletnx` (le `--data` de ScarletNX) : `moteur/`, `prod.keys` et `title.keys` copiés (**secrets**,
     jamais ailleurs), `recompiled/<title id>/` = un jeu construit (`<id>.exe`, `<id>.abi` écrit à la fin, `<id>.ini`, `<id>_data/`).
-    Le jeu se suffit à lui-même : le dump d'origine ne sert plus. Il se lance par `scarletnx --game <dossier>`.
+    Le jeu se suffit à lui-même : le dump d'origine ne sert plus. Il se lance par `scarletnx --data D --extract-container -f <dossier>` (le dossier du jeu,
+    pas `--game` : refusé par le pilote ; sans `--extract-container`, ScarletNX retire l'extraction et relit le dump). Recompiler :
+    `scarletnx --data D -r <dossier>`. Essayé dans CrossOver : la construction avec mod réussit, mais le jeu ne s'affiche pas sur
+    Mac (MoltenVK n'a que Vulkan 1.2, ScarletNX veut 1.3). Sous Wine, Home prend le moteur x86-64.
   - Un jeu en construction est un **chantier** (`constructions.json`, tuile `construction:<n>`) : Reprendre, Abandonner, journal.
   - Mods : un dossier par mod dans `<id>_data/mods/`, avec `romfs/` et/ou `exefs/` ; désactivés dans `mods_off=` du `.ini`. Un mod de
     code (`exefs/`) fait recompiler le jeu (`scarletnx -r`).
