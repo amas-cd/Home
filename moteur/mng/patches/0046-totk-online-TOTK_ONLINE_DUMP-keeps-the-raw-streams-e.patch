@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <273038692+amas-cd@users.noreply.github.com>
+Date: Sat, 28 Nov 2026 01:25:35 +0100
+Subject: [PATCH] totk online: TOTK_ONLINE_DUMP keeps the raw streams exchanged
+ with the server
+
+<path>.send and <path>.recv, every byte in order. With it the server's protocol could be read (a table of message names,
+then packets "type, length, payload" with big-endian varints whose last byte has the high bit) and the RomFS files the
+server ships at each start rebuilt: the same, byte for byte, as the ones in the Mac's RomFS overlay, so the received hits
+that do nothing do not come from out-of-date mod files.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ games/totk/runtime/online_host.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/games/totk/runtime/online_host.c b/games/totk/runtime/online_host.c
+index 5aadd0cbb06cf586ffac9b89f70c877f7ffa86ca..99c9c177b9e38f22ef29035d6aa341873dc0c61f 100644
+--- a/games/totk/runtime/online_host.c
++++ b/games/totk/runtime/online_host.c
+@@ -112,9 +112,18 @@ static void online_scan(const void *buf, size_t n) {
+             fprintf(stderr, "[totk-online] received '%s' (chunk of %zu bytes): %s\n", m, n, ctx); break; }
+     }
+ }
++/* Diagnostic: TOTK_ONLINE_DUMP=<path> appends every byte sent to <path>.send and every byte received to <path>.recv (the raw
++   streams, in order): what the server really ships (its RomFS files, its plugins) and what a hit looks like on the wire. */
++static void online_dump(int way, const void *buf, size_t n) {
++    static int fds[2] = {-2, -2};
++    if (fds[way] == -2) { const char *e = getenv("TOTK_ONLINE_DUMP"); char p[1024]; fds[way] = -1;
++        if (e && *e) { snprintf(p, sizeof p, "%s.%s", e, way ? "recv" : "send"); fds[way] = open(p, O_WRONLY | O_CREAT | O_APPEND, 0600); } }
++    if (fds[way] >= 0 && write(fds[way], buf, n) < 0) {}
++}
+ static int64_t online_send(int fd, const void *buf, uint64_t len, int flags) {
+     ssize_t r = ONLINE_WAIT(send(fd, buf, (size_t)len, (flags & 0xC7) | MSG_NOSIGNAL)); online_trace("send", fd, r);
+     if (r >= 0) { atomic_fetch_add(&st_send_n, 1); atomic_fetch_add(&st_send_b, r); }
++    if (r > 0) online_dump(0, buf, (size_t)r);
+     int e = errno; online_stats(fd); errno = e;
+     return r < 0 ? fail("send") : r;
+ }
+@@ -122,6 +131,7 @@ static int64_t online_recv(int fd, void *buf, uint64_t len, int flags) {
+     ssize_t r = ONLINE_WAIT(recv(fd, buf, (size_t)len, flags & 0xC7)); online_trace("recv", fd, r);
+     int e = errno;
+     if (r >= 0) { atomic_fetch_add(&st_recv_n, 1); atomic_fetch_add(&st_recv_b, r); } else if (e == EAGAIN) atomic_fetch_add(&st_recv_none, 1);
++    if (r > 0) online_dump(1, buf, (size_t)r);
+     if (r > 0 && online_log()) online_scan(buf, (size_t)r);
+     online_stats(fd); errno = e;
+     return r < 0 ? fail("recv") : r;
