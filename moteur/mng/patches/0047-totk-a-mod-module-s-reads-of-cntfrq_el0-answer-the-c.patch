@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anas <273038692+amas-cd@users.noreply.github.com>
+Date: Sat, 28 Nov 2026 01:30:34 +0100
+Subject: [PATCH] totk: a mod module's reads of cntfrq_el0 answer the console's
+ 19.2 MHz
+
+TOTK Online reads the counter frequency itself (25 sites) to turn ticks into time. The rewrite sends cntpct/cntvct to
+the gate, which counts at the Switch's 19.2 MHz, but left cntfrq_el0 to the Mac's own register: 1,000,000,000 on this
+Apple silicon. Every span the mod measured was 52 times too short (its clock almost stopped): the other players'
+movement, its timeouts. Each read now branches to three words after the image that load 19,200,000.
+
+Seen in the log ("25 read(s) of the counter frequency now answer..."), the game starts and exchanges with the server
+as before; not yet tried with another player.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ games/totk/runtime/loader.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/games/totk/runtime/loader.c b/games/totk/runtime/loader.c
+index a4adea9a5943d902f4672934757cdf48aabe12dc..7581fd42bb34f24cebe45414c2e7b2da7cb8b23c 100644
+--- a/games/totk/runtime/loader.c
++++ b/games/totk/runtime/loader.c
+@@ -528,6 +528,26 @@ static int stale_target_reference(int num,siginfo_t *info,ucontext_t *u){
+ }
+ #endif
+ #if !TARGET_OS_IPHONE
++/* A mod module reads the counter's frequency itself (mrs xN, cntfrq_el0: 25 sites in TOTK Online, libnx-style "ticks to
++   nanoseconds") and that read ran on the Mac's own register: 1,000,000,000 on this Apple silicon, 19,200,000 on the console,
++   while the counter it divides is the gate's 19.2 MHz one (runtime_dispatch). Every span the mod measured was 52 times too
++   short: its interpolation of the other players, its timeouts and its send pacing ran on a clock almost stopped. Each read
++   becomes a branch to three words in the zero bytes after the image, in the executable patch area (movz/movk the console's
++   frequency, branch back). The retail modules never read the register (their SDK has the constant). */
++static void mod_counter_frequency(Module *m){
++ if(m->ctor_flag)return;
++ size_t end=page_up(m->file_size),room=(end-m->file_size)/12;unsigned n=0,left=0;
++ for(uint64_t o=0;o+4<=m->text_end;o+=4){uint32_t w;memcpy(&w,m->base+o,4);
++  if((w&0xffffffe0)!=0xd53be000)continue;
++  unsigned rt=w&31;uint64_t s=end-12*(uint64_t)(n+1);uint32_t z[3]={0,0,0};
++  if(rt==31||n>=room||memcmp(m->base+s,z,12)){left++;continue;}
++  uint32_t c[3]={0xd29f0000|rt,0xf2a02480|rt,0x14000000|(uint32_t)(((int64_t)(o+4)-(int64_t)(s+8))>>2&0x3ffffff)};   /* movz xN,#0xf800; movk xN,#0x124,lsl #16 (19,200,000); b back */
++  uint32_t j=0x14000000|(uint32_t)(((int64_t)s-(int64_t)o)>>2&0x3ffffff);
++  memcpy(m->base+s,c,12);memcpy(m->base+o,&j,4);n++;}
++ if(n||left)fprintf(stderr,"[totk] %s: %u read(s) of the counter frequency now answer the console's 19.2 MHz (%u left as they were)\n",m->name,n,left);
++}
++#endif
++#if !TARGET_OS_IPHONE
+ /* Diagnostic for a mod module (2026-11-28, TOTK Online: a hit received from another player did nothing on the Mac and the
+    mod's release build drops its own log lines). TOTK_MOD_DIAG, else the file
+    ~/Library/Application Support/MacNativeGames/TOTK/mod-diag.txt, lists sites separated by commas, spaces or new lines; the
+@@ -893,6 +913,7 @@ int main(int argc,char **argv) {
+  for(unsigned i=0;i<NM;i++)map_module(&modules[i],argv[1]);
+  for(unsigned i=0;i<NM;i++)relocate(&modules[i]);
+ #if !TARGET_OS_IPHONE
++ for(unsigned i=0;i<NM;i++)mod_counter_frequency(&modules[i]);
+  mod_diag_install();
+ #endif
+  rtld_module_list();
