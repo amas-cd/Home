@@ -996,6 +996,11 @@ public static class MenusSwitch
     // MARK: Mods — un dossier par mod dans <jeu>_data/mods/, avec romfs/ et/ou exefs/ ; les mods désactivés sont dans mods_off= du .ini
     static List<string> ModsDe(Jeu j) { try { var d = Construction.Mods(j.Dossier); return Directory.Exists(d) ? Directory.GetDirectories(d).Select(Path.GetFileName).Where(n => n != null && !n.StartsWith('.')).Select(n => n!).OrderBy(n => n, StringComparer.Ordinal).ToList() : new(); } catch { return new(); } }
     static List<string> Eteints(Jeu j) => Ini.Lire(Construction.Reglages(j.Dossier), "Game", "mods_off").Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
+    /// Un mod de code est-il posé et activé ? Ces mods (TOTK Online…) lisent la liste des modules que tient le chargeur d'origine du
+    /// jeu (nn::ro::detail::g_pAutoLoadList). ScarletNX fait d'ordinaire les liens lui-même, sans ce chargeur : la liste reste vide et
+    /// le mod plante dès son démarrage. Vu sur Mac avec le ScarletNX natif : avec `--hooks-off=nn_ro`, le chargeur du jeu tourne, la
+    /// liste existe, et le mod pose ses crochets.
+    public static bool ModDeCodeActif(Jeu j) { try { var eteints = Eteints(j); return ModsDe(j).Any(m => !eteints.Contains(m) && DeCode(j, m)); } catch { return false; } }
     static bool DeCode(Jeu j, string mod) => Directory.Exists(Path.Combine(Construction.Mods(j.Dossier), mod, "exefs"));
     /// Un mod de code change le programme du jeu, que ScarletNX compile d'avance : après un changement, il faut recompiler
     static readonly HashSet<string> aRecompiler = new();

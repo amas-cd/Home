@@ -295,6 +295,7 @@ public sealed partial class Bibliotheque
                     foreach (var a in Moteur.Exe != null ? new[] { "--data", Moteur.Donnees, "--extract-container", "-f" } : new[] { "-f" }) psi.ArgumentList.Add(a);
                     // un mod en ligne demande l'adresse de son serveur au clavier : ScarletNX répond à sa place (swkbd_text, pour cette partie seulement)
                     if (Moteur.Exe != null && Construction.Serveur(dossier) is { Length: > 0 } serveur) psi.ArgumentList.Add("--swkbd-text=" + serveur);
+                    if (Moteur.Exe != null && MenusSwitch.ModDeCodeActif(j)) psi.ArgumentList.Add("--hooks-off=nn_ro");   // un mod de code a besoin du chargeur d'origine du jeu
                     if (Moteur.Exe != null) psi.ArgumentList.Add(dossier.TrimEnd('\\', '/'));   // le jeu en dernier, après les options
                     p = Process.Start(psi);
                 }

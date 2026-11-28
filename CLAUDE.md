@@ -146,6 +146,9 @@ SwiftUI n'existe pas sur Windows : `windows/` est une deuxième app, en C# avec 
     pas `--game` : refusé par le pilote ; sans `--extract-container`, ScarletNX retire l'extraction et relit le dump). Recompiler :
     `scarletnx --data D -r <dossier>`. Essayé dans CrossOver : la construction avec mod réussit, mais le jeu ne s'affiche pas sur
     Mac (MoltenVK n'a que Vulkan 1.2, ScarletNX veut 1.3). Sous Wine, Home prend le moteur x86-64.
+    Un mod de code (TOTK Online) plante au démarrage si ScarletNX fait les liens lui-même : il lit `g_pAutoLoadList`, que seul le
+    chargeur d'origine du jeu remplit. Home lance donc un jeu qui a un mod de code actif avec `--hooks-off=nn_ro` (le chargeur du
+    jeu tourne). Essayé sur Mac avec le ScarletNX natif (`<Home>/essais/scarletnx-mac`) : le jeu démarre et le mod pose ses crochets.
   - Un jeu en construction est un **chantier** (`constructions.json`, tuile `construction:<n>`) : Reprendre, Abandonner, journal.
   - Mods : un dossier par mod dans `<id>_data/mods/`, avec `romfs/` et/ou `exefs/` ; désactivés dans `mods_off=` du `.ini`. Un mod de
     code (`exefs/`) fait recompiler le jeu (`scarletnx -r`).
