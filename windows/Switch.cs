@@ -68,7 +68,12 @@ public static class Moteur
         if (!derniere && Exe is { } la) { if (BonneArchitecture(la)) return la; Journal.Ecrire("le moteur installé n'est pas fait pour ce PC : il est remplacé"); }
         var reference = Reference(); var tag = reference.GetValueOrDefault("tag", ""); var empreinte = reference.GetValueOrDefault(Arm ? "aarch64" : "x86_64");
         var zip = Dossiers.Fichier("telechargements", Archive);
-        void Avance(long lu, long total) { t.Fraction = total > 0 ? 0.9 * lu / total : null; t.Etape = $"Téléchargement du moteur… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); Dispatcher.UIThread.Post(signaler); }
+        var dit = DateTime.MinValue;
+        void Avance(long lu, long total)
+        {   // quatre fois par seconde suffisent : chaque morceau reçu redessinait tout l'écran
+            if (lu < total && (DateTime.Now - dit).TotalSeconds < 0.25) return;
+            dit = DateTime.Now; t.Fraction = total > 0 ? 0.9 * lu / total : null; t.Etape = $"Téléchargement du moteur… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); Dispatcher.UIThread.Post(signaler);
+        }
         string? recue = null;
         // D'où il vient : le dépôt noté dans SCARLETNX-REF (`depot=`, le ScarletNX de Home, avec la caméra à la souris), sinon l'officiel.
         // Si la version figée n'y est plus, la dernière de ce dépôt ; s'il ne répond pas du tout, la dernière officielle (sans la souris).

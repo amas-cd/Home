@@ -142,6 +142,12 @@ sealed class Fenetre : Window
                     lib.Signaler(); break;
                 case "installation": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur… 21 Mo sur 58", Fraction = 0.33 }; lib.Signaler(); break;
                 case "installation2": if (lib.Tache is { } ti) { ti.Etape = "Installation du moteur…"; ti.Fraction = 0.95; lib.Signaler(); } break;   // le passage au second titre (il arrêtait Home)
+                case "installationvite":
+                {   // un téléchargement rapide : cinquante mesures par seconde, encore en cours pendant la capture (l'anneau doit suivre le chiffre)
+                    lib.Installation = true; var tv = new Tache { Titre = "Installation", Etape = "Téléchargement du moteur… 30 Mo sur 58", Fraction = 0.2 }; lib.Tache = tv;
+                    DispatcherTimer.Run(() => { tv.Fraction = Math.Min(0.89, (tv.Fraction ?? 0) + 0.0015); lib.Signaler(); return true; }, TimeSpan.FromMilliseconds(20));
+                    break;
+                }
                 case "installationechec": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur…", Fraction = 0.33, Fini = true, Erreur = "la liste des versions de ScarletNX n'a pas pu être lue" }; lib.Signaler(); break;
                 case "echec": { var te = new Tache { Titre = "Construction de Zelda", Etape = "Échec", Erreur = "Le fichier du jeu n'est plus là", Fini = true }; lib.Tache = te; lib.FinTache(te); } break;
                 default: lib.Nav(s); break;

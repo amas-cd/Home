@@ -661,7 +661,7 @@ sealed class PastilleTache : Border
         BoxShadow = BoxShadows.Parse("0 10 22 0 #66000000"); HorizontalAlignment = HorizontalAlignment.Right; VerticalAlignment = VerticalAlignment.Bottom; Margin = new Thickness(0, 0, 84, 30);
         Opacity = 0; IsHitTestVisible = false; RenderTransform = Mouvement.Deplace(0, 16); Cursor = new Cursor(StandardCursorType.Hand);
         PointerPressed += (_, e) => { e.Handled = true; Clic?.Invoke(); };   // la carte ouvre son menu : avancement, journal, arrêter
-        anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.9), Easing = new CubicEaseInOut() } };
+        anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.4), Easing = new CubicEaseOut() } };   // court et vif au départ : relancé sans cesse par un téléchargement, il ne reste pas en arrière
         titre = U.Titre("", 13, 1); etape = U.Texte("", 14, FontWeight.Medium, 0.7); etape.MaxWidth = 380; etape.TextTrimming = TextTrimming.CharacterEllipsis; titre.MaxWidth = 380;
         pourcent = new TextBlock { FontSize = 20, FontWeight = FontWeight.Black, FontFamily = U.PoliceLarge, Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
         var textes = U.Colonne(3, titre, etape); textes.VerticalAlignment = VerticalAlignment.Center;
@@ -718,14 +718,14 @@ sealed class InstallationVue : Panel
     readonly TextBlock nombre = new() { FontSize = 120, FontWeight = FontWeight.SemiBold, FontFamily = U.Police, Foreground = Brushes.White };
     readonly StackPanel liste = new() { Spacing = 38, Width = 540, VerticalAlignment = VerticalAlignment.Center }, aides, contenu;
     Border? barre; readonly DispatcherTimer seconde = new() { Interval = TimeSpan.FromSeconds(1) };
-    readonly StackPanel pourcent;
+    readonly StackPanel pourcent; DateTime montre = DateTime.MinValue;
 
     public InstallationVue(Bibliotheque lib)
     {
         this.lib = lib; Background = new SolidColorBrush(Color.FromRgb(5, 5, 13));
         // une seule lueur, basse et discrète ; pas de dégradé de couleurs
         Children.Add(Avec(U.Lueur(Color.FromRgb(84, 43, 204), 1500, 0.22), l => { l.VerticalAlignment = VerticalAlignment.Center; l.HorizontalAlignment = HorizontalAlignment.Center; l.RenderTransform = new TranslateTransform(0, 320); }));
-        anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.9), Easing = new CubicEaseInOut() } };
+        anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.4), Easing = new CubicEaseOut() } };
         centre.Children.Add(anneau);
         pourcent = U.Ligne(4, nombre, Avec(U.Texte("%", 42, FontWeight.SemiBold, 0.5), p => { p.VerticalAlignment = VerticalAlignment.Bottom; p.Margin = new Thickness(0, 0, 0, 24); }));
         pourcent.HorizontalAlignment = HorizontalAlignment.Center; pourcent.VerticalAlignment = VerticalAlignment.Center;
@@ -751,9 +751,13 @@ sealed class InstallationVue : Panel
         bool echec = t.Erreur != null, fini = t.Fini && !echec;
         var i = Array.FindLastIndex(groupes, g => t.Etape.StartsWith(g.cle)); if (i > rang) rang = i;   // une étape sans titre ne fait pas reculer
         var fr = fini ? 1 : Math.Min(0.995, Math.Max(0, t.Fraction ?? 0));
-        anneau.Fraction = Math.Max(0.01, fr); anneau.Couleur = echec ? new SolidColorBrush(Icones.Orange) : Brushes.White;
-        nombre.Text = ((int)(fr * 100)).ToString();
+        anneau.Couleur = echec ? new SolidColorBrush(Icones.Orange) : Brushes.White;
         var nouvelle = $"{rang}{echec}{fini}";
+        // Le chiffre, l'anneau et la barre avancent ensemble, trois fois par seconde au plus. Un téléchargement donne des dizaines de
+        // mesures par seconde : chacune relançait le mouvement de l'anneau depuis son départ lent, et il restait loin derrière le
+        // chiffre (89 % écrit, un quart de tour dessiné).
+        var maintenant = DateTime.Now; var montrer = nouvelle != cle || (maintenant - montre).TotalSeconds >= 0.33;
+        if (montrer) { montre = maintenant; anneau.Fraction = Math.Max(0.01, fr); nombre.Text = ((int)(fr * 100)).ToString(); }
         if (nouvelle != cle)
         {
             cle = nouvelle;
@@ -781,7 +785,7 @@ sealed class InstallationVue : Panel
                     if (g == 0)
                     {
                         barre = new Border { Width = 420, Height = 6, Background = Brushes.White, HorizontalAlignment = HorizontalAlignment.Left, RenderTransformOrigin = new RelativePoint(0, 0.5, RelativeUnit.Relative), RenderTransform = Mouvement.Echelle(0.015, 1) };
-                        barre.Transitions = new Transitions { Mouvement.Transfo(0.6, new CubicEaseInOut()) };
+                        barre.Transitions = new Transitions { Mouvement.Transfo(0.4, new CubicEaseOut()) };
                         textes.Children.Add(new Border { Width = 420, Height = 6, CornerRadius = new CornerRadius(3), ClipToBounds = true, Background = U.Blanc(0.14), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), Child = barre });
                     }
                 }
@@ -790,7 +794,7 @@ sealed class InstallationVue : Panel
             }
         }
         // la barre suit le téléchargement lui-même (Moteur.Preparer compte 90 % de la tâche pour lui)
-        if (barre != null && t.Fraction is { } f) barre.RenderTransform = Mouvement.Echelle(Math.Clamp(f / 0.9, 0.015, 1), 1);
+        if (montrer && barre != null && t.Fraction is { } f) barre.RenderTransform = Mouvement.Echelle(Math.Clamp(f / 0.9, 0.015, 1), 1);
         Restant();
     }
     void Restant()
