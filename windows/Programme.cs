@@ -141,6 +141,7 @@ sealed class Fenetre : Window
                     racine.Children.Add(new VueRapide(lib) { Width = 1920, Height = ecran.Height, RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative), RenderTransform = new ScaleTransform(echelle, echelle) });
                     lib.Signaler(); break;
                 case "installation": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur… 21 Mo sur 58", Fraction = 0.33 }; lib.Signaler(); break;
+                case "installation2": if (lib.Tache is { } ti) { ti.Etape = "Installation du moteur…"; ti.Fraction = 0.95; lib.Signaler(); } break;   // le passage au second titre (il arrêtait Home)
                 case "installationechec": lib.Installation = true; lib.Tache = new Tache { Titre = "Installation pour : Jeux Nintendo", Etape = "Téléchargement du moteur…", Fraction = 0.33, Fini = true, Erreur = "la liste des versions de ScarletNX n'a pas pu être lue" }; lib.Signaler(); break;
                 case "echec": { var te = new Tache { Titre = "Construction de Zelda", Etape = "Échec", Erreur = "Le fichier du jeu n'est plus là", Fini = true }; lib.Tache = te; lib.FinTache(te); } break;
                 default: lib.Nav(s); break;

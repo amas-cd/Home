@@ -27,7 +27,24 @@ public static class Moteur
     static string FichierVersion => Path.Combine(Programmes, "version.txt");
     public static string? Version { get { try { return File.Exists(FichierVersion) ? File.ReadAllText(FichierVersion).Trim() : null; } catch { return null; } } }
     public static string? Exe { get { try { return Directory.Exists(Programmes) ? Directory.EnumerateFiles(Programmes, "scarletnx.exe", SearchOption.AllDirectories).FirstOrDefault() : null; } catch { return null; } } }
-    static string Archive => RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "ScarletNX-windows-aarch64.zip" : "ScarletNX-windows-x86_64.zip";
+    /// Sous Wine ou CrossOver sur un Mac Apple Silicon, Windows se dit ARM alors que seuls les programmes x86-64 y tournent (par
+    /// Rosetta) : on y prend le moteur x86-64. Sur un vrai PC ARM, le moteur ARM.
+    [DllImport("ntdll.dll", EntryPoint = "wine_get_version")] static extern IntPtr VersionDeWine();
+    public static readonly bool SousWine = Wine();
+    static bool Wine() { try { return OperatingSystem.IsWindows() && VersionDeWine() != IntPtr.Zero; } catch { return false; } }
+    static bool Arm => RuntimeInformation.OSArchitecture == Architecture.Arm64 && !SousWine;
+    static string Archive => Arm ? "ScarletNX-windows-aarch64.zip" : "ScarletNX-windows-x86_64.zip";
+    /// Le moteur installé est-il fait pour ce PC ? (un moteur ARM posé sous CrossOver par une version précédente ne démarre pas)
+    static bool BonneArchitecture(string exe)
+    {
+        try
+        {
+            using var f = File.OpenRead(exe); using var r = new BinaryReader(f);
+            f.Position = 0x3C; f.Position = r.ReadInt32() + 4; var machine = r.ReadUInt16();   // en-tête PE : 0xAA64 = ARM64, 0x8664 = x86-64
+            return (machine == 0xAA64) == Arm;
+        }
+        catch { return true; }
+    }
 
     /// La version figée, notée dans le dépôt (windows/SCARLETNX-REF, comme moteur/.upstream-ref côté Mac) : « cle=valeur » par ligne
     static Dictionary<string, string> Reference()
@@ -48,8 +65,8 @@ public static class Moteur
     /// correspond, rien n'est installé : c'est un programme qu'on exécute.
     public static async Task<string> Preparer(Tache t, Action signaler, bool derniere = false)
     {
-        if (!derniere && Exe is { } la) return la;
-        var reference = Reference(); var tag = reference.GetValueOrDefault("tag", ""); var empreinte = reference.GetValueOrDefault(Archive.Contains("aarch64") ? "aarch64" : "x86_64");
+        if (!derniere && Exe is { } la) { if (BonneArchitecture(la)) return la; Journal.Ecrire("le moteur installé n'est pas fait pour ce PC : il est remplacé"); }
+        var reference = Reference(); var tag = reference.GetValueOrDefault("tag", ""); var empreinte = reference.GetValueOrDefault(Arm ? "aarch64" : "x86_64");
         var zip = Dossiers.Fichier("telechargements", Archive);
         void Avance(long lu, long total) { t.Fraction = total > 0 ? 0.9 * lu / total : null; t.Etape = $"Téléchargement du moteur… {lu / 1048576} Mo" + (total > 0 ? $" sur {total / 1048576}" : ""); Dispatcher.UIThread.Post(signaler); }
         string? recue = null;

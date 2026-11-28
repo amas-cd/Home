@@ -718,6 +718,7 @@ sealed class InstallationVue : Panel
     readonly TextBlock nombre = new() { FontSize = 120, FontWeight = FontWeight.SemiBold, FontFamily = U.Police, Foreground = Brushes.White };
     readonly StackPanel liste = new() { Spacing = 38, Width = 540, VerticalAlignment = VerticalAlignment.Center }, aides, contenu;
     Border? barre; readonly DispatcherTimer seconde = new() { Interval = TimeSpan.FromSeconds(1) };
+    readonly StackPanel pourcent;
 
     public InstallationVue(Bibliotheque lib)
     {
@@ -726,6 +727,8 @@ sealed class InstallationVue : Panel
         Children.Add(Avec(U.Lueur(Color.FromRgb(84, 43, 204), 1500, 0.22), l => { l.VerticalAlignment = VerticalAlignment.Center; l.HorizontalAlignment = HorizontalAlignment.Center; l.RenderTransform = new TranslateTransform(0, 320); }));
         anneau.Transitions = new Transitions { new DoubleTransition { Property = Anneau.FractionProperty, Duration = Mouvement.S(0.9), Easing = new CubicEaseInOut() } };
         centre.Children.Add(anneau);
+        pourcent = U.Ligne(4, nombre, Avec(U.Texte("%", 42, FontWeight.SemiBold, 0.5), p => { p.VerticalAlignment = VerticalAlignment.Bottom; p.Margin = new Thickness(0, 0, 0, 24); }));
+        pourcent.HorizontalAlignment = HorizontalAlignment.Center; pourcent.VerticalAlignment = VerticalAlignment.Center;
         titre.HorizontalAlignment = phrase.HorizontalAlignment = reste.HorizontalAlignment = HorizontalAlignment.Center; phrase.Margin = new Thickness(0, 16, 0, 0); phrase.TextAlignment = TextAlignment.Center; phrase.MaxWidth = 1100; phrase.TextWrapping = TextWrapping.Wrap;
         aides = U.Ligne(12, U.Pilule(lib.Aides.Ok, "Réessayer"), U.Pilule(lib.Aides.Retour, "Continuer sans")); aides.HorizontalAlignment = HorizontalAlignment.Center; aides.Margin = new Thickness(0, 60, 0, 0); aides.Opacity = 0;
         aides.Transitions = new Transitions { Mouvement.Opacite(0.5, new CubicEaseInOut()) };
@@ -760,7 +763,7 @@ sealed class InstallationVue : Panel
             while (centre.Children.Count > 1) centre.Children.RemoveAt(1);
             if (echec) centre.Children.Add(U.Icone("exclamationmark", 110, new SolidColorBrush(Icones.Orange)));
             else if (fini) centre.Children.Add(U.Icone("checkmark", 110));
-            else centre.Children.Add(Avec(U.Ligne(4, nombre, Avec(U.Texte("%", 42, FontWeight.SemiBold, 0.5), p => { p.VerticalAlignment = VerticalAlignment.Bottom; p.Margin = new Thickness(0, 0, 0, 24); })), l => { l.HorizontalAlignment = HorizontalAlignment.Center; l.VerticalAlignment = VerticalAlignment.Center; }));
+            else centre.Children.Add(pourcent);   // la même ligne à chaque fois : la refaire remettait `nombre` dans un second parent, et Home s'arrêtait en passant à « Mise en place »
             liste.Children.Clear(); barre = null;
             for (var g = 0; g < groupes.Length; g++)
             {
